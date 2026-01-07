@@ -1,0 +1,1772 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AppointmentStatus {
+  PROGRAMADA
+  CONFIRMADA
+  EN_SALA
+  ATENDIDA
+  NO_SHOW
+  CANCELADA
+}
+
+enum PaymentStatus {
+  PENDIENTE
+  PAGADO
+  FACTURADO
+}
+
+enum PartyType {
+  CLIENT
+  PROVIDER
+  PROFESSIONAL
+  INSURER
+  OTHER
+}
+
+enum FlowType {
+  INCOME
+  EXPENSE
+}
+
+enum PurchaseRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  ORDERED
+  RECEIVED_PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  SENT
+  RECEIVED_PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+enum InventoryReportFrequency {
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum InventoryReportType {
+  KARDEX
+  MOVIMIENTOS
+  CIERRE_SAT
+}
+
+enum MailModuleKey {
+  INVENTARIO
+  AGENDA
+  FACTURACION
+  CONTABILIDAD
+  COMPRAS
+  ADMIN
+  SOPORTE
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+enum FinancialAccountType {
+  CASH
+  BANK
+  POS
+}
+
+enum FinancialTransactionType {
+  IN
+  OUT
+}
+
+enum CreditTerm {
+  CASH
+  DAYS_15
+  DAYS_30
+  DAYS_45
+  DAYS_60
+  DAYS_90
+  OTHER
+}
+
+enum DocStatus {
+  OPEN
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+enum FinanceEntityType {
+  CLIENT
+  PROVIDER
+  EMPLOYEE
+  OTHER
+}
+
+enum PaymentType {
+  AR
+  AP
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  POS
+  CHECK
+  OTHER
+}
+
+enum CrmPipelineType {
+  B2B
+  B2C
+}
+
+enum CrmSlaStatus {
+  GREEN
+  YELLOW
+  RED
+}
+
+enum CrmDealStage {
+  NUEVO
+  CONTACTADO
+  DIAGNOSTICO
+  COTIZACION
+  NEGOCIACION
+  GANADO
+  PERDIDO
+}
+
+enum CrmActivityType {
+  CALL
+  WHATSAPP
+  EMAIL
+  VISIT
+  NOTE
+  SYSTEM
+}
+
+enum CrmPreferredChannel {
+  CALL
+  WHATSAPP
+  EMAIL
+  VISIT
+  VIDEO
+}
+
+enum CrmServiceType {
+  BOTIQUINES
+  EXTINTORES
+  CAPACITACIONES
+  CLINICAS_EMPRESARIALES
+  SSO
+  SERVICIOS_MEDICOS
+  CONSULTAS
+  LABORATORIO
+  RAYOS_X
+  ULTRASONIDO
+  MEMBRESIAS
+}
+
+enum CrmTaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum CrmTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum QuoteType {
+  B2B
+  B2C
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  APPROVAL_PENDING
+  APPROVED
+  REJECTED
+}
+
+enum B2BProposalStatus {
+  DRAFT
+  READY
+  SENT
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum QuoteRequestStatus {
+  PENDING
+  QUOTED
+  CANCELLED
+}
+
+enum CrmQuoteStatus {
+  DRAFT
+  SENT
+  APPROVED
+  REJECTED
+  EXPIRED
+  WON
+}
+
+enum CrmQuoteItemType {
+  PRODUCT
+  SERVICE
+  COMBO
+  MANUAL
+}
+
+enum CrmLeadType {
+  COMPANY
+  PATIENT
+}
+
+enum CrmLeadStatus {
+  NEW
+  QUOTED
+  FOLLOW_UP
+  WON
+  LOST
+}
+
+enum CrmCalendarEventType {
+  VISITA
+  REUNION_VIRTUAL
+  LLAMADA
+  SEGUIMIENTO
+}
+
+enum CrmRequestStatus {
+  PENDIENTE
+  COTIZADA
+}
+
+enum ClientProfileType {
+  PERSON
+  COMPANY
+}
+
+enum ApiIntegrationKey {
+  WHATSAPP
+  SMS
+  LABORATORIO
+  ASISTENCIA
+  SAT_FACTURACION
+  GOOGLE_DRIVE
+  WEBHOOKS
+  OTRO
+}
+
+enum PipelineRuleScope {
+  PIPELINE
+  STAGE
+  TRANSITION
+}
+
+enum PipelineRuleType {
+  REQUIRED_FIELDS
+  REQUIRED_NEXT_ACTION
+  REQUIRE_QUOTE_STATUS
+  DISALLOW_STAGE_FOR_PIPELINE
+  REQUIRE_CONTRACT_OR_COLLECTION_PLAN
+  REQUIRE_REASON_ON_LOST
+  AMOUNT_APPROVAL_THRESHOLD
+}
+
+enum RuleSeverity {
+  BLOCK
+  WARN
+}
+
+enum QuoteDeliveryChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum QuoteDeliveryStatus {
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  FAILED
+  BOUNCED
+  PENDING_PROVIDER
+}
+
+model User {
+  id                  String              @id @default(cuid())
+  email               String              @unique
+  name                String?
+  passwordHash        String
+  isActive            Boolean             @default(true)
+  branchId            String?
+  roles               UserRole[]
+  dealsOwned          CrmDeal[]           @relation("DealOwnerUser")
+  auditLogs           AuditLog[]          @relation("AuditActor")
+  fileAssets          FileAsset[]
+  b2bProposalsCreated B2BProposalDoc[]    @relation("B2BProposalCreatedBy")
+  b2bProposalsUpdated B2BProposalDoc[]    @relation("B2BProposalUpdatedBy")
+  deliveries          QuoteDelivery[]     @relation("DeliveryActor")
+  ruleEvaluations     RuleEvaluationLog[]
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  timestamp   DateTime @default(now())
+  actorUserId String?
+  actorRole   String?
+  action      String
+  entityType  String
+  entityId    String
+  metadata    Json?
+  before      Json?
+  after       Json?
+  actorUser   User?    @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([timestamp])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([actorUserId])
+}
+
+model AppointmentType {
+  id           String        @id @default(cuid())
+  name         String
+  description  String?
+  durationMin  Int
+  color        String?
+  status       String        @default("Activo")
+  availability Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  appointments Appointment[]
+}
+
+model Room {
+  id           String        @id @default(cuid())
+  name         String
+  branchId     String
+  resource     String
+  status       String        @default("Activo")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  appointments Appointment[]
+}
+
+model WorkSchedule {
+  id           String   @id @default(cuid())
+  specialistId String
+  branchId     String
+  weekdays     String[] // ["Lunes","Martes"]
+  blocks       Json // [{inicio:"08:00", fin:"12:00"}]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ProductCategory {
+  id            String               @id @default(cuid())
+  name          String
+  slug          String               @unique
+  type          String
+  order         Int                  @default(0)
+  status        String               @default("Activo")
+  subcategories ProductSubcategory[]
+  products      Product[]
+}
+
+model ProductSubcategory {
+  id         String          @id @default(cuid())
+  categoryId String
+  name       String
+  slug       String          @unique
+  order      Int             @default(0)
+  status     String          @default("Activo")
+  category   ProductCategory @relation(fields: [categoryId], references: [id])
+  products   Product[]
+}
+
+model ServiceCategory {
+  id            String               @id @default(cuid())
+  name          String
+  slug          String               @unique
+  area          String
+  order         Int                  @default(0)
+  status        String               @default("Activo")
+  subcategories ServiceSubcategory[]
+  services      Service[]
+}
+
+model ServiceSubcategory {
+  id         String          @id @default(cuid())
+  categoryId String
+  name       String
+  slug       String          @unique
+  order      Int             @default(0)
+  status     String          @default("Activo")
+  category   ServiceCategory @relation(fields: [categoryId], references: [id])
+  services   Service[]
+}
+
+model InventoryArea {
+  id         String    @id @default(cuid())
+  name       String
+  slug       String    @unique
+  order      Int       @default(0)
+  isExternal Boolean   @default(true)
+  products   Product[]
+}
+
+model PriceList {
+  id        String          @id @default(cuid())
+  name      String
+  type      String
+  estado    String          @default("Activo")
+  items     PriceListItem[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model PriceListItem {
+  id          String    @id @default(cuid())
+  priceListId String
+  itemType    String
+  itemId      String
+  precio      Float
+  priceList   PriceList @relation(fields: [priceListId], references: [id])
+}
+
+model Appointment {
+  id            String            @id @default(cuid())
+  date          DateTime
+  durationMin   Int
+  patientId     String
+  specialistId  String
+  branchId      String
+  roomId        String?
+  typeId        String
+  status        AppointmentStatus @default(PROGRAMADA)
+  paymentStatus PaymentStatus     @default(PENDIENTE)
+  companyId     String?
+  notes         String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  createdById   String
+  updatedById   String?
+
+  type AppointmentType @relation(fields: [typeId], references: [id])
+  room Room?           @relation(fields: [roomId], references: [id])
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  name            String
+  code            String   @unique
+  categoryId      String
+  subcategoryId   String?
+  inventoryAreaId String?
+  unit            String?
+  cost            Decimal  @default(0) @db.Decimal(12, 4)
+  price           Decimal  @default(0) @db.Decimal(12, 4)
+  baseSalePrice   Decimal  @default(0) @db.Decimal(12, 4)
+  avgCost         Decimal  @default(0) @db.Decimal(12, 4)
+  marginPct       Float?
+  status          String   @default("Activo")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  category            ProductCategory       @relation(fields: [categoryId], references: [id])
+  subcategory         ProductSubcategory?   @relation(fields: [subcategoryId], references: [id])
+  inventoryArea       InventoryArea?        @relation(fields: [inventoryAreaId], references: [id])
+  stocks              ProductStock[]
+  movements           InventoryMovement[]
+  comboLinks          ComboProduct[]
+  PurchaseRequestItem PurchaseRequestItem[]
+  PurchaseOrderItem   PurchaseOrderItem[]
+}
+
+model Service {
+  id            String   @id @default(cuid())
+  name          String
+  code          String?  @unique
+  categoryId    String
+  subcategoryId String?
+  price         Float    @default(0)
+  marginPct     Float?
+  durationMin   Int      @default(0)
+  status        String   @default("Activo")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  category    ServiceCategory     @relation(fields: [categoryId], references: [id])
+  subcategory ServiceSubcategory? @relation(fields: [subcategoryId], references: [id])
+  comboLinks  ComboService[]
+}
+
+model ProductStock {
+  id        String   @id @default(cuid())
+  productId String
+  branchId  String
+  stock     Int
+  minStock  Int
+  updatedAt DateTime @default(now()) @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([productId, branchId])
+}
+
+model InventoryMovement {
+  id          String       @id @default(cuid())
+  productId   String
+  branchId    String
+  type        MovementType
+  quantity    Int?
+  unitCost    Decimal?     @db.Decimal(12, 4)
+  salePrice   Decimal?     @db.Decimal(12, 4)
+  reference   String?
+  reason      String?
+  createdById String
+  createdAt   DateTime     @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+}
+
+enum MovementType {
+  ENTRY
+  EXIT
+  ADJUSTMENT
+  COST_UPDATE
+  PRICE_UPDATE
+}
+
+model PurchaseRequest {
+  id            String                @id @default(cuid())
+  code          String                @unique
+  branchId      String
+  requestedById String
+  status        PurchaseRequestStatus @default(DRAFT)
+  notes         String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  items         PurchaseRequestItem[]
+  orders        PurchaseOrder[]
+}
+
+model PurchaseRequestItem {
+  id                String  @id @default(cuid())
+  purchaseRequestId String
+  productId         String
+  quantity          Int
+  unitId            String?
+  supplierId        String?
+  notes             String?
+
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  product         Product         @relation(fields: [productId], references: [id])
+}
+
+model PurchaseOrder {
+  id          String              @id @default(cuid())
+  code        String              @unique
+  supplierId  String
+  branchId    String
+  createdById String
+  status      PurchaseOrderStatus @default(DRAFT)
+  requestId   String?
+  notes       String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  request PurchaseRequest?    @relation(fields: [requestId], references: [id])
+  items   PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id              String   @id @default(cuid())
+  purchaseOrderId String
+  productId       String
+  quantity        Int
+  unitCost        Decimal? @db.Decimal(12, 2)
+  receivedQty     Int      @default(0)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product       @relation(fields: [productId], references: [id])
+}
+
+model Combo {
+  id                String         @id @default(cuid())
+  name              String
+  description       String?
+  priceFinal        Decimal        @default(0) @db.Decimal(12, 4)
+  costProductsTotal Decimal        @default(0) @db.Decimal(12, 4)
+  costCalculated    Decimal        @default(0) @db.Decimal(12, 4)
+  imageUrl          String?
+  status            String         @default("Activo")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  services          ComboService[]
+  products          ComboProduct[]
+}
+
+model ComboService {
+  id        String  @id @default(cuid())
+  comboId   String
+  serviceId String
+  combo     Combo   @relation(fields: [comboId], references: [id])
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  @@unique([comboId, serviceId])
+}
+
+model ComboProduct {
+  id        String   @id @default(cuid())
+  comboId   String
+  productId String
+  quantity  Int      @default(1)
+  unitCost  Decimal? @db.Decimal(12, 4)
+  combo     Combo    @relation(fields: [comboId], references: [id])
+  product   Product  @relation(fields: [productId], references: [id])
+
+  @@unique([comboId, productId])
+}
+
+model InventoryEmailSetting {
+  id                 String                   @id @default(cuid())
+  isEnabled          Boolean                  @default(true)
+  frequency          InventoryReportFrequency
+  reportType         InventoryReportType      @default(KARDEX)
+  branchId           String?
+  recipients         String
+  recipientsJson     String                   @default("[]")
+  includeAllProducts Boolean                  @default(true)
+  scheduleType       String                   @default("BIWEEKLY")
+  oneTimeDate        DateTime?
+  oneTimeTime        String?
+  sentAt             DateTime?
+  sendTime           String                   @default("23:30")
+  timezone           String                   @default("America/Guatemala")
+  biweeklyMode       String?                  @default("FIXED_DAYS")
+  fixedDays          String?
+  startDate          DateTime?
+  monthlyDay         Int?
+  useLastDay         Boolean?                 @default(true)
+  lastSentAt         DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  logs InventoryReportLog[]
+}
+
+model InventoryEmailSchedule {
+  id           String              @id @default(cuid())
+  email        String
+  isEnabled    Boolean             @default(true)
+  reportType   InventoryReportType @default(KARDEX)
+  branchId     String?
+  scheduleType String              @default("ONE_TIME")
+  sendTime     String              @default("23:30")
+  timezone     String              @default("America/Guatemala")
+  oneTimeDate  DateTime?
+  monthlyDay   Int?
+  useLastDay   Boolean?            @default(true)
+  biweeklyMode String?             @default("FIXED_DAYS")
+  fixedDays    String?
+  startDate    DateTime?
+  lastSentAt   DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  logs InventoryEmailScheduleLog[]
+}
+
+model InventoryEmailScheduleLog {
+  id         String              @id @default(cuid())
+  scheduleId String
+  reportType InventoryReportType
+  periodFrom DateTime
+  periodTo   DateTime
+  sentAt     DateTime            @default(now())
+  status     String
+  error      String?
+
+  schedule InventoryEmailSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+}
+
+model MailGlobalConfig {
+  id         String   @id @default(cuid())
+  provider   String?
+  smtpHost   String
+  smtpPort   Int
+  smtpSecure Boolean  @default(true)
+  imapHost   String
+  imapPort   Int
+  imapSecure Boolean  @default(true)
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+}
+
+model MailModuleAccount {
+  id            String        @id @default(cuid())
+  moduleKey     MailModuleKey @unique
+  email         String
+  username      String
+  passwordEnc   String
+  fromName      String?
+  fromEmail     String?
+  isEnabled     Boolean       @default(true)
+  lastTestAt    DateTime?
+  lastTestError String?
+  updatedAt     DateTime      @updatedAt
+  createdAt     DateTime      @default(now())
+}
+
+model AppConfig {
+  id             String   @id @default(cuid())
+  companyName    String
+  companyNit     String?
+  companyPhone   String?
+  companyAddress String?
+  brandColor     String?
+  logoUrl        String?
+  timezone       String   @default("America/Guatemala")
+  openingHours   Json?
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+}
+
+model InvoiceConfig {
+  id                String   @id @default(cuid())
+  legalName         String
+  nit               String
+  fiscalAddress     String?
+  defaultTaxRate    Int      @default(12)
+  invoiceFooterText String?
+  pdfTemplateConfig Json?
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  series InvoiceSeries[]
+}
+
+model InvoiceSeries {
+  id              String   @id @default(cuid())
+  invoiceConfigId String
+  code            String
+  initialNumber   Int      @default(1)
+  currentNumber   Int      @default(1)
+  branchId        String?
+  isActive        Boolean  @default(true)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  invoiceConfig InvoiceConfig @relation(fields: [invoiceConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([invoiceConfigId, code, branchId])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  name        String           @unique
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  permissions RolePermission[]
+  userRoles   UserRole[]
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime   @default(now())
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model AttendanceIntegrationConfig {
+  id            String    @id @default(cuid())
+  provider      String
+  apiUrl        String?
+  apiKeyEnc     String?
+  enabled       Boolean   @default(true)
+  lastTestAt    DateTime?
+  lastTestError String?
+  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime  @default(now())
+}
+
+model LabIntegrationConfig {
+  id            String    @id @default(cuid())
+  provider      String
+  apiUrl        String?
+  apiKeyEnc     String?
+  enabled       Boolean   @default(true)
+  lastTestAt    DateTime?
+  lastTestError String?
+  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime  @default(now())
+}
+
+model ApiIntegrationConfig {
+  id            String            @id @default(cuid())
+  key           ApiIntegrationKey @unique
+  name          String
+  isEnabled     Boolean           @default(false)
+  baseUrl       String?
+  apiKeyEnc     String?
+  apiSecretEnc  String?
+  tokenEnc      String?
+  extraJson     String?
+  lastTestAt    DateTime?
+  lastTestError String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+model LegalEntity {
+  id                String             @id @default(cuid())
+  name              String
+  comercialName     String?
+  nit               String?
+  fiscalAddress     String?
+  phone             String?
+  email             String?
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  financialAccounts FinancialAccount[]
+  receivables       Receivable[]
+  payables          Payable[]
+  payments          Payment[]
+  journalEntries    JournalEntry[]
+}
+
+model Party {
+  id          String       @id @default(cuid())
+  type        PartyType
+  name        String
+  nit         String?
+  email       String?
+  phone       String?
+  address     String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  receivables Receivable[]
+  payables    Payable[]
+}
+
+model FinanceCategory {
+  id            String               @id @default(cuid())
+  flowType      FlowType
+  name          String
+  slug          String               @unique
+  isActive      Boolean              @default(true)
+  order         Int                  @default(0)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  subcategories FinanceSubcategory[]
+  receivables   Receivable[]
+  payables      Payable[]
+}
+
+model FinanceSubcategory {
+  id          String          @id @default(cuid())
+  categoryId  String
+  name        String
+  slug        String          @unique
+  isActive    Boolean         @default(true)
+  order       Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  category    FinanceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  receivables Receivable[]
+  payables    Payable[]
+}
+
+model FinanceAttachment {
+  id           String      @id @default(cuid())
+  fileUrl      String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  createdAt    DateTime    @default(now())
+  uploadedById String?
+  receivableId String?
+  payableId    String?
+  paymentId    String?
+  receivable   Receivable? @relation("ReceivableAttachments", fields: [receivableId], references: [id], onDelete: Cascade)
+  payable      Payable?    @relation("PayableAttachments", fields: [payableId], references: [id], onDelete: Cascade)
+  payment      Payment?    @relation("PaymentAttachments", fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id        String             @id @default(cuid())
+  code      String             @unique
+  name      String
+  type      AccountType
+  parentId  String?
+  isActive  Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  parent    Account?           @relation("AccountChildren", fields: [parentId], references: [id])
+  children  Account[]          @relation("AccountChildren")
+  lines     JournalEntryLine[]
+}
+
+model JournalEntry {
+  id            String             @id @default(cuid())
+  date          DateTime
+  reference     String?
+  description   String?
+  branchId      String?
+  legalEntityId String?
+  sourceType    String?
+  sourceId      String?
+  createdById   String
+  totalDebit    Decimal            @default(0) @db.Decimal(14, 2)
+  totalCredit   Decimal            @default(0) @db.Decimal(14, 2)
+  status        JournalEntryStatus @default(DRAFT)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  lines         JournalEntryLine[]
+  legalEntity   LegalEntity?       @relation(fields: [legalEntityId], references: [id])
+}
+
+model JournalEntryLine {
+  id         String             @id @default(cuid())
+  entryId    String
+  accountId  String
+  debit      Decimal            @default(0) @db.Decimal(14, 2)
+  credit     Decimal            @default(0) @db.Decimal(14, 2)
+  memo       String?
+  entityType FinanceEntityType?
+  entityId   String?
+  createdAt  DateTime           @default(now())
+  entry      JournalEntry       @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account    Account            @relation(fields: [accountId], references: [id])
+}
+
+model FinancialAccount {
+  id            String                 @id @default(cuid())
+  legalEntityId String
+  name          String
+  type          FinancialAccountType
+  bankName      String?
+  accountNumber String?
+  currency      String                 @default("GTQ")
+  branchId      String?
+  isActive      Boolean                @default(true)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  entries       FinancialTransaction[]
+  payments      Payment[]
+  legalEntity   LegalEntity            @relation(fields: [legalEntityId], references: [id])
+
+  @@index([legalEntityId])
+}
+
+model FinancialTransaction {
+  id                 String                   @id @default(cuid())
+  financialAccountId String
+  date               DateTime
+  amount             Decimal                  @db.Decimal(14, 2)
+  type               FinancialTransactionType
+  description        String
+  reference          String?
+  createdById        String
+  createdAt          DateTime                 @default(now())
+  account            FinancialAccount         @relation(fields: [financialAccountId], references: [id], onDelete: Cascade)
+}
+
+model Receivable {
+  id            String              @id @default(cuid())
+  legalEntityId String
+  partyId       String
+  date          DateTime
+  dueDate       DateTime?
+  creditTerm    CreditTerm          @default(CASH)
+  amount        Decimal             @db.Decimal(12, 2)
+  paidAmount    Decimal             @default(0) @db.Decimal(12, 2)
+  status        DocStatus           @default(OPEN)
+  reference     String?
+  categoryId    String?
+  subcategoryId String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  attachments   FinanceAttachment[] @relation("ReceivableAttachments")
+  payments      Payment[]
+  legalEntity   LegalEntity         @relation(fields: [legalEntityId], references: [id])
+  party         Party               @relation(fields: [partyId], references: [id])
+  category      FinanceCategory?    @relation(fields: [categoryId], references: [id])
+  subcategory   FinanceSubcategory? @relation(fields: [subcategoryId], references: [id])
+
+  @@index([legalEntityId])
+  @@index([partyId])
+}
+
+model Payable {
+  id            String              @id @default(cuid())
+  legalEntityId String
+  partyId       String
+  date          DateTime
+  dueDate       DateTime?
+  amount        Decimal             @db.Decimal(12, 2)
+  paidAmount    Decimal             @default(0) @db.Decimal(12, 2)
+  status        DocStatus           @default(OPEN)
+  reference     String?
+  categoryId    String?
+  subcategoryId String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  attachments   FinanceAttachment[] @relation("PayableAttachments")
+  payments      Payment[]
+  legalEntity   LegalEntity         @relation(fields: [legalEntityId], references: [id])
+  party         Party               @relation(fields: [partyId], references: [id])
+  category      FinanceCategory?    @relation(fields: [categoryId], references: [id])
+  subcategory   FinanceSubcategory? @relation(fields: [subcategoryId], references: [id])
+
+  @@index([legalEntityId])
+  @@index([partyId])
+}
+
+model Payment {
+  id                 String              @id @default(cuid())
+  legalEntityId      String
+  type               PaymentType
+  receivableId       String?
+  payableId          String?
+  financialAccountId String
+  method             PaymentMethod
+  date               DateTime
+  amount             Decimal             @db.Decimal(12, 2)
+  reference          String?
+  createdById        String?
+  createdAt          DateTime            @default(now())
+  financialAccount   FinancialAccount    @relation(fields: [financialAccountId], references: [id])
+  receivable         Receivable?         @relation(fields: [receivableId], references: [id])
+  payable            Payable?            @relation(fields: [payableId], references: [id])
+  attachments        FinanceAttachment[] @relation("PaymentAttachments")
+  legalEntity        LegalEntity         @relation(fields: [legalEntityId], references: [id])
+}
+
+model InventoryMarginPolicy {
+  id                String   @id @default(cuid())
+  marginProductsPct Float?
+  marginServicesPct Float?
+  roundingMode      String   @default("NONE")
+  autoApplyOnCreate Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model InventoryReportLog {
+  id         String              @id @default(cuid())
+  settingId  String
+  reportType InventoryReportType
+  periodFrom DateTime
+  periodTo   DateTime
+  sentAt     DateTime            @default(now())
+  status     String
+  error      String?
+
+  setting InventoryEmailSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+
+  @@unique([settingId, periodFrom, periodTo])
+}
+
+model CrmLead {
+  id           String             @id @default(cuid())
+  leadType     CrmLeadType
+  clientId     String?
+  companyName  String?
+  nit          String?
+  personName   String?
+  personDpi    String?
+  email        String?
+  phone        String?
+  address      String?
+  source       String?
+  status       CrmLeadStatus      @default(NEW)
+  ownerId      String?
+  nextActionAt DateTime?
+  notes        String?
+  createdById  String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  client       ClientProfile?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  quotes       CrmQuote[]
+  calendar     CrmCalendarEvent[]
+
+  @@index([leadType, status])
+  @@index([nit])
+  @@index([personDpi])
+}
+
+model ClientProfile {
+  id          String            @id @default(cuid())
+  type        ClientProfileType
+  companyName String?
+  firstName   String?
+  lastName    String?
+  nit         String?           @unique
+  dpi         String?           @unique
+  email       String?
+  phone       String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  accounts    CrmAccount[]
+  contacts    CrmContact[]
+  leads       CrmLead[]
+
+  @@index([email, phone])
+}
+
+model CrmAccount {
+  id          String         @id @default(cuid())
+  clientId    String?
+  name        String
+  nit         String?
+  address     String?
+  sector      String?
+  creditTerm  String?
+  status      String         @default("ACTIVE")
+  ownerId     String?
+  createdById String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  contacts    CrmContact[]
+  deals       CrmDeal[]
+  activities  CrmActivity[]
+  client      ClientProfile? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([nit])
+  @@index([ownerId])
+}
+
+model CrmContact {
+  id          String         @id @default(cuid())
+  clientId    String?
+  accountId   String?
+  type        String         @default("PERSON")
+  firstName   String
+  lastName    String?
+  position    String?
+  email       String?
+  phone       String?
+  phonesJson  Json?
+  createdById String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  account     CrmAccount?    @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  client      ClientProfile? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  deals       CrmDeal[]
+  activities  CrmActivity[]
+
+  @@index([email, phone])
+}
+
+model CrmPipeline {
+  id          String             @id @default(cuid())
+  type        CrmPipelineType
+  name        String
+  description String?
+  stages      CrmPipelineStage[]
+  deals       CrmDeal[]
+
+  @@index([type])
+}
+
+model PipelineConfig {
+  id          String               @id @default(cuid())
+  name        String
+  type        CrmPipelineType
+  isActive    Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  stages      PipelineStage[]
+  transitions PipelineTransition[]
+  ruleSets    PipelineRuleSet[]
+  evaluations RuleEvaluationLog[]
+
+  @@unique([name, type])
+}
+
+model PipelineStage {
+  id          String         @id @default(cuid())
+  pipelineId  String
+  key         String
+  name        String
+  order       Int
+  slaDays     Int            @default(0)
+  probability Int            @default(0)
+  isTerminal  Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  pipeline    PipelineConfig @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@unique([pipelineId, key])
+  @@index([pipelineId, order])
+}
+
+model PipelineTransition {
+  id           String         @id @default(cuid())
+  pipelineId   String
+  fromStageKey String
+  toStageKey   String
+  isEnabled    Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  pipeline     PipelineConfig @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@index([pipelineId, fromStageKey, toStageKey])
+}
+
+model PipelineRuleSet {
+  id           String            @id @default(cuid())
+  pipelineId   String
+  scope        PipelineRuleScope
+  stageKey     String?
+  fromStageKey String?
+  toStageKey   String?
+  name         String
+  description  String?
+  priority     Int               @default(100)
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  pipeline     PipelineConfig    @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  rules        PipelineRule[]
+
+  @@index([pipelineId, scope])
+  @@index([pipelineId, scope, stageKey])
+  @@index([pipelineId, scope, fromStageKey, toStageKey])
+}
+
+model PipelineRule {
+  id        String           @id @default(cuid())
+  ruleSetId String
+  type      PipelineRuleType
+  severity  RuleSeverity     @default(BLOCK)
+  message   String
+  params    Json?
+  isActive  Boolean          @default(true)
+  order     Int              @default(0)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  ruleSet   PipelineRuleSet  @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+
+  @@index([ruleSetId, order])
+}
+
+model RuleEvaluationLog {
+  id             String         @id @default(cuid())
+  pipelineId     String
+  dealId         String
+  fromStageKey   String?
+  toStageKey     String?
+  allowed        Boolean
+  errors         Json?
+  warnings       Json?
+  evaluatedRules Json?
+  actorUserId    String?
+  createdAt      DateTime       @default(now())
+  pipeline       PipelineConfig @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  actorUser      User?          @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([dealId, createdAt])
+}
+
+model CrmPipelineStage {
+  id              String       @id @default(cuid())
+  pipelineId      String
+  stage           CrmDealStage
+  probabilityPct  Int
+  slaDays         Int
+  expectedActions Json?
+  order           Int
+  pipeline        CrmPipeline  @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@unique([pipelineId, stage])
+  @@index([pipelineId, order])
+}
+
+model CrmDeal {
+  id                String                   @id @default(cuid())
+  pipelineType      CrmPipelineType
+  pipelineId        String?
+  stage             CrmDealStage             @default(NUEVO)
+  stageEnteredAt    DateTime                 @default(now())
+  amountEstimated   Decimal                  @default(0) @db.Decimal(12, 2)
+  amount            Decimal                  @default(0) @db.Decimal(12, 2)
+  probabilityPct    Int                      @default(0)
+  expectedCloseDate DateTime?
+  ownerId           String?
+  ownerUserId       String?
+  branchId          String?
+  capturedById      String                   @default("Ventas")
+  capturedAt        DateTime                 @default(now())
+  accountId         String?
+  contactId         String?
+  source            String?
+  lostReason        String?
+  competitor        String?
+  slaStatus         CrmSlaStatus             @default(GREEN)
+  nextAction        String?
+  nextActionAt      DateTime?
+  preferredChannel  CrmPreferredChannel?
+  preferredAt       DateTime?
+  servicesOtherNote String?
+  status            String                   @default("OPEN")
+  notes             String?
+  createdById       String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  ownerUser         User?                    @relation("DealOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  account           CrmAccount?              @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  contact           CrmContact?              @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  pipeline          CrmPipeline?             @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
+  activities        CrmActivity[]
+  tasks             CrmTask[]
+  quotes            CrmQuote[]
+  requests          CrmRequest[]
+  quotesV2          Quote[]
+  b2bProposals      B2BProposalDoc[]
+  quoteRequestsV2   QuoteRequest[]
+  services          CrmDealServiceInterest[]
+  stageHistory      CrmDealStageHistory[]
+  calendarEvents    CrmCalendarEvent[]
+  deliveries        QuoteDelivery[]
+  FileAsset         FileAsset[]
+
+  @@index([pipelineType, stage])
+  @@index([pipelineId])
+  @@index([accountId])
+  @@index([contactId])
+  @@index([ownerUserId])
+  @@index([branchId])
+}
+
+model CrmDealStageHistory {
+  id          String        @id @default(cuid())
+  dealId      String
+  fromStage   CrmDealStage?
+  toStage     CrmDealStage
+  changedAt   DateTime      @default(now())
+  changedById String?
+  comment     String?
+  deal        CrmDeal       @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId, changedAt])
+}
+
+model CrmDealServiceInterest {
+  id          String         @id @default(cuid())
+  dealId      String
+  serviceType CrmServiceType
+  selected    Boolean        @default(true)
+  notes       String?
+  deal        CrmDeal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, serviceType])
+  @@index([dealId])
+}
+
+model CrmActivity {
+  id               String          @id @default(cuid())
+  dealId           String?
+  accountId        String?
+  contactId        String?
+  type             CrmActivityType
+  dateTime         DateTime
+  summary          String?
+  nextStepDateTime DateTime?
+  notes            String?
+  createdById      String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deal             CrmDeal?        @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  account          CrmAccount?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  contact          CrmContact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([dealId])
+  @@index([accountId])
+  @@index([contactId])
+}
+
+model CrmTask {
+  id          String          @id @default(cuid())
+  ownerId     String?
+  dealId      String?
+  dueDate     DateTime
+  title       String
+  status      CrmTaskStatus   @default(OPEN)
+  priority    CrmTaskPriority @default(MEDIUM)
+  notes       String?
+  createdById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deal        CrmDeal?        @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  @@index([dealId])
+  @@index([ownerId])
+}
+
+model CrmQuote {
+  id             String             @id @default(cuid())
+  dealId         String?
+  leadId         String?
+  quoteNumber    Int
+  sequence       Int                @default(1)
+  isActive       Boolean            @default(false)
+  versionLabel   String?
+  status         CrmQuoteStatus     @default(DRAFT)
+  validUntil     DateTime?
+  totalAmount    Decimal            @db.Decimal(12, 2)
+  internalCost   Decimal            @default(0) @db.Decimal(12, 2)
+  internalMargin Decimal            @default(0) @db.Decimal(12, 2)
+  currency       String             @default("GTQ")
+  notes          String?
+  approvedById   String?
+  approvedAt     DateTime?
+  rejectedReason String?
+  createdById    String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  deal           CrmDeal?           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  lead           CrmLead?           @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  items          CrmQuoteItem[]
+  calendarEvents CrmCalendarEvent[]
+  requests       CrmQuoteRequest[]
+
+  @@unique([dealId, sequence])
+  @@unique([quoteNumber])
+  @@index([dealId])
+  @@index([leadId])
+}
+
+model CrmQuoteItem {
+  id                String           @id @default(cuid())
+  quoteId           String
+  itemType          CrmQuoteItemType
+  itemId            String?
+  manualDescription String?
+  manualUnitPrice   Decimal?         @db.Decimal(12, 2)
+  qty               Int
+  unitPrice         Decimal          @db.Decimal(12, 2)
+  discountPct       Int?
+  lineTotal         Decimal          @db.Decimal(12, 2)
+  costTotal         Decimal          @default(0) @db.Decimal(12, 2)
+  marginTotal       Decimal          @default(0) @db.Decimal(12, 2)
+  quote             CrmQuote         @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+}
+
+model CrmRequest {
+  id          String            @id @default(cuid())
+  dealId      String
+  services    CrmServiceType[]
+  description String
+  status      CrmRequestStatus  @default(PENDIENTE)
+  requestedAt DateTime          @default(now())
+  createdById String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  deal        CrmDeal           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  quotes      CrmQuoteRequest[]
+
+  @@index([dealId, status])
+}
+
+model CrmQuoteRequest {
+  quoteId   String
+  requestId String
+  quote     CrmQuote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  request   CrmRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@id([quoteId, requestId])
+}
+
+model CrmCalendarEvent {
+  id          String               @id @default(cuid())
+  dealId      String?
+  leadId      String?
+  quoteId     String?
+  type        CrmCalendarEventType
+  startAt     DateTime
+  endAt       DateTime?
+  title       String
+  notes       String?
+  ownerId     String?
+  createdById String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  deal        CrmDeal?             @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  lead        CrmLead?             @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  quote       CrmQuote?            @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+
+  @@index([dealId])
+  @@index([leadId])
+  @@index([quoteId])
+  @@index([type, startAt])
+}
+
+model SequenceCounter {
+  id           String   @id @default(cuid())
+  key          String   @unique
+  currentValue Int
+  updatedAt    DateTime @updatedAt
+}
+
+model B2BProposalDoc {
+  id                 String            @id @default(cuid())
+  dealId             String
+  sequenceYear       Int
+  sequenceNumber     Int
+  sequenceLabel      String
+  versionNumber      Int               @default(1)
+  status             B2BProposalStatus @default(DRAFT)
+  title              String?
+  contentJson        Json?
+  contentText        String?
+  totalDeclared      Decimal?          @db.Decimal(14, 2)
+  lastPdfFileAssetId String?
+  createdByUserId    String?
+  updatedByUserId    String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  deal               CrmDeal           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  lastPdfFileAsset   FileAsset?        @relation("B2BProposalPdfAsset", fields: [lastPdfFileAssetId], references: [id], onDelete: SetNull)
+  createdByUser      User?             @relation("B2BProposalCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUser      User?             @relation("B2BProposalUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([sequenceYear, sequenceNumber])
+  @@index([dealId, createdAt])
+  @@index([status])
+}
+
+model Quote {
+  id                  String          @id @default(cuid())
+  dealId              String
+  type                QuoteType
+  status              QuoteStatus     @default(DRAFT)
+  isActive            Boolean         @default(false)
+  number              String          @unique
+  issuedAt            DateTime        @default(now())
+  createdById         String?
+  sentAt              DateTime?
+  approvalRequestedAt DateTime?
+  approvedAt          DateTime?
+  approvedById        String?
+  rejectedAt          DateTime?
+  rejectedById        String?
+  rejectionReason     String?
+  templateId          String?
+  notes               String?
+  validityDays        Int             @default(30)
+  currency            String          @default("GTQ")
+  subtotal            Decimal         @default(0) @db.Decimal(14, 2)
+  discountTotal       Decimal         @default(0) @db.Decimal(14, 2)
+  taxTotal            Decimal         @default(0) @db.Decimal(14, 2)
+  total               Decimal         @default(0) @db.Decimal(14, 2)
+  paymentTerms        String?
+  deliveryTime        String?
+  deliveryNote        String?
+  pricesIncludeTax    Boolean         @default(true)
+  chequePayableTo     String?
+  pdfUrl              String?
+  pdfGeneratedAt      DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  deal                CrmDeal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  template            QuoteTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  items               QuoteItem[]
+  requests            QuoteRequest[]
+  deliveries          QuoteDelivery[]
+
+  @@index([dealId])
+  @@index([dealId, status])
+  @@index([dealId, isActive])
+}
+
+model QuoteItem {
+  id          String   @id @default(cuid())
+  quoteId     String
+  category    String
+  productName String
+  enlace      String?
+  refCode     String?
+  description String?
+  qty         Decimal  @db.Decimal(12, 2)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  discountPct Decimal? @db.Decimal(5, 2)
+  lineTotal   Decimal  @db.Decimal(14, 2)
+  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+}
+
+model QuoteTemplate {
+  id                  String          @id @default(cuid())
+  name                String
+  type                QuoteType
+  isDefault           Boolean         @default(false)
+  sectionsJson        Json?
+  headerJson          Json?
+  coverImageUrl       String?
+  introLetterHtml     String?
+  experienceLogosJson Json?
+  termsHtml           String?
+  bankAccountsJson    Json?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  quotes              Quote[]
+  settingsAsB2B       QuoteSettings[] @relation("DefaultTemplateB2B")
+  settingsAsB2C       QuoteSettings[] @relation("DefaultTemplateB2C")
+}
+
+model QuoteSettings {
+  id                      Int            @id @default(1)
+  defaultTemplateB2BId    String?
+  defaultTemplateB2CId    String?
+  defaultValidityDays     Int            @default(30)
+  defaultIntroLetterHtml  String?
+  defaultTermsB2BHtml     String?
+  defaultTermsB2CHtml     String?
+  defaultFooterJson       Json?
+  defaultBankAccountsJson Json?
+  defaultChequePayableTo  String?
+  defaultPaymentTerms     String?
+  defaultDeliveryTime     String?
+  defaultDeliveryNote     String?
+  showTaxIncludedText     Boolean        @default(true)
+  showBankBlock           Boolean        @default(true)
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  defaultTemplateB2B      QuoteTemplate? @relation("DefaultTemplateB2B", fields: [defaultTemplateB2BId], references: [id], onDelete: SetNull)
+  defaultTemplateB2C      QuoteTemplate? @relation("DefaultTemplateB2C", fields: [defaultTemplateB2CId], references: [id], onDelete: SetNull)
+}
+
+model QuoteRequest {
+  id          String             @id @default(cuid())
+  dealId      String
+  createdAt   DateTime           @default(now())
+  createdById String?
+  services    CrmServiceType[]
+  description String
+  status      QuoteRequestStatus @default(PENDING)
+  quoteId     String?
+  deal        CrmDeal            @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  quote       Quote?             @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+
+  @@index([dealId])
+  @@index([quoteId])
+}
+
+model FileAsset {
+  id              String           @id @default(cuid())
+  storageKey      String           @unique
+  originalName    String?
+  mimeType        String
+  sizeBytes       Int
+  sha256          String
+  dealId          String?
+  createdAt       DateTime         @default(now())
+  createdByUserId String?
+  createdByUser   User?            @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  deal            CrmDeal?         @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  proposalPdfs    B2BProposalDoc[] @relation("B2BProposalPdfAsset")
+  deliveries      QuoteDelivery[]
+}
+
+model QuoteDelivery {
+  id                String               @id @default(cuid())
+  quoteId           String
+  dealId            String?
+  channel           QuoteDeliveryChannel
+  to                Json
+  cc                Json?
+  bcc               Json?
+  subject           String
+  bodyText          String?
+  bodyHtml          String?
+  pdfUrl            String
+  pdfHash           String
+  pdfVersion        Int                  @default(1)
+  fileAssetId       String?
+  status            QuoteDeliveryStatus  @default(SENDING)
+  provider          String               @default("SMTP")
+  providerMessageId String?
+  actorUserId       String?
+  metadata          Json?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  failedAt          DateTime?
+  errorCode         String?
+  errorMessage      String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  quote             Quote                @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  deal              CrmDeal?             @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  actorUser         User?                @relation("DeliveryActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  fileAsset         FileAsset?           @relation(fields: [fileAssetId], references: [id], onDelete: SetNull)
+
+  @@index([quoteId, createdAt])
+  @@index([status])
+  @@index([providerMessageId])
+}

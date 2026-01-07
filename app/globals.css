@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  min-height: 100vh;
+  font-family: "Inter", "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0b1f3a;
+  background:
+    radial-gradient(1200px circle at 10% 20%, rgba(12, 116, 255, 0.18), transparent 35%),
+    radial-gradient(900px circle at 80% 10%, rgba(44, 211, 255, 0.2), transparent 30%),
+    linear-gradient(180deg, #f6f9ff 0%, #eef3fb 40%, #f8fbff 100%);
+}
+
+input,
+button {
+  font: inherit;
+}
+
+.glass-card {
+  @apply bg-white/90 backdrop-blur shadow-soft border border-white/60;
+}
+
+.surface-card {
+  @apply bg-white/90 border border-slate-100 shadow-soft;
+}

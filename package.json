@@ -1,0 +1,49 @@
+{
+  "name": "star-medical-erp",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"No tests configured\"",
+    "qa": "npm run lint && npm run typecheck && npm run test",
+    "db:reset": "sh -c 'if [ \"$NODE_ENV\" = \"production\" ]; then echo \"db:reset bloqueado en production\" && exit 1; else npx prisma migrate reset --force; fi'",
+    "inventory:reset": "sh -c 'if [ \"$NODE_ENV\" = \"production\" ]; then echo \"inventory:reset bloqueado en production\" && exit 1; else curl -X POST -H \"x-reset-confirm: YES\" -H \"Content-Type: application/json\" -d \"{\\\"mode\\\":\\\"wipe_movements\\\"}\" http://localhost:3000/api/inventario/reset; fi'"
+  },
+  "dependencies": {
+    "@heroicons/react": "^2.1.5",
+    "@prisma/client": "^5.22.0",
+    "@supabase/supabase-js": "^2.89.0",
+    "bcryptjs": "^2.4.3",
+    "exceljs": "^4.4.0",
+    "jsonwebtoken": "^9.0.3",
+    "next": "^16.1.0-canary.20",
+    "nodemailer": "^7.0.12",
+    "pdf-lib": "^1.17.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@next/eslint-plugin-next": "^16.0.10",
+    "@types/node": "^20.11.30",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@types/uuid": "^10.0.0",
+    "autoprefixer": "^10.4.19",
+    "eslint": "^9.39.2",
+    "eslint-config-next": "^16.0.10",
+    "postcss": "^8.4.38",
+    "prisma": "^5.22.0",
+    "tailwindcss": "^3.4.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
