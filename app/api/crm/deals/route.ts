@@ -125,7 +125,9 @@ export async function GET(req: NextRequest) {
     if (status) where.status = status;
     const scope = dealScopeWhere(auth.user!);
     if (Object.keys(scope).length) {
-      (where.AND = where.AND || []).push(scope);
+      const andConditions: Prisma.CrmDealWhereInput[] = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+      andConditions.push(scope);
+      where.AND = andConditions;
     }
     const deals = await prisma.crmDeal.findMany({
       where,

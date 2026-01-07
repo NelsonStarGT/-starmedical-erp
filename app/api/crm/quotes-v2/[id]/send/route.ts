@@ -129,8 +129,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         dealId: quote.dealId,
         channel,
         to,
-        cc: cc.length ? cc : null,
-        bcc: bcc.length ? bcc : null,
+        cc: cc.length ? cc : undefined,
+        bcc: bcc.length ? bcc : undefined,
         subject,
         bodyText,
         bodyHtml,
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         actorUserId: auth.user?.id || null,
         metadata: {
           requestId: req.headers.get("x-request-id") || crypto.randomUUID(),
-          ip: req.headers.get("x-forwarded-for") || req.ip
+          ip: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "unknown"
         }
       }
     });

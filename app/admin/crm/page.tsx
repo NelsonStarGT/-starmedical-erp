@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function CrmIndexPage() {
-  redirect("/admin/crm/dashboard");
+  redirect("/admin/crm/inbox?type=b2b");
 }
