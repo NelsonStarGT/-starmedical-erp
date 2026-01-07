@@ -325,6 +325,31 @@ enum QuoteDeliveryStatus {
   PENDING_PROVIDER
 }
 
+enum HrEmploymentType {
+  DEPENDENCIA
+  HONORARIOS
+  OUTSOURCING
+  TEMPORAL
+  PRACTICAS
+}
+
+enum HrEmployeeStatus {
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum HrEmployeeDocumentType {
+  DPI
+  CV
+  CONTRACT
+  TITLE
+  LICENSE
+  EVALUATION
+  WARNING
+  OTHER
+}
+
 model User {
   id                  String              @id @default(cuid())
   email               String              @unique
@@ -1769,4 +1794,108 @@ model QuoteDelivery {
   @@index([quoteId, createdAt])
   @@index([status])
   @@index([providerMessageId])
+}
+
+model Branch {
+  id          String                       @id @default(cuid())
+  name        String                       @unique
+  isActive    Boolean                      @default(true)
+  createdById String?
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
+  employees   HrEmployee[]                 @relation("PrimaryBranch")
+  assignments HrEmployeeBranchAssignment[]
+}
+
+model HrDepartment {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  isActive    Boolean      @default(true)
+  createdById String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  employees   HrEmployee[]
+}
+
+model HrPosition {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  isActive    Boolean      @default(true)
+  createdById String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  employees   HrEmployee[]
+}
+
+model HrEmployee {
+  id                String                       @id @default(cuid())
+  employeeCode      String                       @unique
+  firstName         String
+  lastName          String
+  dpi               String?                      @unique
+  nit               String?
+  email             String?
+  phone             String?
+  birthDate         DateTime?
+  address           String?
+  hireDate          DateTime
+  terminationDate   DateTime?
+  employmentType    HrEmploymentType
+  status            HrEmployeeStatus             @default(ACTIVE)
+  primaryBranchId   String
+  departmentId      String?
+  positionId        String
+  notes             String?
+  isActive          Boolean                      @default(true)
+  createdById       String?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  primaryBranch     Branch                       @relation("PrimaryBranch", fields: [primaryBranchId], references: [id])
+  department        HrDepartment?                @relation(fields: [departmentId], references: [id])
+  position          HrPosition                   @relation(fields: [positionId], references: [id])
+  documents         HrEmployeeDocument[]
+  branchAssignments HrEmployeeBranchAssignment[]
+
+  @@index([employeeCode])
+  @@index([primaryBranchId])
+  @@index([departmentId])
+  @@index([positionId])
+}
+
+model HrEmployeeDocument {
+  id          String                 @id @default(cuid())
+  employeeId  String
+  type        HrEmployeeDocumentType
+  title       String
+  fileUrl     String
+  issuedAt    DateTime?
+  expiresAt   DateTime?
+  notes       String?
+  isActive    Boolean                @default(true)
+  createdById String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  employee    HrEmployee             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+}
+
+model HrEmployeeBranchAssignment {
+  id          String     @id @default(cuid())
+  employeeId  String
+  branchId    String
+  isPrimary   Boolean    @default(false)
+  startDate   DateTime?
+  endDate     DateTime?
+  createdById String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  employee    HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branch      Branch     @relation(fields: [branchId], references: [id])
+
+  @@unique([employeeId, branchId])
+  @@index([employeeId])
+  @@index([branchId])
 }

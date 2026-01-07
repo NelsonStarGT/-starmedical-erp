@@ -24,7 +24,8 @@ export type NavRoute =
   | "/admin/inventario"
   | "/admin/facturacion"
   | "/admin/finanzas"
-  | "/admin/configuracion";
+  | "/admin/configuracion"
+  | "/hr/employees";
 
 export const navItems: { name: string; href: NavRoute; icon: typeof HomeIcon; disabled?: boolean }[] = [
   { name: "Inicio", href: "/admin", icon: HomeIcon },
@@ -34,6 +35,7 @@ export const navItems: { name: string; href: NavRoute; icon: typeof HomeIcon; di
   { name: "Agenda", href: "/admin/agenda", icon: CalendarDaysIcon },
   { name: "Inventario", href: "/admin/inventario", icon: Squares2X2Icon },
   { name: "Finanzas", href: "/admin/finanzas", icon: BanknotesIcon },
+  { name: "RRHH", href: "/hr/employees", icon: UserGroupIcon },
   { name: "Facturación", href: "/admin/facturacion", icon: ClipboardDocumentListIcon, disabled: true },
   { name: "Configuración", href: "/admin/configuracion", icon: Cog6ToothIcon }
 ];

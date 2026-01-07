@@ -21,7 +21,10 @@ const {
   CrmTaskStatus,
   CrmTaskPriority,
   CrmServiceType,
-  QuoteType
+  QuoteType,
+  HrEmploymentType,
+  HrEmployeeStatus,
+  HrEmployeeDocumentType
 } = pkg;
 
 const prisma = new PrismaClient();
@@ -48,11 +51,88 @@ async function main() {
     { id: "le2", name: "StarLabs, S.A.", comercialName: "StarLabs", nit: "987654-3" }
   ];
 
+  const hrDepartments = [
+    { name: "Administración", description: "Operaciones y soporte corporativo" },
+    { name: "Clínica", description: "Servicios médicos en clínica" },
+    { name: "Laboratorio", description: "Procesos y análisis de laboratorio" },
+    { name: "Imagenología", description: "Rayos X, US y otros estudios" },
+    { name: "Comercial", description: "Ventas y relaciones comerciales" }
+  ];
+
+  const hrPositions = [
+    { name: "Doctor", description: "Profesional médico" },
+    { name: "Enfermería", description: "Cuidados y apoyo clínico" },
+    { name: "Recepción", description: "Atención y admisión" },
+    { name: "RRHH", description: "Gestión de personal" },
+    { name: "Finanzas", description: "Administración financiera" },
+    { name: "Técnico RX", description: "Técnico en Rayos X" },
+    { name: "Técnico US", description: "Técnico en Ultrasonido" }
+  ];
+
+  const hrDemoEmployees = [
+    {
+      employeeCode: "EMP-0001",
+      firstName: "Ana",
+      lastName: "Morales",
+      employmentType: HrEmploymentType.DEPENDENCIA,
+      status: HrEmployeeStatus.ACTIVE,
+      hireDate: new Date("2024-02-01"),
+      primaryBranchKey: "s1",
+      positionName: "Doctor",
+      departmentName: "Clínica",
+      email: "ana.morales@starmedical.test",
+      phone: "50255560001",
+      notes: "Médico general con enfoque en salud ocupacional",
+      documents: [
+        { id: "hr-doc-1", type: HrEmployeeDocumentType.DPI, title: "DPI", fileUrl: "/uploads/hr/ana-dpi.pdf" },
+        {
+          id: "hr-doc-2",
+          type: HrEmployeeDocumentType.CONTRACT,
+          title: "Contrato indefinido",
+          fileUrl: "/uploads/hr/ana-contrato.pdf",
+          issuedAt: new Date("2024-02-01")
+        }
+      ]
+    },
+    {
+      employeeCode: "EMP-0002",
+      firstName: "Luis",
+      lastName: "Pérez",
+      employmentType: HrEmploymentType.HONORARIOS,
+      status: HrEmployeeStatus.SUSPENDED,
+      hireDate: new Date("2024-05-15"),
+      primaryBranchKey: "s2",
+      positionName: "RRHH",
+      departmentName: "Administración",
+      email: "luis.perez@starmedical.test",
+      phone: "50255560002",
+      notes: "Especialista en nómina y relaciones laborales",
+      extraBranches: [{ branchId: "s1", startDate: new Date("2024-06-01") }],
+      documents: [
+        {
+          id: "hr-doc-3",
+          type: HrEmployeeDocumentType.CV,
+          title: "CV actualizado",
+          fileUrl: "/uploads/hr/luis-cv.pdf",
+          issuedAt: new Date("2024-05-01")
+        }
+      ]
+    }
+  ];
+
   for (const type of appointmentTypes) {
     await prisma.appointmentType.upsert({
       where: { id: type.id },
       update: {},
       create: { ...type, status: "Activo" }
+    });
+  }
+
+  for (const branch of branches) {
+    await prisma.branch.upsert({
+      where: { id: branch.id },
+      update: { name: branch.name, isActive: true },
+      create: { ...branch, isActive: true }
     });
   }
 
@@ -402,6 +482,152 @@ async function main() {
       }
     ]
   });
+
+  // RRHH base
+  const hrRoles = [
+    { name: "ADMIN", description: "Administrador global" },
+    { name: "HR_ADMIN", description: "RRHH - administración" },
+    { name: "HR_USER", description: "RRHH - usuario" },
+    { name: "VIEWER", description: "Solo lectura" }
+  ];
+
+  for (const role of hrRoles) {
+    await prisma.role.upsert({
+      where: { name: role.name },
+      update: { description: role.description },
+      create: role
+    });
+  }
+
+  const departmentMap: Record<string, string> = {};
+  for (const dept of hrDepartments) {
+    const saved = await prisma.hrDepartment.upsert({
+      where: { name: dept.name },
+      update: { description: dept.description, isActive: true },
+      create: { ...dept, isActive: true, createdById: "admin-seed" }
+    });
+    departmentMap[dept.name] = saved.id;
+  }
+
+  const positionMap: Record<string, string> = {};
+  for (const pos of hrPositions) {
+    const saved = await prisma.hrPosition.upsert({
+      where: { name: pos.name },
+      update: { description: pos.description, isActive: true },
+      create: { ...pos, isActive: true, createdById: "admin-seed" }
+    });
+    positionMap[pos.name] = saved.id;
+  }
+
+  const branchMap: Record<string, string> = {};
+  for (const b of branches) {
+    branchMap[b.id] = b.id;
+  }
+
+  for (const emp of hrDemoEmployees) {
+    const primaryBranchId = branchMap[emp.primaryBranchKey] || emp.primaryBranchKey;
+    const positionId = positionMap[emp.positionName];
+    const departmentId = emp.departmentName ? departmentMap[emp.departmentName] : undefined;
+
+    if (!primaryBranchId || !positionId) {
+      throw new Error(`Seed RRHH: faltan referencias para ${emp.employeeCode}`);
+    }
+
+    const saved = await prisma.hrEmployee.upsert({
+      where: { employeeCode: emp.employeeCode },
+      update: {
+        firstName: emp.firstName,
+        lastName: emp.lastName,
+        hireDate: emp.hireDate,
+        employmentType: emp.employmentType,
+        status: emp.status,
+        primaryBranchId,
+        positionId,
+        departmentId: departmentId || null,
+        email: emp.email || null,
+        phone: emp.phone || null,
+        notes: emp.notes || null,
+        isActive: emp.status !== HrEmployeeStatus.TERMINATED,
+        terminationDate: emp.status === HrEmployeeStatus.TERMINATED ? emp.terminationDate || null : null
+      },
+      create: {
+        employeeCode: emp.employeeCode,
+        firstName: emp.firstName,
+        lastName: emp.lastName,
+        hireDate: emp.hireDate,
+        employmentType: emp.employmentType,
+        status: emp.status,
+        primaryBranchId,
+        positionId,
+        departmentId: departmentId || null,
+        email: emp.email || null,
+        phone: emp.phone || null,
+        notes: emp.notes || null,
+        isActive: emp.status !== HrEmployeeStatus.TERMINATED,
+        terminationDate: emp.status === HrEmployeeStatus.TERMINATED ? emp.terminationDate || null : null,
+        createdById: "admin-seed"
+      }
+    });
+
+    await prisma.hrEmployeeBranchAssignment.upsert({
+      where: { employeeId_branchId: { employeeId: saved.id, branchId: primaryBranchId } as any },
+      update: { isPrimary: true, startDate: emp.hireDate },
+      create: {
+        employeeId: saved.id,
+        branchId: primaryBranchId,
+        isPrimary: true,
+        startDate: emp.hireDate,
+        createdById: "admin-seed"
+      }
+    });
+
+    for (const extra of (emp as any).extraBranches || []) {
+      const branchId = branchMap[extra.branchId] || extra.branchId;
+      await prisma.hrEmployeeBranchAssignment.upsert({
+        where: { employeeId_branchId: { employeeId: saved.id, branchId } as any },
+        update: {
+          isPrimary: false,
+          startDate: extra.startDate || null,
+          endDate: extra.endDate || null
+        },
+        create: {
+          employeeId: saved.id,
+          branchId,
+          isPrimary: false,
+          startDate: extra.startDate || null,
+          endDate: extra.endDate || null,
+          createdById: "admin-seed"
+        }
+      });
+    }
+
+    for (const doc of (emp as any).documents || []) {
+      await prisma.hrEmployeeDocument.upsert({
+        where: { id: doc.id },
+        update: {
+          type: doc.type,
+          title: doc.title,
+          fileUrl: doc.fileUrl,
+          issuedAt: doc.issuedAt || null,
+          expiresAt: doc.expiresAt || null,
+          notes: doc.notes || null,
+          isActive: true
+        },
+        create: {
+          id: doc.id,
+          employeeId: saved.id,
+          type: doc.type,
+          title: doc.title,
+          fileUrl: doc.fileUrl,
+          issuedAt: doc.issuedAt || null,
+          expiresAt: doc.expiresAt || null,
+          notes: doc.notes || null,
+          isActive: true,
+          createdById: "admin-seed"
+        }
+      });
+    }
+  }
 
   // CRM seed
   const pipelineB2B = await prisma.crmPipeline.upsert({

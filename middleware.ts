@@ -7,8 +7,9 @@ export function middleware(request: NextRequest) {
   const authenticated = Boolean(sessionCookie);
   const isLoginRoute = pathname.startsWith("/login");
   const isAdminRoute = pathname.startsWith("/admin");
+  const isHrRoute = pathname.startsWith("/hr");
 
-  if (isAdminRoute && !authenticated) {
+  if ((isAdminRoute || isHrRoute) && !authenticated) {
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }
@@ -22,5 +23,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/login", "/admin/:path*"]
+  matcher: ["/login", "/admin/:path*", "/hr/:path*"]
 };
