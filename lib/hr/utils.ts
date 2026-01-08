@@ -14,18 +14,26 @@ export function parseDateInput(value: string | null | undefined, label: string, 
   return date;
 }
 
-export function normalizeBranchAssignments(raw: any[], primaryBranchId: string) {
-  const extras: Array<{ branchId: string; startDate: Date | null; endDate: Date | null }> = [];
-  const seen = new Set<string>();
-  for (const item of raw || []) {
-    const branchId = cleanNullableString(item.branchId) || "";
-    if (!branchId || branchId === primaryBranchId || seen.has(branchId)) continue;
-    extras.push({
-      branchId,
-      startDate: parseDateInput(item.startDate, "Fecha de inicio"),
-      endDate: parseDateInput(item.endDate, "Fecha fin")
-    });
-    seen.add(branchId);
+export function ensurePrimary<T extends { isPrimary?: boolean }>(items: T[]) {
+  if (!items || items.length === 0) return items;
+  if (!items.some((item) => item.isPrimary)) {
+    items[0].isPrimary = true;
   }
-  return extras;
+  return items;
+}
+
+export function computeRetentionUntil(base: Date | null | undefined, provided?: Date | null, years = 5) {
+  if (provided) return provided;
+  const source = base || new Date();
+  const copy = new Date(source);
+  copy.setFullYear(copy.getFullYear() + years);
+  return copy;
+}
+
+export function isExpiringSoon(date: Date | null | undefined, thresholdDays = 45) {
+  if (!date) return false;
+  const now = new Date();
+  const threshold = new Date(now);
+  threshold.setDate(threshold.getDate() + thresholdDays);
+  return date <= threshold;
 }

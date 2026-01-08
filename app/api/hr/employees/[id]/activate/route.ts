@@ -12,29 +12,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   try {
     const saved = await prisma.$transaction(async (tx) => {
-      const employee = await tx.hrEmployee.update({
+      await tx.employeeEngagement.updateMany({
+        where: { employeeId: params.id },
+        data: { status: HrEmployeeStatus.ACTIVE, endDate: null }
+      });
+
+      await tx.employeeBranchAssignment.updateMany({
+        where: { employeeId: params.id },
+        data: { endDate: null }
+      });
+
+      await tx.employeePositionAssignment.updateMany({
+        where: { employeeId: params.id },
+        data: { endDate: null }
+      });
+
+      await tx.hrEmployee.update({
         where: { id: params.id },
         data: {
           status: HrEmployeeStatus.ACTIVE,
-          terminationDate: null,
           isActive: true
-        }
-      });
-
-      await tx.hrEmployeeBranchAssignment.updateMany({
-        where: { employeeId: params.id },
-        data: { endDate: null, isPrimary: false }
-      });
-
-      await tx.hrEmployeeBranchAssignment.upsert({
-        where: { employeeId_branchId: { employeeId: params.id, branchId: employee.primaryBranchId } as any },
-        update: { isPrimary: true, endDate: null },
-        create: {
-          employeeId: params.id,
-          branchId: employee.primaryBranchId,
-          isPrimary: true,
-          startDate: employee.hireDate,
-          createdById: auth.user?.id || null
         }
       });
 

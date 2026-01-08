@@ -24,7 +24,8 @@ const {
   QuoteType,
   HrEmploymentType,
   HrEmployeeStatus,
-  HrEmployeeDocumentType
+  HrEmployeeDocumentType,
+  PayFrequency
 } = pkg;
 
 const prisma = new PrismaClient();
@@ -74,49 +75,124 @@ async function main() {
       employeeCode: "EMP-0001",
       firstName: "Ana",
       lastName: "Morales",
-      employmentType: HrEmploymentType.DEPENDENCIA,
-      status: HrEmployeeStatus.ACTIVE,
-      hireDate: new Date("2024-02-01"),
-      primaryBranchKey: "s1",
-      positionName: "Doctor",
-      departmentName: "Clínica",
+      dpi: "1234567890101",
       email: "ana.morales@starmedical.test",
       phone: "50255560001",
-      notes: "Médico general con enfoque en salud ocupacional",
+      homePhone: "50222280001",
+      emergencyContactName: "María Morales",
+      emergencyContactPhone: "50244445555",
+      address: "Palín, Escuintla",
+      residenceProofUrl: "/uploads/hr/ana-recibo-agua.pdf",
+      dpiPhotoUrl: "/uploads/hr/ana-dpi-foto.jpg",
+      rtuFileUrl: "/uploads/hr/ana-rtu.pdf",
+      status: HrEmployeeStatus.ACTIVE,
+      primaryLegalEntityKey: "le1",
+      engagements: [
+        {
+          id: "hr-eng-ana-le1",
+          legalEntityKey: "le1",
+          employmentType: HrEmploymentType.DEPENDENCIA,
+          status: HrEmployeeStatus.ACTIVE,
+          startDate: new Date("2024-02-01"),
+          isPrimary: true,
+          compensationAmount: new Prisma.Decimal(8000),
+          compensationFrequency: PayFrequency.MONTHLY
+        }
+      ],
+      branchAssignments: [{ id: "hr-branch-ana-s1", branchKey: "s1", isPrimary: true, startDate: new Date("2024-02-01") }],
+      positionAssignments: [
+        {
+          id: "hr-pos-ana",
+          positionName: "Doctor",
+          departmentName: "Clínica",
+          isPrimary: true,
+          startDate: new Date("2024-02-01")
+        }
+      ],
       documents: [
-        { id: "hr-doc-1", type: HrEmployeeDocumentType.DPI, title: "DPI", fileUrl: "/uploads/hr/ana-dpi.pdf" },
+        {
+          id: "hr-doc-1",
+          versionId: "hr-doc-1-v1",
+          versionNumber: 1,
+          type: HrEmployeeDocumentType.DPI,
+          title: "DPI",
+          fileUrl: "/uploads/hr/ana-dpi.pdf",
+          issuedAt: new Date("2024-01-15"),
+          deliveredAt: new Date("2024-01-15")
+        },
         {
           id: "hr-doc-2",
+          versionId: "hr-doc-2-v1",
+          versionNumber: 1,
           type: HrEmployeeDocumentType.CONTRACT,
           title: "Contrato indefinido",
           fileUrl: "/uploads/hr/ana-contrato.pdf",
           issuedAt: new Date("2024-02-01")
         }
-      ]
+      ],
+      professionalLicense: {
+        applies: true,
+        number: "COL-2024-001",
+        issuedAt: new Date("2024-01-10"),
+        expiresAt: new Date("2026-01-09"),
+        fileUrl: "/uploads/hr/ana-licencia.pdf"
+      }
     },
     {
       employeeCode: "EMP-0002",
       firstName: "Luis",
       lastName: "Pérez",
-      employmentType: HrEmploymentType.HONORARIOS,
-      status: HrEmployeeStatus.SUSPENDED,
-      hireDate: new Date("2024-05-15"),
-      primaryBranchKey: "s2",
-      positionName: "RRHH",
-      departmentName: "Administración",
+      dpi: "1234567890202",
       email: "luis.perez@starmedical.test",
       phone: "50255560002",
-      notes: "Especialista en nómina y relaciones laborales",
-      extraBranches: [{ branchId: "s1", startDate: new Date("2024-06-01") }],
+      homePhone: "50222280002",
+      emergencyContactName: "Carlos Pérez",
+      emergencyContactPhone: "50244446666",
+      address: "Escuintla, Guatemala",
+      residenceProofUrl: "/uploads/hr/luis-recibo-luz.pdf",
+      dpiPhotoUrl: "/uploads/hr/luis-dpi.jpg",
+      rtuFileUrl: "/uploads/hr/luis-rtu.pdf",
+      status: HrEmployeeStatus.SUSPENDED,
+      primaryLegalEntityKey: "le2",
+      engagements: [
+        {
+          id: "hr-eng-luis-le2",
+          legalEntityKey: "le2",
+          employmentType: HrEmploymentType.HONORARIOS,
+          status: HrEmployeeStatus.SUSPENDED,
+          startDate: new Date("2024-05-15"),
+          isPrimary: true,
+          compensationAmount: new Prisma.Decimal(12000),
+          compensationFrequency: PayFrequency.MONTHLY
+        }
+      ],
+      branchAssignments: [
+        { id: "hr-branch-luis-s2", branchKey: "s2", isPrimary: true, startDate: new Date("2024-05-15") },
+        { id: "hr-branch-luis-s1", branchKey: "s1", isPrimary: false, startDate: new Date("2024-06-01") }
+      ],
+      positionAssignments: [
+        {
+          id: "hr-pos-luis",
+          positionName: "RRHH",
+          departmentName: "Administración",
+          isPrimary: true,
+          startDate: new Date("2024-05-15")
+        }
+      ],
       documents: [
         {
           id: "hr-doc-3",
+          versionId: "hr-doc-3-v1",
+          versionNumber: 1,
           type: HrEmployeeDocumentType.CV,
           title: "CV actualizado",
           fileUrl: "/uploads/hr/luis-cv.pdf",
           issuedAt: new Date("2024-05-01")
         }
-      ]
+      ],
+      professionalLicense: {
+        applies: false
+      }
     }
   ];
 
@@ -524,106 +600,263 @@ async function main() {
     branchMap[b.id] = b.id;
   }
 
-  for (const emp of hrDemoEmployees) {
-    const primaryBranchId = branchMap[emp.primaryBranchKey] || emp.primaryBranchKey;
-    const positionId = positionMap[emp.positionName];
-    const departmentId = emp.departmentName ? departmentMap[emp.departmentName] : undefined;
+  const entityMap: Record<string, string> = {};
+  for (const ent of entities) {
+    entityMap[ent.id] = ent.id;
+  }
 
-    if (!primaryBranchId || !positionId) {
-      throw new Error(`Seed RRHH: faltan referencias para ${emp.employeeCode}`);
-    }
+  for (const emp of hrDemoEmployees) {
+    const primaryEngagement = emp.engagements?.find((e) => e.isPrimary) || emp.engagements?.[0];
+    const primaryLegalEntityId = primaryEngagement ? entityMap[primaryEngagement.legalEntityKey] || primaryEngagement.legalEntityKey : null;
 
     const saved = await prisma.hrEmployee.upsert({
       where: { employeeCode: emp.employeeCode },
       update: {
         firstName: emp.firstName,
         lastName: emp.lastName,
-        hireDate: emp.hireDate,
-        employmentType: emp.employmentType,
-        status: emp.status,
-        primaryBranchId,
-        positionId,
-        departmentId: departmentId || null,
+        dpi: emp.dpi,
         email: emp.email || null,
         phone: emp.phone || null,
-        notes: emp.notes || null,
+        homePhone: emp.homePhone || null,
+        emergencyContactName: emp.emergencyContactName || null,
+        emergencyContactPhone: emp.emergencyContactPhone || null,
+        address: emp.address || null,
+        residenceProofUrl: emp.residenceProofUrl || null,
+        dpiPhotoUrl: emp.dpiPhotoUrl || null,
+        rtuFileUrl: emp.rtuFileUrl || null,
+        status: emp.status,
         isActive: emp.status !== HrEmployeeStatus.TERMINATED,
-        terminationDate: emp.status === HrEmployeeStatus.TERMINATED ? emp.terminationDate || null : null
+        primaryLegalEntityId
       },
       create: {
         employeeCode: emp.employeeCode,
         firstName: emp.firstName,
         lastName: emp.lastName,
-        hireDate: emp.hireDate,
-        employmentType: emp.employmentType,
-        status: emp.status,
-        primaryBranchId,
-        positionId,
-        departmentId: departmentId || null,
+        dpi: emp.dpi,
         email: emp.email || null,
         phone: emp.phone || null,
-        notes: emp.notes || null,
+        homePhone: emp.homePhone || null,
+        emergencyContactName: emp.emergencyContactName || null,
+        emergencyContactPhone: emp.emergencyContactPhone || null,
+        address: emp.address || null,
+        residenceProofUrl: emp.residenceProofUrl || null,
+        dpiPhotoUrl: emp.dpiPhotoUrl || null,
+        rtuFileUrl: emp.rtuFileUrl || null,
+        status: emp.status,
         isActive: emp.status !== HrEmployeeStatus.TERMINATED,
-        terminationDate: emp.status === HrEmployeeStatus.TERMINATED ? emp.terminationDate || null : null,
+        primaryLegalEntityId,
         createdById: "admin-seed"
       }
     });
 
-    await prisma.hrEmployeeBranchAssignment.upsert({
-      where: { employeeId_branchId: { employeeId: saved.id, branchId: primaryBranchId } as any },
-      update: { isPrimary: true, startDate: emp.hireDate },
-      create: {
-        employeeId: saved.id,
-        branchId: primaryBranchId,
-        isPrimary: true,
-        startDate: emp.hireDate,
-        createdById: "admin-seed"
+    for (const engagement of emp.engagements || []) {
+      const legalEntityId = entityMap[engagement.legalEntityKey] || engagement.legalEntityKey;
+      if (!legalEntityId) {
+        throw new Error(`Seed RRHH: entidad legal no encontrada para ${emp.employeeCode}`);
       }
-    });
-
-    for (const extra of (emp as any).extraBranches || []) {
-      const branchId = branchMap[extra.branchId] || extra.branchId;
-      await prisma.hrEmployeeBranchAssignment.upsert({
-        where: { employeeId_branchId: { employeeId: saved.id, branchId } as any },
+      const eng = await prisma.employeeEngagement.upsert({
+        where: { id: engagement.id },
         update: {
-          isPrimary: false,
-          startDate: extra.startDate || null,
-          endDate: extra.endDate || null
+          employeeId: saved.id,
+          legalEntityId,
+          employmentType: engagement.employmentType,
+          status: engagement.status,
+          startDate: engagement.startDate,
+          endDate: engagement.endDate || null,
+          isPrimary: Boolean(engagement.isPrimary),
+          isPayrollEligible: engagement.isPayrollEligible ?? true,
+          compensationAmount: engagement.compensationAmount || null,
+          compensationCurrency: engagement.compensationCurrency || "GTQ",
+          compensationFrequency: engagement.compensationFrequency || PayFrequency.MONTHLY,
+          compensationNotes: engagement.compensationNotes || null
         },
         create: {
+          id: engagement.id,
           employeeId: saved.id,
-          branchId,
-          isPrimary: false,
-          startDate: extra.startDate || null,
-          endDate: extra.endDate || null,
+          legalEntityId,
+          employmentType: engagement.employmentType,
+          status: engagement.status,
+          startDate: engagement.startDate,
+          endDate: engagement.endDate || null,
+          isPrimary: Boolean(engagement.isPrimary),
+          isPayrollEligible: engagement.isPayrollEligible ?? true,
+          compensationAmount: engagement.compensationAmount || null,
+          compensationCurrency: engagement.compensationCurrency || "GTQ",
+          compensationFrequency: engagement.compensationFrequency || PayFrequency.MONTHLY,
+          compensationNotes: engagement.compensationNotes || null,
+          createdById: "admin-seed"
+        }
+      });
+
+      await prisma.employeeCompensation.upsert({
+        where: { id: `${eng.id}-base` },
+        update: {
+          engagementId: eng.id,
+          effectiveFrom: engagement.startDate,
+          effectiveTo: null,
+          baseSalary: engagement.compensationAmount || null,
+          currency: engagement.compensationCurrency || "GTQ",
+          payFrequency: engagement.compensationFrequency || PayFrequency.MONTHLY,
+          allowances: {},
+          deductions: {},
+          isActive: true
+        },
+        create: {
+          id: `${eng.id}-base`,
+          engagementId: eng.id,
+          effectiveFrom: engagement.startDate,
+          effectiveTo: null,
+          baseSalary: engagement.compensationAmount || null,
+          currency: engagement.compensationCurrency || "GTQ",
+          payFrequency: engagement.compensationFrequency || PayFrequency.MONTHLY,
+          allowances: {},
+          deductions: {},
+          isActive: true,
           createdById: "admin-seed"
         }
       });
     }
 
-    for (const doc of (emp as any).documents || []) {
-      await prisma.hrEmployeeDocument.upsert({
+    for (const assign of emp.branchAssignments || []) {
+      const branchId = branchMap[assign.branchKey] || assign.branchKey;
+      if (!branchId) {
+        throw new Error(`Seed RRHH: sucursal no encontrada para ${emp.employeeCode}`);
+      }
+      await prisma.employeeBranchAssignment.upsert({
+        where: { id: assign.id },
+        update: {
+          employeeId: saved.id,
+          branchId,
+          isPrimary: Boolean(assign.isPrimary),
+          startDate: assign.startDate || null,
+          endDate: assign.endDate || null
+        },
+        create: {
+          id: assign.id,
+          employeeId: saved.id,
+          branchId,
+          isPrimary: Boolean(assign.isPrimary),
+          startDate: assign.startDate || null,
+          endDate: assign.endDate || null,
+          createdById: "admin-seed"
+        }
+      });
+    }
+
+    for (const posAssign of emp.positionAssignments || []) {
+      const positionId = positionMap[posAssign.positionName];
+      const departmentId = posAssign.departmentName ? departmentMap[posAssign.departmentName] : undefined;
+      if (!positionId) {
+        throw new Error(`Seed RRHH: puesto no encontrado para ${emp.employeeCode}`);
+      }
+      await prisma.employeePositionAssignment.upsert({
+        where: { id: posAssign.id },
+        update: {
+          employeeId: saved.id,
+          positionId,
+          departmentId: departmentId || null,
+          isPrimary: Boolean(posAssign.isPrimary),
+          startDate: posAssign.startDate || null,
+          endDate: posAssign.endDate || null,
+          notes: posAssign.notes || null
+        },
+        create: {
+          id: posAssign.id,
+          employeeId: saved.id,
+          positionId,
+          departmentId: departmentId || null,
+          isPrimary: Boolean(posAssign.isPrimary),
+          startDate: posAssign.startDate || null,
+          endDate: posAssign.endDate || null,
+          notes: posAssign.notes || null,
+          createdById: "admin-seed"
+        }
+      });
+    }
+
+    for (const doc of emp.documents || []) {
+      const retentionSource = doc.issuedAt || new Date();
+      const retentionUntil = new Date(retentionSource);
+      retentionUntil.setFullYear(retentionUntil.getFullYear() + 5);
+
+      await prisma.employeeDocument.upsert({
         where: { id: doc.id },
         update: {
+          employeeId: saved.id,
           type: doc.type,
           title: doc.title,
-          fileUrl: doc.fileUrl,
-          issuedAt: doc.issuedAt || null,
-          expiresAt: doc.expiresAt || null,
           notes: doc.notes || null,
-          isActive: true
+          retentionUntil,
+          isArchived: false
         },
         create: {
           id: doc.id,
           employeeId: saved.id,
           type: doc.type,
           title: doc.title,
+          notes: doc.notes || null,
+          retentionUntil,
+          isArchived: false,
+          createdById: "admin-seed"
+        }
+      });
+
+      await prisma.employeeDocumentVersion.upsert({
+        where: { id: doc.versionId },
+        update: {
+          documentId: doc.id,
+          versionNumber: doc.versionNumber || 1,
           fileUrl: doc.fileUrl,
           issuedAt: doc.issuedAt || null,
+          deliveredAt: doc.deliveredAt || null,
           expiresAt: doc.expiresAt || null,
           notes: doc.notes || null,
-          isActive: true,
-          createdById: "admin-seed"
+          uploadedById: null
+        },
+        create: {
+          id: doc.versionId,
+          documentId: doc.id,
+          versionNumber: doc.versionNumber || 1,
+          fileUrl: doc.fileUrl,
+          issuedAt: doc.issuedAt || null,
+          deliveredAt: doc.deliveredAt || null,
+          expiresAt: doc.expiresAt || null,
+          notes: doc.notes || null,
+          uploadedById: null
+        }
+      });
+
+      await prisma.employeeDocument.update({
+        where: { id: doc.id },
+        data: { currentVersionId: doc.versionId }
+      });
+    }
+
+    if (emp.professionalLicense) {
+      await prisma.professionalLicense.upsert({
+        where: { employeeId: saved.id },
+        update: {
+          applies: emp.professionalLicense.applies ?? false,
+          number: emp.professionalLicense.number || null,
+          issuedAt: emp.professionalLicense.issuedAt || null,
+          expiresAt: emp.professionalLicense.expiresAt || null,
+          issuingEntity: emp.professionalLicense.issuingEntity || null,
+          fileUrl: emp.professionalLicense.fileUrl || null,
+          reminderDays: emp.professionalLicense.reminderDays || null,
+          notes: emp.professionalLicense.notes || null
+        },
+        create: {
+          employeeId: saved.id,
+          applies: emp.professionalLicense.applies ?? false,
+          number: emp.professionalLicense.number || null,
+          issuedAt: emp.professionalLicense.issuedAt || null,
+          expiresAt: emp.professionalLicense.expiresAt || null,
+          issuingEntity: emp.professionalLicense.issuingEntity || null,
+          fileUrl: emp.professionalLicense.fileUrl || null,
+          reminderDays: emp.professionalLicense.reminderDays || null,
+          notes: emp.professionalLicense.notes || null,
+          createdAt: new Date(),
+          updatedAt: new Date()
         }
       });
     }

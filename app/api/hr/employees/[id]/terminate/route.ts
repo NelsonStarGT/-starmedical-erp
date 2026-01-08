@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { HrEmployeeStatus } from "@prisma/client";
+import { HrEmployeeStatus, NotificationType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api/hr";
 import { employeeInclude, serializeEmployee } from "@/lib/hr/serializers";
@@ -19,19 +19,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const notes = cleanNullableString(body?.notes);
 
     const saved = await prisma.$transaction(async (tx) => {
+      await tx.employeeEngagement.updateMany({
+        where: { employeeId: params.id },
+        data: { status: HrEmployeeStatus.TERMINATED, endDate: terminationDate }
+      });
+
+      await tx.employeeBranchAssignment.updateMany({
+        where: { employeeId: params.id },
+        data: { endDate: terminationDate }
+      });
+
+      await tx.employeePositionAssignment.updateMany({
+        where: { employeeId: params.id },
+        data: { endDate: terminationDate }
+      });
+
+      await tx.notification.deleteMany({ where: { employeeId: params.id, type: NotificationType.LICENSE_EXPIRY } });
+
       await tx.hrEmployee.update({
         where: { id: params.id },
         data: {
           status: HrEmployeeStatus.TERMINATED,
-          terminationDate,
-          isActive: true,
+          isActive: false,
           notes: notes ?? undefined
         }
-      });
-
-      await tx.hrEmployeeBranchAssignment.updateMany({
-        where: { employeeId: params.id },
-        data: { endDate: terminationDate, isPrimary: false }
       });
 
       return tx.hrEmployee.findUnique({ where: { id: params.id }, include: employeeInclude });

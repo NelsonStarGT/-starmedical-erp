@@ -11,16 +11,24 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (auth.errorResponse) return auth.errorResponse;
 
   try {
-    const updated = await prisma.hrEmployee.update({
-      where: { id: params.id },
-      data: {
-        status: HrEmployeeStatus.SUSPENDED,
-        terminationDate: null,
-        isActive: true
-      },
-      include: employeeInclude
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.employeeEngagement.updateMany({
+        where: { employeeId: params.id },
+        data: { status: HrEmployeeStatus.SUSPENDED, endDate: null }
+      });
+
+      await tx.hrEmployee.update({
+        where: { id: params.id },
+        data: {
+          status: HrEmployeeStatus.SUSPENDED,
+          isActive: true
+        }
+      });
+
+      return tx.hrEmployee.findUnique({ where: { id: params.id }, include: employeeInclude });
     });
 
+    if (!updated) return NextResponse.json({ error: "Empleado no encontrado" }, { status: 404 });
     return NextResponse.json({ data: serializeEmployee(updated) });
   } catch (err: any) {
     console.error("suspend employee", err);

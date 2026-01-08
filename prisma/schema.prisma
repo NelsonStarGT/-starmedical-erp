@@ -350,23 +350,51 @@ enum HrEmployeeDocumentType {
   OTHER
 }
 
+enum PayFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum NotificationType {
+  DOCUMENT_EXPIRY
+  LICENSE_EXPIRY
+  CONTRACT_EXPIRY
+}
+
+enum NotificationSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  APPROVED
+  POSTED
+}
+
 model User {
-  id                  String              @id @default(cuid())
-  email               String              @unique
+  id                  String                    @id @default(cuid())
+  email               String                    @unique
   name                String?
   passwordHash        String
-  isActive            Boolean             @default(true)
+  isActive            Boolean                   @default(true)
   branchId            String?
   roles               UserRole[]
-  dealsOwned          CrmDeal[]           @relation("DealOwnerUser")
-  auditLogs           AuditLog[]          @relation("AuditActor")
+  dealsOwned          CrmDeal[]                 @relation("DealOwnerUser")
+  auditLogs           AuditLog[]                @relation("AuditActor")
   fileAssets          FileAsset[]
-  b2bProposalsCreated B2BProposalDoc[]    @relation("B2BProposalCreatedBy")
-  b2bProposalsUpdated B2BProposalDoc[]    @relation("B2BProposalUpdatedBy")
-  deliveries          QuoteDelivery[]     @relation("DeliveryActor")
+  employee            HrEmployee?               @relation("EmployeeUser")
+  uploadedDocuments   EmployeeDocumentVersion[] @relation("DocumentUploadedBy")
+  payrollRunsApproved PayrollRun[]              @relation("PayrollRunApprovedBy")
+  payrollRunsCreated  PayrollRun[]              @relation("PayrollRunCreatedBy")
+  b2bProposalsCreated B2BProposalDoc[]          @relation("B2BProposalCreatedBy")
+  b2bProposalsUpdated B2BProposalDoc[]          @relation("B2BProposalUpdatedBy")
+  deliveries          QuoteDelivery[]           @relation("DeliveryActor")
   ruleEvaluations     RuleEvaluationLog[]
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
 }
 
 model UserRole {
@@ -903,21 +931,24 @@ model ApiIntegrationConfig {
 }
 
 model LegalEntity {
-  id                String             @id @default(cuid())
-  name              String
-  comercialName     String?
-  nit               String?
-  fiscalAddress     String?
-  phone             String?
-  email             String?
-  isActive          Boolean            @default(true)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  financialAccounts FinancialAccount[]
-  receivables       Receivable[]
-  payables          Payable[]
-  payments          Payment[]
-  journalEntries    JournalEntry[]
+  id                 String               @id @default(cuid())
+  name               String
+  comercialName      String?
+  nit                String?
+  fiscalAddress      String?
+  phone              String?
+  email              String?
+  isActive           Boolean              @default(true)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  financialAccounts  FinancialAccount[]
+  receivables        Receivable[]
+  payables           Payable[]
+  payments           Payment[]
+  journalEntries     JournalEntry[]
+  HrEmployee         HrEmployee[]
+  EmployeeEngagement EmployeeEngagement[]
+  PayrollRun         PayrollRun[]
 }
 
 model Party {
@@ -1797,92 +1828,123 @@ model QuoteDelivery {
 }
 
 model Branch {
+  id          String                     @id @default(cuid())
+  name        String                     @unique
+  isActive    Boolean                    @default(true)
+  createdById String?
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  assignments EmployeeBranchAssignment[]
+}
+
+model HrDepartment {
+  id                  String                       @id @default(cuid())
+  name                String                       @unique
+  description         String?
+  isActive            Boolean                      @default(true)
+  createdById         String?
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+  positionAssignments EmployeePositionAssignment[]
+}
+
+model HrPosition {
   id          String                       @id @default(cuid())
   name        String                       @unique
+  description String?
   isActive    Boolean                      @default(true)
   createdById String?
   createdAt   DateTime                     @default(now())
   updatedAt   DateTime                     @updatedAt
-  employees   HrEmployee[]                 @relation("PrimaryBranch")
-  assignments HrEmployeeBranchAssignment[]
-}
-
-model HrDepartment {
-  id          String       @id @default(cuid())
-  name        String       @unique
-  description String?
-  isActive    Boolean      @default(true)
-  createdById String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  employees   HrEmployee[]
-}
-
-model HrPosition {
-  id          String       @id @default(cuid())
-  name        String       @unique
-  description String?
-  isActive    Boolean      @default(true)
-  createdById String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  employees   HrEmployee[]
+  assignments EmployeePositionAssignment[]
 }
 
 model HrEmployee {
-  id                String                       @id @default(cuid())
-  employeeCode      String                       @unique
-  firstName         String
-  lastName          String
-  dpi               String?                      @unique
-  nit               String?
-  email             String?
-  phone             String?
-  birthDate         DateTime?
-  address           String?
-  hireDate          DateTime
-  terminationDate   DateTime?
-  employmentType    HrEmploymentType
-  status            HrEmployeeStatus             @default(ACTIVE)
-  primaryBranchId   String
-  departmentId      String?
-  positionId        String
-  notes             String?
-  isActive          Boolean                      @default(true)
-  createdById       String?
-  createdAt         DateTime                     @default(now())
-  updatedAt         DateTime                     @updatedAt
-  primaryBranch     Branch                       @relation("PrimaryBranch", fields: [primaryBranchId], references: [id])
-  department        HrDepartment?                @relation(fields: [departmentId], references: [id])
-  position          HrPosition                   @relation(fields: [positionId], references: [id])
-  documents         HrEmployeeDocument[]
-  branchAssignments HrEmployeeBranchAssignment[]
+  id                    String                       @id @default(cuid())
+  employeeCode          String                       @unique
+  firstName             String
+  lastName              String
+  dpi                   String                       @unique
+  nit                   String?
+  email                 String?
+  personalEmail         String?
+  phone                 String?
+  homePhone             String?
+  birthDate             DateTime?
+  address               String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  residenceProofUrl     String?
+  dpiPhotoUrl           String?
+  rtuFileUrl            String?
+  photoUrl              String?
+  status                HrEmployeeStatus             @default(ACTIVE)
+  isActive              Boolean                      @default(true)
+  primaryLegalEntityId  String?
+  userId                String?                      @unique
+  createdById           String?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+  user                  User?                        @relation("EmployeeUser", fields: [userId], references: [id], onDelete: SetNull)
+  primaryLegalEntity    LegalEntity?                 @relation(fields: [primaryLegalEntityId], references: [id], onDelete: SetNull)
+  engagements           EmployeeEngagement[]
+  branchAssignments     EmployeeBranchAssignment[]
+  positionAssignments   EmployeePositionAssignment[]
+  documents             EmployeeDocument[]
+  professionalLicense   ProfessionalLicense?
+  notifications         Notification[]
 
   @@index([employeeCode])
-  @@index([primaryBranchId])
-  @@index([departmentId])
-  @@index([positionId])
+  @@index([dpi])
+  @@index([primaryLegalEntityId])
 }
 
-model HrEmployeeDocument {
-  id          String                 @id @default(cuid())
-  employeeId  String
-  type        HrEmployeeDocumentType
-  title       String
-  fileUrl     String
-  issuedAt    DateTime?
-  expiresAt   DateTime?
-  notes       String?
-  isActive    Boolean                @default(true)
-  createdById String?
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
-  employee    HrEmployee             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+model EmployeeEngagement {
+  id                    String                 @id @default(cuid())
+  employeeId            String
+  legalEntityId         String
+  employmentType        HrEmploymentType
+  status                HrEmployeeStatus       @default(ACTIVE)
+  startDate             DateTime
+  endDate               DateTime?
+  isPayrollEligible     Boolean                @default(true)
+  isPrimary             Boolean                @default(false)
+  compensationAmount    Decimal?               @db.Decimal(12, 2)
+  compensationCurrency  String                 @default("GTQ")
+  compensationFrequency PayFrequency           @default(MONTHLY)
+  compensationNotes     String?
+  createdById           String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  employee              HrEmployee             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  legalEntity           LegalEntity            @relation(fields: [legalEntityId], references: [id])
+  compensations         EmployeeCompensation[]
+  payrollEntries        PayrollRunEntry[]
 
   @@index([employeeId])
+  @@index([legalEntityId])
+  @@index([status])
 }
 
-model HrEmployeeBranchAssignment {
+model EmployeeCompensation {
+  id            String             @id @default(cuid())
+  engagementId  String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  baseSalary    Decimal?           @db.Decimal(12, 2)
+  currency      String             @default("GTQ")
+  payFrequency  PayFrequency
+  allowances    Json?
+  deductions    Json?
+  isActive      Boolean            @default(true)
+  createdById   String?
+  createdAt     DateTime           @default(now())
+  engagement    EmployeeEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId, effectiveFrom])
+}
+
+model EmployeeBranchAssignment {
   id          String     @id @default(cuid())
   employeeId  String
   branchId    String
@@ -1898,4 +1960,134 @@ model HrEmployeeBranchAssignment {
   @@unique([employeeId, branchId])
   @@index([employeeId])
   @@index([branchId])
+}
+
+model EmployeePositionAssignment {
+  id           String        @id @default(cuid())
+  employeeId   String
+  positionId   String
+  departmentId String?
+  isPrimary    Boolean       @default(false)
+  startDate    DateTime?
+  endDate      DateTime?
+  notes        String?
+  createdById  String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  employee     HrEmployee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  position     HrPosition    @relation(fields: [positionId], references: [id])
+  department   HrDepartment? @relation(fields: [departmentId], references: [id])
+
+  @@index([employeeId])
+  @@index([positionId])
+}
+
+model EmployeeDocument {
+  id               String                    @id @default(cuid())
+  employeeId       String
+  type             HrEmployeeDocumentType
+  title            String
+  notes            String?
+  retentionUntil   DateTime?
+  isArchived       Boolean                   @default(false)
+  currentVersionId String?                   @unique
+  createdById      String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  employee         HrEmployee                @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  versions         EmployeeDocumentVersion[] @relation("DocumentVersions")
+  currentVersion   EmployeeDocumentVersion?  @relation("CurrentEmployeeDocumentVersion", fields: [currentVersionId], references: [id])
+
+  @@index([employeeId])
+}
+
+model EmployeeDocumentVersion {
+  id            String            @id @default(cuid())
+  documentId    String
+  versionNumber Int
+  fileUrl       String
+  issuedAt      DateTime?
+  deliveredAt   DateTime?
+  expiresAt     DateTime?
+  notes         String?
+  uploadedById  String?
+  createdAt     DateTime          @default(now())
+  document      EmployeeDocument  @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
+  currentFor    EmployeeDocument? @relation("CurrentEmployeeDocumentVersion")
+  uploadedBy    User?             @relation("DocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@unique([documentId, versionNumber])
+  @@index([expiresAt])
+}
+
+model ProfessionalLicense {
+  id            String     @id @default(cuid())
+  employeeId    String     @unique
+  applies       Boolean    @default(false)
+  number        String?
+  issuedAt      DateTime?
+  expiresAt     DateTime?
+  issuingEntity String?
+  fileUrl       String?
+  reminderDays  Int?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  employee      HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id          String               @id @default(cuid())
+  type        NotificationType
+  severity    NotificationSeverity @default(INFO)
+  title       String
+  description String?
+  entityId    String?
+  entityType  String?
+  employeeId  String?
+  dueAt       DateTime?
+  sentAt      DateTime?
+  readAt      DateTime?
+  createdAt   DateTime             @default(now())
+  employee    HrEmployee?          @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId])
+  @@index([type, dueAt])
+}
+
+model PayrollRun {
+  id            String            @id @default(cuid())
+  legalEntityId String
+  periodStart   DateTime
+  periodEnd     DateTime
+  status        PayrollRunStatus  @default(DRAFT)
+  notes         String?
+  approvedAt    DateTime?
+  approvedById  String?
+  createdById   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  legalEntity   LegalEntity       @relation(fields: [legalEntityId], references: [id])
+  approvedBy    User?             @relation("PayrollRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  createdBy     User?             @relation("PayrollRunCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  entries       PayrollRunEntry[]
+
+  @@index([legalEntityId])
+  @@index([status])
+}
+
+model PayrollRunEntry {
+  id                   String             @id @default(cuid())
+  payrollRunId         String
+  engagementId         String
+  compensationSnapshot Json?
+  grossAmount          Decimal?           @db.Decimal(14, 2)
+  netAmount            Decimal?           @db.Decimal(14, 2)
+  notes                String?
+  createdAt            DateTime           @default(now())
+  payrollRun           PayrollRun         @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  engagement           EmployeeEngagement @relation(fields: [engagementId], references: [id])
+
+  @@index([payrollRunId])
+  @@index([engagementId])
 }

@@ -1,10 +1,11 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { HrEmployeeStatus, Prisma } from "@prisma/client";
+import { HrEmployeeStatus, NotificationSeverity, NotificationType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api/hr";
 import { createEmployeeSchema, employeeFiltersSchema } from "@/lib/hr/schemas";
 import { employeeInclude, serializeEmployee } from "@/lib/hr/serializers";
-import { cleanNullableString, normalizeBranchAssignments, parseDateInput } from "@/lib/hr/utils";
+import { cleanNullableString, computeRetentionUntil, ensurePrimary, parseDateInput } from "@/lib/hr/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ function parseSearchParams(req: NextRequest) {
     search: params.get("search") || undefined,
     status: params.get("status") || undefined,
     branchId: params.get("branchId") || undefined,
+    legalEntityId: params.get("legalEntityId") || undefined,
     page: params.get("page") || undefined
   });
 }
@@ -32,8 +34,22 @@ async function generateEmployeeCode(tx: Prisma.TransactionClient) {
     const exists = await tx.hrEmployee.findUnique({ where: { employeeCode: candidate } });
     if (!exists) return candidate;
   }
-  const fallback = `EMP-${Date.now()}`;
-  return fallback;
+  return `EMP-${Date.now()}`;
+}
+
+async function createNotification(tx: Prisma.TransactionClient, employeeId: string, type: NotificationType, title: string, entityId: string, dueAt?: Date | null) {
+  if (!dueAt) return;
+  await tx.notification.deleteMany({ where: { employeeId, type, entityId } });
+  await tx.notification.create({
+    data: {
+      employeeId,
+      type,
+      severity: type === NotificationType.LICENSE_EXPIRY ? NotificationSeverity.CRITICAL : NotificationSeverity.WARNING,
+      title,
+      entityId,
+      dueAt
+    }
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -45,7 +61,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Parámetros inválidos", details: parsed.error.flatten().fieldErrors }, { status: 400 });
   }
 
-  const { search, status, branchId, page } = parsed.data;
+  const { search, status, branchId, legalEntityId, page } = parsed.data;
   const where: Prisma.HrEmployeeWhereInput = { isActive: true };
   if (status) where.status = status;
   if (search) {
@@ -56,14 +72,23 @@ export async function GET(req: NextRequest) {
       { employeeCode: { contains: term, mode: "insensitive" } },
       { email: { contains: term, mode: "insensitive" } },
       { dpi: { contains: term, mode: "insensitive" } },
-      { nit: { contains: term, mode: "insensitive" } }
+      { nit: { contains: term, mode: "insensitive" } },
+      { phone: { contains: term, mode: "insensitive" } }
     ];
   }
   if (branchId) {
     where.AND = [
       ...(where.AND || []),
       {
-        OR: [{ primaryBranchId: branchId }, { branchAssignments: { some: { branchId } } }]
+        branchAssignments: { some: { branchId } }
+      }
+    ];
+  }
+  if (legalEntityId) {
+    where.AND = [
+      ...(where.AND || []),
+      {
+        engagements: { some: { legalEntityId } }
       }
     ];
   }
@@ -97,81 +122,217 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const parsed = createEmployeeSchema.parse(body);
-
-    const hireDate = parseDateInput(parsed.hireDate, "Fecha de ingreso", { required: true })!;
-    const birthDate = parseDateInput(parsed.birthDate, "Fecha de nacimiento");
-    const terminationDate = parseDateInput(parsed.terminationDate, "Fecha de terminación");
     const status = parsed.status || HrEmployeeStatus.ACTIVE;
-    const primaryBranchId = parsed.primaryBranchId.trim();
-    const extraAssignments = normalizeBranchAssignments(parsed.branchAssignments || [], primaryBranchId);
 
-    const branchIdsToCheck = new Set<string>([primaryBranchId, ...extraAssignments.map((a) => a.branchId)]);
-    const branches = await prisma.branch.findMany({ where: { id: { in: Array.from(branchIdsToCheck) } } });
-    if (branches.length !== branchIdsToCheck.size) {
+    const engagements = ensurePrimary(parsed.engagements || []).map((eng) => ({
+      ...eng,
+      startDate: parseDateInput(eng.startDate, "Fecha de inicio", { required: true })!,
+      endDate: parseDateInput(eng.endDate, "Fecha de fin")
+    }));
+
+    const branchAssignments = ensurePrimary(parsed.branchAssignments || []).map((assign) => ({
+      ...assign,
+      startDate: parseDateInput(assign.startDate, "Fecha de inicio"),
+      endDate: parseDateInput(assign.endDate, "Fecha fin")
+    }));
+
+    const positionAssignments = ensurePrimary(parsed.positionAssignments || []).map((assign) => ({
+      ...assign,
+      startDate: parseDateInput(assign.startDate, "Fecha de inicio"),
+      endDate: parseDateInput(assign.endDate, "Fecha fin")
+    }));
+
+    const branchIds = Array.from(new Set(branchAssignments.map((b) => b.branchId.trim())));
+    const positionIds = Array.from(new Set(positionAssignments.map((p) => p.positionId.trim())));
+    const legalEntityIds = Array.from(new Set(engagements.map((e) => e.legalEntityId.trim())));
+
+    const [branches, positions, entities] = await Promise.all([
+      prisma.branch.findMany({ where: { id: { in: branchIds } } }),
+      prisma.hrPosition.findMany({ where: { id: { in: positionIds } } }),
+      prisma.legalEntity.findMany({ where: { id: { in: legalEntityIds } } })
+    ]);
+
+    if (branches.length !== branchIds.length) {
       return NextResponse.json({ error: "Sucursal inválida" }, { status: 400 });
     }
-
-    const position = await prisma.hrPosition.findUnique({ where: { id: parsed.positionId } });
-    if (!position) return NextResponse.json({ error: "Puesto inválido" }, { status: 400 });
-
-    if (parsed.departmentId) {
-      const department = await prisma.hrDepartment.findUnique({ where: { id: parsed.departmentId } });
-      if (!department) return NextResponse.json({ error: "Departamento inválido" }, { status: 400 });
+    if (positions.length !== positionIds.length) {
+      return NextResponse.json({ error: "Puesto inválido" }, { status: 400 });
+    }
+    if (entities.length !== legalEntityIds.length) {
+      return NextResponse.json({ error: "Razón social inválida" }, { status: 400 });
     }
 
-    const saved = await prisma.$transaction(async (tx) => {
+    const primaryEngagement = engagements.find((e) => e.isPrimary) || engagements[0];
+    const employee = await prisma.$transaction(async (tx) => {
       const employeeCode = parsed.employeeCode?.trim() || (await generateEmployeeCode(tx));
-      const employee = await tx.hrEmployee.create({
+      const saved = await tx.hrEmployee.create({
         data: {
           employeeCode,
           firstName: parsed.firstName.trim(),
           lastName: parsed.lastName.trim(),
-          dpi: cleanNullableString(parsed.dpi),
+          dpi: parsed.dpi.trim(),
           nit: cleanNullableString(parsed.nit),
           email: cleanNullableString(parsed.email),
+          personalEmail: cleanNullableString(parsed.personalEmail),
           phone: cleanNullableString(parsed.phone),
-          birthDate,
-          address: cleanNullableString(parsed.address),
-          hireDate,
-          terminationDate,
-          employmentType: parsed.employmentType,
+          homePhone: parsed.homePhone.trim(),
+          birthDate: parseDateInput(parsed.birthDate, "Fecha de nacimiento"),
+          address: parsed.address.trim(),
+          emergencyContactName: parsed.emergencyContactName.trim(),
+          emergencyContactPhone: parsed.emergencyContactPhone.trim(),
+          residenceProofUrl: parsed.residenceProofUrl.trim(),
+          dpiPhotoUrl: parsed.dpiPhotoUrl.trim(),
+          rtuFileUrl: parsed.rtuFileUrl.trim(),
+          photoUrl: cleanNullableString(parsed.photoUrl),
           status,
-          primaryBranchId,
-          departmentId: parsed.departmentId || null,
-          positionId: parsed.positionId,
-          notes: cleanNullableString(parsed.notes),
-          isActive: true,
+          isActive: status !== HrEmployeeStatus.TERMINATED,
+          primaryLegalEntityId: primaryEngagement?.legalEntityId || parsed.primaryLegalEntityId || null,
           createdById: auth.user?.id || null
         }
       });
 
-      await tx.hrEmployeeBranchAssignment.create({
-        data: {
-          employeeId: employee.id,
-          branchId: primaryBranchId,
-          isPrimary: true,
-          startDate: hireDate,
-          createdById: auth.user?.id || null
-        }
-      });
+      for (const eng of engagements) {
+        const engId = eng.id || randomUUID();
+        const createdEng = await tx.employeeEngagement.create({
+          data: {
+            id: engId,
+            employeeId: saved.id,
+            legalEntityId: eng.legalEntityId,
+            employmentType: eng.employmentType,
+            status: eng.status,
+            startDate: eng.startDate,
+            endDate: eng.endDate,
+            isPrimary: Boolean(eng.isPrimary),
+            isPayrollEligible: eng.isPayrollEligible ?? true,
+            compensationAmount: eng.compensationAmount || null,
+            compensationCurrency: eng.compensationCurrency || "GTQ",
+            compensationFrequency: eng.compensationFrequency || "MONTHLY",
+            compensationNotes: cleanNullableString(eng.compensationNotes),
+            createdById: auth.user?.id || null
+          }
+        });
 
-      if (extraAssignments.length) {
-        await tx.hrEmployeeBranchAssignment.createMany({
-          data: extraAssignments.map((a) => ({
-            employeeId: employee.id,
-            branchId: a.branchId,
-            isPrimary: false,
-            startDate: a.startDate,
-            endDate: a.endDate,
+        await tx.employeeCompensation.create({
+          data: {
+            engagementId: createdEng.id,
+            effectiveFrom: eng.startDate,
+            baseSalary: eng.compensationAmount || null,
+            currency: eng.compensationCurrency || "GTQ",
+            payFrequency: eng.compensationFrequency || "MONTHLY",
+            allowances: {},
+            deductions: {},
+            isActive: true,
+            createdById: auth.user?.id || null
+          }
+        });
+      }
+
+      if (branchAssignments.length) {
+        await tx.employeeBranchAssignment.createMany({
+          data: branchAssignments.map((assign) => ({
+            employeeId: saved.id,
+            branchId: assign.branchId,
+            isPrimary: Boolean(assign.isPrimary),
+            startDate: assign.startDate,
+            endDate: assign.endDate,
             createdById: auth.user?.id || null
           }))
         });
       }
 
-      return tx.hrEmployee.findUnique({ where: { id: employee.id }, include: employeeInclude });
+      if (positionAssignments.length) {
+        await tx.employeePositionAssignment.createMany({
+          data: positionAssignments.map((assign) => ({
+            employeeId: saved.id,
+            positionId: assign.positionId,
+            departmentId: cleanNullableString(assign.departmentId),
+            isPrimary: Boolean(assign.isPrimary),
+            startDate: assign.startDate,
+            endDate: assign.endDate,
+            notes: cleanNullableString(assign.notes),
+            createdById: auth.user?.id || null
+          }))
+        });
+      }
+
+      for (const doc of parsed.documents || []) {
+        const documentId = doc.id || randomUUID();
+        const versionId = randomUUID();
+        const issuedAt = parseDateInput(doc.version.issuedAt, "Fecha de emisión");
+        const deliveredAt = parseDateInput(doc.version.deliveredAt, "Fecha de entrega");
+        const expiresAt = parseDateInput(doc.version.expiresAt, "Fecha de vencimiento");
+        const retentionUntil = computeRetentionUntil(issuedAt, parseDateInput(doc.retentionUntil, "Retención"));
+
+        await tx.employeeDocument.create({
+          data: {
+            id: documentId,
+            employeeId: saved.id,
+            type: doc.type,
+            title: doc.title.trim(),
+            notes: cleanNullableString(doc.notes),
+            retentionUntil,
+            isArchived: false,
+            currentVersionId: versionId,
+            createdById: auth.user?.id || null,
+            versions: {
+              create: {
+                id: versionId,
+                versionNumber: doc.version.versionNumber || 1,
+                fileUrl: doc.version.fileUrl.trim(),
+                issuedAt,
+                deliveredAt,
+                expiresAt,
+                notes: cleanNullableString(doc.version.notes),
+                uploadedById: auth.user?.id || null
+              }
+            }
+          }
+        });
+
+        await createNotification(tx, saved.id, NotificationType.DOCUMENT_EXPIRY, `Documento ${doc.title} por vencer`, documentId, expiresAt);
+      }
+
+      if (parsed.professionalLicense) {
+        const expiresAt = parseDateInput(parsed.professionalLicense.expiresAt, "Vence colegiado");
+        await tx.professionalLicense.upsert({
+          where: { employeeId: saved.id },
+          update: {
+            applies: parsed.professionalLicense.applies ?? false,
+            number: cleanNullableString(parsed.professionalLicense.number),
+            issuedAt: parseDateInput(parsed.professionalLicense.issuedAt, "Emitido colegiado"),
+            expiresAt,
+            issuingEntity: cleanNullableString(parsed.professionalLicense.issuingEntity),
+            fileUrl: cleanNullableString(parsed.professionalLicense.fileUrl),
+            reminderDays: parsed.professionalLicense.reminderDays || null,
+            notes: cleanNullableString(parsed.professionalLicense.notes)
+          },
+          create: {
+            employeeId: saved.id,
+            applies: parsed.professionalLicense.applies ?? false,
+            number: cleanNullableString(parsed.professionalLicense.number),
+            issuedAt: parseDateInput(parsed.professionalLicense.issuedAt, "Emitido colegiado"),
+            expiresAt,
+            issuingEntity: cleanNullableString(parsed.professionalLicense.issuingEntity),
+            fileUrl: cleanNullableString(parsed.professionalLicense.fileUrl),
+            reminderDays: parsed.professionalLicense.reminderDays || null,
+            notes: cleanNullableString(parsed.professionalLicense.notes)
+          }
+        });
+
+        await createNotification(
+          tx,
+          saved.id,
+          NotificationType.LICENSE_EXPIRY,
+          "Colegiado por vencer",
+          saved.id,
+          expiresAt
+        );
+      }
+
+      return tx.hrEmployee.findUnique({ where: { id: saved.id }, include: employeeInclude });
     });
 
-    return NextResponse.json({ data: serializeEmployee(saved!) }, { status: 201 });
+    return NextResponse.json({ data: serializeEmployee(employee!) }, { status: 201 });
   } catch (err: any) {
     console.error("create employee error", err);
     if (err.name === "ZodError") {

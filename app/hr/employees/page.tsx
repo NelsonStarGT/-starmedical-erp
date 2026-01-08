@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
-import type { HrBranch, HrEmployee, HrEmployeeStatus } from "@/types/hr";
+import type { HrBranch, HrEmployee, HrEmployeeStatus, LegalEntitySummary } from "@/types/hr";
 import { HR_EMPLOYEE_STATUSES } from "@/types/hr";
 
 type EmployeeResponse = {
@@ -28,11 +28,12 @@ const employmentLabels = {
   PRACTICAS: "Prácticas"
 };
 
-async function fetchEmployees(filters: { search?: string; status?: string; branchId?: string; page: number }) {
+async function fetchEmployees(filters: { search?: string; status?: string; branchId?: string; legalEntityId?: string; page: number }) {
   const qs = new URLSearchParams();
   if (filters.search) qs.set("search", filters.search);
   if (filters.status) qs.set("status", filters.status);
   if (filters.branchId) qs.set("branchId", filters.branchId);
+  if (filters.legalEntityId) qs.set("legalEntityId", filters.legalEntityId);
   qs.set("page", String(filters.page || 1));
 
   const res = await fetch(`/api/hr/employees?${qs.toString()}`, { cache: "no-store" });
@@ -50,6 +51,13 @@ async function fetchBranches() {
   return (payload.data || []) as HrBranch[];
 }
 
+async function fetchLegalEntities() {
+  const res = await fetch("/api/finanzas/legal-entities", { cache: "no-store" });
+  if (!res.ok) return [];
+  const payload = await res.json();
+  return (payload.data || []) as LegalEntitySummary[];
+}
+
 function formatDate(value?: string | null) {
   if (!value) return "—";
   const date = new Date(value);
@@ -58,10 +66,11 @@ function formatDate(value?: string | null) {
 }
 
 export default function EmployeesPage() {
-  const [filters, setFilters] = useState<{ search?: string; status?: string; branchId?: string; page: number }>({
+  const [filters, setFilters] = useState<{ search?: string; status?: string; branchId?: string; legalEntityId?: string; page: number }>({
     search: "",
     status: "",
     branchId: "",
+    legalEntityId: "",
     page: 1
   });
 
@@ -76,8 +85,17 @@ export default function EmployeesPage() {
     queryFn: fetchBranches
   });
 
+  const legalEntitiesQuery = useQuery({
+    queryKey: ["legal-entities"],
+    queryFn: fetchLegalEntities
+  });
+
   const onFilterChange = (key: "search" | "status" | "branchId") => (value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value, page: 1 }));
+  };
+
+  const onLegalEntityChange = (value: string) => {
+    setFilters((prev) => ({ ...prev, legalEntityId: value, page: 1 }));
   };
 
   const onPageChange = (direction: "next" | "prev") => {
@@ -152,6 +170,21 @@ export default function EmployeesPage() {
               ))}
             </select>
           </div>
+          <div>
+            <label className="text-sm text-slate-600">Razón social</label>
+            <select
+              value={filters.legalEntityId}
+              onChange={(e) => onLegalEntityChange(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+            >
+              <option value="">Todas</option>
+              {(legalEntitiesQuery.data || []).map((entity) => (
+                <option key={entity.id} value={entity.id}>
+                  {entity.comercialName || entity.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </CardContent>
       </Card>
 
@@ -168,11 +201,13 @@ export default function EmployeesPage() {
               <tr className="text-left text-slate-500">
                 <th className="py-2 pr-4 font-medium">Código</th>
                 <th className="py-2 pr-4 font-medium">Nombre</th>
+                <th className="py-2 pr-4 font-medium">Razón social</th>
                 <th className="py-2 pr-4 font-medium">Puesto</th>
                 <th className="py-2 pr-4 font-medium">Sucursal</th>
                 <th className="py-2 pr-4 font-medium">Tipo</th>
                 <th className="py-2 pr-4 font-medium">Estado</th>
-                <th className="py-2 pr-4 font-medium">Ingreso</th>
+                <th className="py-2 pr-4 font-medium">Alertas</th>
+                <th className="py-2 pr-4 font-medium">Inicio</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -200,9 +235,12 @@ export default function EmployeesPage() {
                       <div className="font-semibold text-slate-900">{employee.fullName}</div>
                       <div className="text-xs text-slate-500">{employee.email || employee.phone || "—"}</div>
                     </td>
-                    <td className="py-3 pr-4 text-slate-700">{employee.position?.name || "—"}</td>
+                    <td className="py-3 pr-4 text-slate-700">{employee.primaryLegalEntity?.comercialName || employee.primaryLegalEntity?.name || "—"}</td>
+                    <td className="py-3 pr-4 text-slate-700">{employee.primaryPosition?.name || "—"}</td>
                     <td className="py-3 pr-4 text-slate-700">{employee.primaryBranch?.name || "—"}</td>
-                    <td className="py-3 pr-4 text-slate-700">{employmentLabels[employee.employmentType]}</td>
+                    <td className="py-3 pr-4 text-slate-700">
+                      {employee.primaryEngagement ? employmentLabels[employee.primaryEngagement.employmentType] : "—"}
+                    </td>
                     <td className="py-3 pr-4">
                       <span
                         className={cn(
@@ -213,7 +251,13 @@ export default function EmployeesPage() {
                         {statusCopy[employee.status].label}
                       </span>
                     </td>
-                    <td className="py-3 pr-4 text-slate-700">{formatDate(employee.hireDate)}</td>
+                    <td className="py-3 pr-4 text-slate-700">
+                      {employee.alerts.documentsExpiring > 0 && (
+                        <Badge variant="warning">{employee.alerts.documentsExpiring} doc</Badge>
+                      )}
+                      {employee.alerts.licenseExpiring && <Badge variant="warning" className="ml-2">Colegiado</Badge>}
+                    </td>
+                    <td className="py-3 pr-4 text-slate-700">{formatDate(employee.primaryEngagement?.startDate)}</td>
                   </tr>
                 ))
               )}
