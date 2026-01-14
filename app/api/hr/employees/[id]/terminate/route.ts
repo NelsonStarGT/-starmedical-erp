@@ -76,7 +76,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       await tx.auditLog.create({
         data: {
           actorUserId: auth.user?.id || null,
-          actorRole: auth.user?.roles?.[0]?.role?.name || null,
+          actorRole: auth.user?.roles?.[0] || null,
           action: "HR_EMPLOYEE_TERMINATE",
           entityType: "HrEmployee",
           entityId: resolvedParams.id,

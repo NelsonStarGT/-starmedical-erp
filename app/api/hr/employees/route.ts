@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { HrEmployeeStatus, NotificationSeverity, NotificationType, Prisma } from "@prisma/client";
+import { HrEmployeeStatus, HrEmploymentType, NotificationSeverity, NotificationType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api/hr";
 import { createEmployeeSchema, employeeDraftSchema, employeeFiltersSchema } from "@/lib/hr/schemas";
@@ -86,16 +86,18 @@ export async function GET(req: NextRequest) {
     ];
   }
   if (branchId) {
+    const andClauses = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
     where.AND = [
-      ...(where.AND || []),
+      ...andClauses,
       {
         branchAssignments: { some: { branchId } }
       }
     ];
   }
   if (legalEntityId) {
+    const andClauses = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
     where.AND = [
-      ...(where.AND || []),
+      ...andClauses,
       {
         engagements: { some: { legalEntityId } }
       }

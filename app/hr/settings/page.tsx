@@ -389,10 +389,11 @@ export default function HrSettingsPage() {
                   showToast("Completa los campos obligatorios", "error");
                   return;
                 }
+                const payload = { ...parsed.data, isActive: parsed.data.isActive ?? true };
                 if (editingBranchId) {
-                  updateBranchMutation.mutate({ id: editingBranchId, data: parsed.data });
+                  updateBranchMutation.mutate({ id: editingBranchId, data: payload });
                 } else {
-                  createBranchMutation.mutate(parsed.data);
+                  createBranchMutation.mutate(payload);
                 }
               }}
               className="rounded-xl bg-brand-primary px-4 py-2 text-sm font-semibold text-white shadow-soft hover:-translate-y-px transition disabled:opacity-60"

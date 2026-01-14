@@ -1,28 +1,8 @@
-# dependencies
 node_modules
-
-# next
 .next
-out
-
-# env
+dist
 .env
-.env.*
 .env.local
-
-# prisma
-prisma/*.db
-
-# logs
-logs
-*.log
-
-# os
+.env.*
+.prisma/client
 .DS_Store
-
-# build artifacts
-tsconfig.tsbuildinfo
-
-# uploads / temp
-public/uploads/
-backups/

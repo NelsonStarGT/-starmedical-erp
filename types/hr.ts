@@ -10,6 +10,7 @@ export type OnboardingStatus = (typeof ONBOARDING_STATUSES)[number];
 export const HR_EMPLOYEE_DOCUMENT_TYPES = [
   "DPI",
   "RTU",
+  "CV",
   "RENAS",
   "POLICIACOS",
   "RECIBO_SERVICIO",

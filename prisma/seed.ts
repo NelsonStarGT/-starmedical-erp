@@ -1,4 +1,5 @@
 import pkg from "@prisma/client";
+import type { HrEmployeeStatus as HrEmployeeStatusType } from "@prisma/client";
 
 const {
   Prisma,
@@ -124,7 +125,7 @@ async function main() {
           id: "hr-doc-2",
           versionId: "hr-doc-2-v1",
           versionNumber: 1,
-          type: HrEmployeeDocumentType.CONTRACT,
+          type: HrEmployeeDocumentType.CONTRATO,
           title: "Contrato indefinido",
           fileUrl: "/uploads/hr/ana-contrato.pdf",
           issuedAt: new Date("2024-02-01")
@@ -608,6 +609,7 @@ async function main() {
   for (const emp of hrDemoEmployees) {
     const primaryEngagement = emp.engagements?.find((e) => e.isPrimary) || emp.engagements?.[0];
     const primaryLegalEntityId = primaryEngagement ? entityMap[primaryEngagement.legalEntityKey] || primaryEngagement.legalEntityKey : null;
+    const status = emp.status as HrEmployeeStatusType;
 
     const saved = await prisma.hrEmployee.upsert({
       where: { employeeCode: emp.employeeCode },
@@ -616,16 +618,16 @@ async function main() {
         lastName: emp.lastName,
         dpi: emp.dpi,
         email: emp.email || null,
-        phone: emp.phone || null,
-        homePhone: emp.homePhone || null,
+        phoneMobile: emp.phone || null,
+        phoneHome: emp.homePhone || null,
         emergencyContactName: emp.emergencyContactName || null,
         emergencyContactPhone: emp.emergencyContactPhone || null,
-        address: emp.address || null,
+        addressHome: emp.address || null,
         residenceProofUrl: emp.residenceProofUrl || null,
         dpiPhotoUrl: emp.dpiPhotoUrl || null,
         rtuFileUrl: emp.rtuFileUrl || null,
-        status: emp.status,
-        isActive: emp.status !== HrEmployeeStatus.TERMINATED,
+        status,
+        isActive: status !== HrEmployeeStatus.TERMINATED,
         primaryLegalEntityId
       },
       create: {
@@ -634,16 +636,16 @@ async function main() {
         lastName: emp.lastName,
         dpi: emp.dpi,
         email: emp.email || null,
-        phone: emp.phone || null,
-        homePhone: emp.homePhone || null,
+        phoneMobile: emp.phone || null,
+        phoneHome: emp.homePhone || null,
         emergencyContactName: emp.emergencyContactName || null,
         emergencyContactPhone: emp.emergencyContactPhone || null,
-        address: emp.address || null,
+        addressHome: emp.address || null,
         residenceProofUrl: emp.residenceProofUrl || null,
         dpiPhotoUrl: emp.dpiPhotoUrl || null,
         rtuFileUrl: emp.rtuFileUrl || null,
-        status: emp.status,
-        isActive: emp.status !== HrEmployeeStatus.TERMINATED,
+        status,
+        isActive: status !== HrEmployeeStatus.TERMINATED,
         primaryLegalEntityId,
         createdById: "admin-seed"
       }
@@ -654,6 +656,12 @@ async function main() {
       if (!legalEntityId) {
         throw new Error(`Seed RRHH: entidad legal no encontrada para ${emp.employeeCode}`);
       }
+      const endDate = "endDate" in engagement ? (engagement as any).endDate : undefined;
+      const compensationAmount = "compensationAmount" in engagement ? (engagement as any).compensationAmount : undefined;
+      const compensationCurrency = "compensationCurrency" in engagement ? (engagement as any).compensationCurrency : undefined;
+      const compensationFrequency = "compensationFrequency" in engagement ? (engagement as any).compensationFrequency : undefined;
+      const compensationNotes = "compensationNotes" in engagement ? (engagement as any).compensationNotes : undefined;
+      const isPayrollEligible = "isPayrollEligible" in engagement ? (engagement as any).isPayrollEligible : undefined;
       const eng = await prisma.employeeEngagement.upsert({
         where: { id: engagement.id },
         update: {
@@ -662,13 +670,13 @@ async function main() {
           employmentType: engagement.employmentType,
           status: engagement.status,
           startDate: engagement.startDate,
-          endDate: engagement.endDate || null,
+          endDate: endDate || null,
           isPrimary: Boolean(engagement.isPrimary),
-          isPayrollEligible: engagement.isPayrollEligible ?? true,
-          compensationAmount: engagement.compensationAmount || null,
-          compensationCurrency: engagement.compensationCurrency || "GTQ",
-          compensationFrequency: engagement.compensationFrequency || PayFrequency.MONTHLY,
-          compensationNotes: engagement.compensationNotes || null
+          isPayrollEligible: isPayrollEligible ?? true,
+          compensationAmount: compensationAmount || null,
+          compensationCurrency: compensationCurrency || "GTQ",
+          compensationFrequency: compensationFrequency || PayFrequency.MONTHLY,
+          compensationNotes: compensationNotes || null
         },
         create: {
           id: engagement.id,
@@ -677,13 +685,13 @@ async function main() {
           employmentType: engagement.employmentType,
           status: engagement.status,
           startDate: engagement.startDate,
-          endDate: engagement.endDate || null,
+          endDate: endDate || null,
           isPrimary: Boolean(engagement.isPrimary),
-          isPayrollEligible: engagement.isPayrollEligible ?? true,
-          compensationAmount: engagement.compensationAmount || null,
-          compensationCurrency: engagement.compensationCurrency || "GTQ",
-          compensationFrequency: engagement.compensationFrequency || PayFrequency.MONTHLY,
-          compensationNotes: engagement.compensationNotes || null,
+          isPayrollEligible: isPayrollEligible ?? true,
+          compensationAmount: compensationAmount || null,
+          compensationCurrency: compensationCurrency || "GTQ",
+          compensationFrequency: compensationFrequency || PayFrequency.MONTHLY,
+          compensationNotes: compensationNotes || null,
           createdById: "admin-seed"
         }
       });
@@ -694,9 +702,9 @@ async function main() {
           engagementId: eng.id,
           effectiveFrom: engagement.startDate,
           effectiveTo: null,
-          baseSalary: engagement.compensationAmount || null,
-          currency: engagement.compensationCurrency || "GTQ",
-          payFrequency: engagement.compensationFrequency || PayFrequency.MONTHLY,
+          baseSalary: compensationAmount || null,
+          currency: compensationCurrency || "GTQ",
+          payFrequency: compensationFrequency || PayFrequency.MONTHLY,
           allowances: {},
           deductions: {},
           isActive: true
@@ -706,9 +714,9 @@ async function main() {
           engagementId: eng.id,
           effectiveFrom: engagement.startDate,
           effectiveTo: null,
-          baseSalary: engagement.compensationAmount || null,
-          currency: engagement.compensationCurrency || "GTQ",
-          payFrequency: engagement.compensationFrequency || PayFrequency.MONTHLY,
+          baseSalary: compensationAmount || null,
+          currency: compensationCurrency || "GTQ",
+          payFrequency: compensationFrequency || PayFrequency.MONTHLY,
           allowances: {},
           deductions: {},
           isActive: true,
@@ -722,6 +730,7 @@ async function main() {
       if (!branchId) {
         throw new Error(`Seed RRHH: sucursal no encontrada para ${emp.employeeCode}`);
       }
+      const branchEndDate = "endDate" in assign ? (assign as any).endDate : undefined;
       await prisma.employeeBranchAssignment.upsert({
         where: { id: assign.id },
         update: {
@@ -729,7 +738,7 @@ async function main() {
           branchId,
           isPrimary: Boolean(assign.isPrimary),
           startDate: assign.startDate || null,
-          endDate: assign.endDate || null
+          endDate: branchEndDate || null
         },
         create: {
           id: assign.id,
@@ -737,7 +746,7 @@ async function main() {
           branchId,
           isPrimary: Boolean(assign.isPrimary),
           startDate: assign.startDate || null,
-          endDate: assign.endDate || null,
+          endDate: branchEndDate || null,
           createdById: "admin-seed"
         }
       });
@@ -749,6 +758,8 @@ async function main() {
       if (!positionId) {
         throw new Error(`Seed RRHH: puesto no encontrado para ${emp.employeeCode}`);
       }
+      const posEndDate = "endDate" in posAssign ? (posAssign as any).endDate : undefined;
+      const posNotes = "notes" in posAssign ? (posAssign as any).notes : undefined;
       await prisma.employeePositionAssignment.upsert({
         where: { id: posAssign.id },
         update: {
@@ -757,8 +768,8 @@ async function main() {
           departmentId: departmentId || null,
           isPrimary: Boolean(posAssign.isPrimary),
           startDate: posAssign.startDate || null,
-          endDate: posAssign.endDate || null,
-          notes: posAssign.notes || null
+          endDate: posEndDate || null,
+          notes: posNotes || null
         },
         create: {
           id: posAssign.id,
@@ -767,15 +778,19 @@ async function main() {
           departmentId: departmentId || null,
           isPrimary: Boolean(posAssign.isPrimary),
           startDate: posAssign.startDate || null,
-          endDate: posAssign.endDate || null,
-          notes: posAssign.notes || null,
+          endDate: posEndDate || null,
+          notes: posNotes || null,
           createdById: "admin-seed"
         }
       });
     }
 
     for (const doc of emp.documents || []) {
-      const retentionSource = doc.issuedAt || new Date();
+      const docIssuedAt = "issuedAt" in doc ? (doc as any).issuedAt : undefined;
+      const docDeliveredAt = "deliveredAt" in doc ? (doc as any).deliveredAt : undefined;
+      const docExpiresAt = "expiresAt" in doc ? (doc as any).expiresAt : undefined;
+      const docNotes = "notes" in doc ? (doc as any).notes : undefined;
+      const retentionSource = docIssuedAt || new Date();
       const retentionUntil = new Date(retentionSource);
       retentionUntil.setFullYear(retentionUntil.getFullYear() + 5);
 
@@ -785,7 +800,7 @@ async function main() {
           employeeId: saved.id,
           type: doc.type,
           title: doc.title,
-          notes: doc.notes || null,
+          notes: docNotes || null,
           retentionUntil,
           isArchived: false
         },
@@ -794,7 +809,7 @@ async function main() {
           employeeId: saved.id,
           type: doc.type,
           title: doc.title,
-          notes: doc.notes || null,
+          notes: docNotes || null,
           retentionUntil,
           isArchived: false,
           createdById: "admin-seed"
@@ -807,10 +822,10 @@ async function main() {
           documentId: doc.id,
           versionNumber: doc.versionNumber || 1,
           fileUrl: doc.fileUrl,
-          issuedAt: doc.issuedAt || null,
-          deliveredAt: doc.deliveredAt || null,
-          expiresAt: doc.expiresAt || null,
-          notes: doc.notes || null,
+          issuedAt: docIssuedAt || null,
+          deliveredAt: docDeliveredAt || null,
+          expiresAt: docExpiresAt || null,
+          notes: docNotes || null,
           uploadedById: null
         },
         create: {
@@ -818,10 +833,10 @@ async function main() {
           documentId: doc.id,
           versionNumber: doc.versionNumber || 1,
           fileUrl: doc.fileUrl,
-          issuedAt: doc.issuedAt || null,
-          deliveredAt: doc.deliveredAt || null,
-          expiresAt: doc.expiresAt || null,
-          notes: doc.notes || null,
+          issuedAt: docIssuedAt || null,
+          deliveredAt: docDeliveredAt || null,
+          expiresAt: docExpiresAt || null,
+          notes: docNotes || null,
           uploadedById: null
         }
       });
@@ -833,28 +848,36 @@ async function main() {
     }
 
     if (emp.professionalLicense) {
+      const lic = emp.professionalLicense as any;
+      const licNumber = "number" in lic ? lic.number : null;
+      const licIssuedAt = "issuedAt" in lic ? lic.issuedAt : null;
+      const licExpiresAt = "expiresAt" in lic ? lic.expiresAt : null;
+      const licIssuingEntity = "issuingEntity" in lic ? lic.issuingEntity : null;
+      const licFileUrl = "fileUrl" in lic ? lic.fileUrl : null;
+      const licReminderDays = "reminderDays" in lic ? lic.reminderDays : null;
+      const licNotes = "notes" in lic ? lic.notes : null;
       await prisma.professionalLicense.upsert({
         where: { employeeId: saved.id },
         update: {
           applies: emp.professionalLicense.applies ?? false,
-          number: emp.professionalLicense.number || null,
-          issuedAt: emp.professionalLicense.issuedAt || null,
-          expiresAt: emp.professionalLicense.expiresAt || null,
-          issuingEntity: emp.professionalLicense.issuingEntity || null,
-          fileUrl: emp.professionalLicense.fileUrl || null,
-          reminderDays: emp.professionalLicense.reminderDays || null,
-          notes: emp.professionalLicense.notes || null
+          licenseNumber: licNumber,
+          issuedAt: licIssuedAt,
+          expiresAt: licExpiresAt,
+          issuingEntity: licIssuingEntity,
+          fileUrl: licFileUrl,
+          reminderDays: licReminderDays,
+          notes: licNotes
         },
         create: {
           employeeId: saved.id,
           applies: emp.professionalLicense.applies ?? false,
-          number: emp.professionalLicense.number || null,
-          issuedAt: emp.professionalLicense.issuedAt || null,
-          expiresAt: emp.professionalLicense.expiresAt || null,
-          issuingEntity: emp.professionalLicense.issuingEntity || null,
-          fileUrl: emp.professionalLicense.fileUrl || null,
-          reminderDays: emp.professionalLicense.reminderDays || null,
-          notes: emp.professionalLicense.notes || null,
+          licenseNumber: licNumber,
+          issuedAt: licIssuedAt,
+          expiresAt: licExpiresAt,
+          issuingEntity: licIssuingEntity,
+          fileUrl: licFileUrl,
+          reminderDays: licReminderDays,
+          notes: licNotes,
           createdAt: new Date(),
           updatedAt: new Date()
         }

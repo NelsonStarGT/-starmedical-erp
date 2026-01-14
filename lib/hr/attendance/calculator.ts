@@ -100,8 +100,8 @@ export function computeAttendanceFromLogs(params: {
   }
 
   const notes: string[] = [];
-  let status = AttendanceStatus.ABSENT;
-  let color = AttendanceColor.RED;
+  let status: AttendanceStatus = AttendanceStatus.ABSENT;
+  let color: AttendanceColor = AttendanceColor.RED;
 
   if (!checkIn && leaveApproved) {
     status = AttendanceStatus.NORMAL;

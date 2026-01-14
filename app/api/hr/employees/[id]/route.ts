@@ -54,7 +54,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (parsed.dpiPhotoUrl !== undefined) updateData.dpiPhotoUrl = cleanNullableString(parsed.dpiPhotoUrl);
     if (parsed.rtuFileUrl !== undefined) updateData.rtuFileUrl = cleanNullableString(parsed.rtuFileUrl);
     if (parsed.photoUrl !== undefined) updateData.photoUrl = cleanNullableString(parsed.photoUrl);
-    if (parsed.primaryLegalEntityId !== undefined) updateData.primaryLegalEntityId = cleanNullableString(parsed.primaryLegalEntityId);
+    if (parsed.primaryLegalEntityId !== undefined) {
+      const primaryLegalEntityId = cleanNullableString(parsed.primaryLegalEntityId);
+      updateData.primaryLegalEntity = primaryLegalEntityId ? { connect: { id: primaryLegalEntityId } } : { disconnect: true };
+    }
     if (parsed.status !== undefined) {
       updateData.status = parsed.status;
       updateData.isActive = parsed.status !== HrEmployeeStatus.TERMINATED;
@@ -144,7 +147,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           });
         }
         const primaryEng = engagements.find((e) => e.isPrimary) || engagements[0];
-        updateData.primaryLegalEntityId = primaryEng?.legalEntityId || null;
+        updateData.primaryLegalEntity = primaryEng?.legalEntityId
+          ? { connect: { id: primaryEng.legalEntityId } }
+          : { disconnect: true };
       }
 
       if (branchAssignments) {

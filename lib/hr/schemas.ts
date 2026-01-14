@@ -6,7 +6,7 @@ import {
   HR_EMPLOYMENT_TYPES,
   HR_PAYMENT_SCHEMES,
   PAY_FREQUENCIES
-} from "../../types/hr.ts";
+} from "../../types/hr";
 
 const optionalString = z.string().trim().optional();
 const optionalNullableString = z.string().trim().optional().nullable();

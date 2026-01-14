@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api/hr";
 import { createEmployeeDocumentSchema } from "@/lib/hr/schemas";
 import { cleanNullableString, computeRetentionUntil, parseDateInput } from "@/lib/hr/utils";
+import { normalizeRoleName } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const auth = requireRole(req, ["ADMIN", "HR_ADMIN", "HR_USER", "STAFF", "VIEWER"], "HR:DOCS:READ");
   if (auth.errorResponse) return auth.errorResponse;
 
-  const roleNames = (auth.user?.roles || []).map((r) => r.role?.name).filter(Boolean) as string[];
+  const roleNames = (auth.user?.roles || []).map(normalizeRoleName).filter(Boolean) as string[];
   const canSeeAll = roleNames.includes("ADMIN") || roleNames.includes("HR_ADMIN") || roleNames.includes("HR_USER");
 
   const docs = await prisma.employeeDocument.findMany({
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const employee = await prisma.hrEmployee.findUnique({ where: { id: resolvedParams.id } });
     if (!employee) return NextResponse.json({ error: "Empleado no encontrado" }, { status: 404 });
 
-    const roleNames = (auth.user?.roles || []).map((r) => r.role?.name).filter(Boolean) as string[];
+    const roleNames = (auth.user?.roles || []).map(normalizeRoleName).filter(Boolean) as string[];
     const elevated = roleNames.includes("ADMIN") || roleNames.includes("HR_ADMIN");
     if (!elevated && parsed.visibility !== "PERSONAL") {
       return NextResponse.json({ error: "Visibilidad no permitida" }, { status: 403 });

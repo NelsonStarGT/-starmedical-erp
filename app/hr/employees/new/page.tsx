@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -121,7 +121,7 @@ function formatCurrency(value?: string | null, currency: "GTQ" | "USD" = "GTQ") 
   return new Intl.NumberFormat("es-GT", { style: "currency", currency, minimumFractionDigits: 2 }).format(numeric);
 }
 
-export default function EmployeeWizardPage() {
+function EmployeeWizardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toasts, showToast, dismiss } = useToast();

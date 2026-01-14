@@ -54,6 +54,7 @@ type DisciplinaryActionItem = {
   startDate?: string | null;
   endDate?: string | null;
   issuedAt?: string | null;
+  createdAt?: string | null;
   approvedById?: string | null;
   attachments: WarningAttachment[];
 };
@@ -2333,7 +2334,7 @@ export default function EmployeesPage() {
                   <button
                     onClick={() => {
                       setSelectedEmployeeId(selectedEmployee.id);
-                      activateMutation.mutate();
+                      activateMutation.mutate(selectedEmployee.id);
                     }}
                     className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
                   >

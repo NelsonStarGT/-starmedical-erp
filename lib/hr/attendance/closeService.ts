@@ -193,7 +193,7 @@ export async function processAttendanceDayClose(params: {
     const saved = await client.attendanceDay.update({
       where: { id: attendance.id },
       data: {
-        issues: issues.length ? issues : null,
+        issues: issues.length ? issues : Prisma.JsonNull,
         closeStatus,
         lastProcessedAt: new Date()
       },

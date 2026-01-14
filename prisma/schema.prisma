@@ -35,6 +35,9 @@ model User {
   approvedAttendance  AttendanceDay[]           @relation("AttendanceApprovedBy")
   closedAttendance    AttendanceDay[]           @relation("AttendanceClosedBy")
   reviewedOvertime    OvertimeRequest[]         @relation("OvertimeReviewedBy")
+  disciplinaryActionsCreated DisciplinaryAction[] @relation("DisciplinaryActionCreatedBy")
+  disciplinaryActionsApproved DisciplinaryAction[] @relation("DisciplinaryActionApprovedBy")
+  hrWarningsCreated HrEmployeeWarning[] @relation("HrWarningCreatedBy")
 }
 
 model UserRole {
@@ -1497,6 +1500,9 @@ model Branch {
 model HrSettings {
   id           Int      @id @default(1)
   currencyCode String   @default("GTQ")
+  warningWindowDays Int?
+  warningThreshold Int?
+  logoUrl      String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -1558,6 +1564,7 @@ model HrEmployee {
   AttendanceDay           AttendanceDay[]
   OvertimeRequest         OvertimeRequest[]
   DisciplinaryAction      DisciplinaryAction[]
+  warnings                HrEmployeeWarning[]
   compensationBonuses     CompensationBonus[]
   compensationHistory     HrCompensationHistory[]
   branchAssignments       EmployeeBranchAssignment[]
@@ -1974,16 +1981,51 @@ model DisciplinaryAction {
   type         DisciplinaryActionType
   title        String
   description  String?
+  comments     String?
+  status       DisciplinaryActionStatus @default(DRAFT)
   documentUrl  String?
   issuedAt     DateTime
+  startDate    DateTime?
   endDate      DateTime?
   cooldownDays Int?
+  createdById  String?
+  approvedById String?
   createdAt    DateTime                 @default(now())
   updatedAt    DateTime                 @updatedAt
   HrEmployee   HrEmployee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy    User?                    @relation("DisciplinaryActionCreatedBy", fields: [createdById], references: [id])
+  approvedBy   User?                    @relation("DisciplinaryActionApprovedBy", fields: [approvedById], references: [id])
   attachments  DisciplinaryAttachment[]
 
   @@index([employeeId, issuedAt])
+  @@index([status])
+}
+
+model HrEmployeeWarning {
+  id          String               @id @default(cuid())
+  employeeId  String
+  title       String
+  description String?
+  issuedAt    DateTime
+  createdAt   DateTime             @default(now())
+  createdById String?
+  HrEmployee  HrEmployee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy   User?                @relation("HrWarningCreatedBy", fields: [createdById], references: [id])
+  attachments HrWarningAttachment[]
+
+  @@index([employeeId, issuedAt])
+}
+
+model HrWarningAttachment {
+  id        String             @id @default(cuid())
+  warningId String
+  fileUrl   String
+  fileName  String
+  mime      String?
+  createdAt DateTime           @default(now())
+  warning   HrEmployeeWarning  @relation(fields: [warningId], references: [id], onDelete: Cascade)
+
+  @@index([warningId])
 }
 
 model DisciplinaryAttachment {
@@ -2687,6 +2729,7 @@ enum OnboardingStatus {
 enum HrEmployeeDocumentType {
   DPI
   RTU
+  CV
   RENAS
   POLICIACOS
   RECIBO_SERVICIO
@@ -2762,7 +2805,15 @@ enum DisciplinaryActionType {
   LLAMADA_ATENCION
   AMONESTACION
   SUSPENSION
+  TERMINACION_RECOMENDADA
   TERMINACION
+}
+
+enum DisciplinaryActionStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
 }
 
 enum EvaluationQuestionType {

@@ -33,7 +33,7 @@ export async function processAttendanceDay(params: { employeeId: string; date: D
   const client = params.tx || prisma;
   const date = startOfDay(params.date);
 
-  return client.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     const [assignment, existing, leaveRequest] = await Promise.all([
       tx.employeeShiftAssignment.findFirst({
         where: {
@@ -148,5 +148,11 @@ export async function processAttendanceDay(params: { employeeId: string; date: D
     }
 
     return serializeAttendanceDay(attendance);
-  });
+  };
+
+  if ("$transaction" in client) {
+    return (client as PrismaClient).$transaction((tx) => run(tx));
+  }
+
+  return run(client as Prisma.TransactionClient);
 }

@@ -64,11 +64,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         endDate,
         isPrimary: true,
         isPayrollEligible: parsed.data.isPayrollEligible,
-        paymentScheme: parsed.data.isPayrollEligible ? parsed.data.paymentScheme || "MONTHLY" : null,
+        paymentScheme: parsed.data.isPayrollEligible ? parsed.data.paymentScheme || "MONTHLY" : "MONTHLY",
         baseSalary: parsed.data.isPayrollEligible && parsed.data.baseSalary !== undefined ? parsed.data.baseSalary : null,
         compensationAmount: parsed.data.isPayrollEligible && parsed.data.baseSalary !== undefined ? parsed.data.baseSalary : null,
         compensationCurrency: "GTQ",
-        compensationFrequency: parsed.data.paymentScheme ? "MONTHLY" : "MONTHLY",
+        compensationFrequency: "MONTHLY",
         compensationNotes: null
       }
     });

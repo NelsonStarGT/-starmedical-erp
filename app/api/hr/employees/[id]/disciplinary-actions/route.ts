@@ -39,6 +39,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       startDate: action.startDate,
       endDate: action.endDate,
       issuedAt: action.issuedAt,
+      createdAt: action.createdAt,
       approvedById: action.approvedById,
       createdById: action.createdById,
       attachments: action.attachments.map((att) => ({
@@ -120,6 +121,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         startDate: action.startDate,
         endDate: action.endDate,
         issuedAt: action.issuedAt,
+        createdAt: action.createdAt,
         attachments: attachments.map((att) => ({
           id: att.id,
           fileUrl: att.fileUrl,

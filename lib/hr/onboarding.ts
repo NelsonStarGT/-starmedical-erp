@@ -1,6 +1,13 @@
 import { randomUUID } from "crypto";
-import { NotificationSeverity, NotificationType, Prisma, PrismaClient } from "@prisma/client";
-import { computeRetentionUntil, parseDateInput, cleanNullableString } from "./utils.ts";
+import {
+  NotificationSeverity,
+  NotificationType,
+  Prisma,
+  PrismaClient,
+  HrEmployeeDocumentType,
+  HrDocumentVisibility
+} from "@prisma/client";
+import { computeRetentionUntil, parseDateInput, cleanNullableString } from "./utils";
 
 type Tx = Prisma.TransactionClient | PrismaClient;
 
@@ -60,8 +67,9 @@ export async function upsertEmployeeDocument(
   },
   actorUserId?: string | null
 ) {
+  const docType = doc.type as HrEmployeeDocumentType;
   const existing = await tx.employeeDocument.findFirst({
-    where: { employeeId, type: doc.type, isArchived: false },
+    where: { employeeId, type: docType, isArchived: false },
     select: { id: true }
   });
 
@@ -72,7 +80,7 @@ export async function upsertEmployeeDocument(
   const expiresAt = parseDateInput(doc.version.expiresAt, "Fecha de vencimiento");
   const viewGrantedUntil = parseDateInput(doc.version.viewGrantedUntil, "Vigencia visibilidad");
   const retentionUntil = computeRetentionUntil(issuedAt, parseDateInput(doc.retentionUntil, "Retención"));
-  const visibility = deriveVisibility(doc.type, doc.visibility);
+  const visibility = deriveVisibility(doc.type, doc.visibility) as HrDocumentVisibility;
 
   if (existing) {
     await tx.employeeDocument.update({
@@ -104,7 +112,7 @@ export async function upsertEmployeeDocument(
       data: {
         id: documentId,
         employeeId,
-        type: doc.type,
+        type: docType,
         visibility,
         title: doc.title.trim(),
         notes: cleanNullableString(doc.notes),
