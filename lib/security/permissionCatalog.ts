@@ -1,0 +1,50 @@
+// Catálogo base de permisos y roles. Mantener sincronizado con módulos CRM/HR.
+
+export const ALL_PERMISSION_KEYS: string[] = [
+  // CRM
+  "CRM:LEADS:READ",
+  "CRM:LEADS:WRITE",
+  "CRM:DEALS:READ",
+  "CRM:DEALS:WRITE",
+  "CRM:QUOTES:READ",
+  "CRM:QUOTES:WRITE",
+  "CRM:QUOTES:PUBLISH",
+  "CRM:QUOTES:APPROVE",
+  "CRM:PROPOSALS:READ",
+  "CRM:PROPOSALS:WRITE",
+  "CRM:PROPOSALS:PUBLISH",
+  "CRM:FILES:READ",
+  "CRM:FILES:WRITE",
+  "CRM:SETTINGS:ADMIN",
+  "CRM:AUDIT:READ",
+  // HR
+  "HR:EMPLOYEES:READ",
+  "HR:EMPLOYEES:WRITE",
+  "HR:EMPLOYEES:DELETE",
+  "HR:DOCS:READ",
+  "HR:DOCS:EDIT",
+  "HR:SETTINGS:ADMIN",
+  "HR:ATTENDANCE:READ",
+  "HR:ATTENDANCE:WRITE",
+  "HR:ATTENDANCE:APPROVE",
+  "HR:PAYROLL:READ",
+  "HR:PAYROLL:WRITE",
+  "HR:PAYROLL:APPROVE"
+];
+
+export const BASE_ROLES = {
+  ADMIN: {
+    permissions: ALL_PERMISSION_KEYS
+  },
+  STAFF: {
+    permissions: [
+      "CRM:LEADS:READ",
+      "CRM:DEALS:READ",
+      "CRM:QUOTES:READ",
+      "CRM:FILES:READ",
+      "HR:EMPLOYEES:READ",
+      "HR:DOCS:READ",
+      "HR:ATTENDANCE:READ"
+    ]
+  }
+};
