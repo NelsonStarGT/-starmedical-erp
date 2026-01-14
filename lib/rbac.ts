@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { CrmDeal } from "@prisma/client";
 import type { SessionUser } from "./auth";
-import { ALL_PERMISSION_KEYS, BASE_ROLES } from "./security/permissionCatalog";
+import { ALL_PERMISSION_KEYS, BASE_ROLES } from "@/lib/security/permissionCatalog";
 
 export const PERMISSIONS = {
   LEAD_READ: "CRM:LEADS:READ",
