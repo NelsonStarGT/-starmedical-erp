@@ -1,5 +1,4 @@
 import { NotificationSeverity, NotificationType, Prisma } from "@prisma/client";
-import { isExpiringSoon } from "@/lib/hr/utils";
 import type { HrAlert } from "@/types/hr";
 
 export const employeeInclude = {
@@ -16,10 +15,25 @@ export const employeeInclude = {
   notifications: {
     where: { type: { in: [NotificationType.DOCUMENT_EXPIRY, NotificationType.LICENSE_EXPIRY] } },
     orderBy: { dueAt: "asc" }
+  },
+  user: {
+    include: {
+      roles: { include: { role: true } },
+      userPermissions: { include: { permission: true } }
+    }
   }
 } satisfies Prisma.HrEmployeeInclude;
 
 export type EmployeeWithRelations = Prisma.HrEmployeeGetPayload<{ include: typeof employeeInclude }>;
+
+function expirySeverity(date: Date) {
+  const now = new Date();
+  const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays <= 7) return { severity: NotificationSeverity.CRITICAL, withinWindow: true };
+  if (diffDays <= 15) return { severity: NotificationSeverity.WARNING, withinWindow: true };
+  if (diffDays <= 30) return { severity: NotificationSeverity.INFO, withinWindow: true };
+  return { severity: NotificationSeverity.INFO, withinWindow: false };
+}
 
 function pickPrimary<T extends { isPrimary?: boolean }>(items: T[]): T | null {
   if (!items || items.length === 0) return null;
@@ -31,26 +45,31 @@ function serializeAlerts(employee: EmployeeWithRelations, documents: any[]) {
 
   for (const doc of documents) {
     const expiresAt = doc.currentVersion?.expiresAt as Date | null;
-    if (expiresAt && isExpiringSoon(expiresAt, 60)) {
+    if (expiresAt) {
+      const { severity, withinWindow } = expirySeverity(expiresAt);
+      if (!withinWindow) continue;
       alerts.push({
         type: "DOCUMENT_EXPIRY",
         title: doc.title,
         entityId: doc.id,
         dueAt: expiresAt.toISOString(),
-        severity: "WARNING"
+        severity
       });
     }
   }
 
   const license = employee.professionalLicense;
-  if (license?.applies && license.expiresAt && isExpiringSoon(license.expiresAt, 60)) {
-    alerts.push({
-      type: "LICENSE_EXPIRY",
-      title: "Colegiado por vencer",
-      entityId: license.id,
-      dueAt: license.expiresAt.toISOString(),
-      severity: "CRITICAL"
-    });
+  if (license?.applies && license.expiresAt) {
+    const { severity, withinWindow } = expirySeverity(license.expiresAt);
+    if (withinWindow) {
+      alerts.push({
+        type: "LICENSE_EXPIRY",
+        title: "Colegiado por vencer",
+        entityId: license.id,
+        dueAt: license.expiresAt.toISOString(),
+        severity: severity === NotificationSeverity.INFO ? NotificationSeverity.WARNING : severity
+      });
+    }
   }
 
   for (const notif of employee.notifications || []) {
@@ -88,6 +107,7 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
     return {
       id: doc.id,
       type: doc.type,
+      visibility: doc.visibility,
       title: doc.title,
       notes: doc.notes,
       retentionUntil: doc.retentionUntil,
@@ -100,6 +120,8 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
             issuedAt: currentVersion.issuedAt,
             deliveredAt: currentVersion.deliveredAt,
             expiresAt: currentVersion.expiresAt,
+            canEmployeeView: currentVersion.canEmployeeView,
+            viewGrantedUntil: currentVersion.viewGrantedUntil,
             notes: currentVersion.notes,
             createdAt: currentVersion.createdAt
           }
@@ -111,6 +133,8 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
         issuedAt: ver.issuedAt,
         deliveredAt: ver.deliveredAt,
         expiresAt: ver.expiresAt,
+        canEmployeeView: ver.canEmployeeView,
+        viewGrantedUntil: ver.viewGrantedUntil,
         notes: ver.notes,
         createdAt: ver.createdAt
       }))
@@ -129,10 +153,13 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
     nit: employee.nit,
     email: employee.email,
     personalEmail: employee.personalEmail,
-    phone: employee.phone,
-    homePhone: employee.homePhone,
+    phoneMobile: employee.phoneMobile,
+    phoneHome: employee.phoneHome,
     birthDate: employee.birthDate,
-    address: employee.address,
+    addressHome: employee.addressHome,
+    workLocation: primaryBranch?.branch?.address || null,
+    notes: employee.notes,
+    isExternal: employee.isExternal,
     emergencyContactName: employee.emergencyContactName,
     emergencyContactPhone: employee.emergencyContactPhone,
     residenceProofUrl: employee.residenceProofUrl,
@@ -141,6 +168,9 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
     photoUrl: employee.photoUrl,
     status: employee.status,
     isActive: employee.isActive,
+    onboardingStatus: employee.onboardingStatus,
+    onboardingStep: employee.onboardingStep,
+    completedAt: employee.completedAt,
     primaryLegalEntity: primaryEngagement
       ? {
           id: primaryEngagement.legalEntity.id,
@@ -153,10 +183,18 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
             id: employee.primaryLegalEntity.id,
             name: employee.primaryLegalEntity.name,
             comercialName: employee.primaryLegalEntity.comercialName,
-            nit: employee.primaryLegalEntity.nit
-          }
-        : null,
-    primaryBranch: primaryBranch?.branch ? { id: primaryBranch.branch.id, name: primaryBranch.branch.name } : null,
+          nit: employee.primaryLegalEntity.nit
+        }
+      : null,
+    primaryBranch: primaryBranch?.branch
+      ? {
+          id: primaryBranch.branch.id,
+          name: primaryBranch.branch.name,
+          code: primaryBranch.branch.code,
+          address: primaryBranch.branch.address,
+          isActive: primaryBranch.branch.isActive
+        }
+      : null,
     primaryPosition: primaryPosition?.position ? { id: primaryPosition.position.id, name: primaryPosition.position.name } : null,
     primaryDepartment: primaryPosition?.department
       ? { id: primaryPosition.department.id, name: primaryPosition.department.name, description: primaryPosition.department.description }
@@ -176,6 +214,9 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
           endDate: primaryEngagement.endDate,
           isPrimary: primaryEngagement.isPrimary,
           isPayrollEligible: primaryEngagement.isPayrollEligible,
+          paymentScheme: primaryEngagement.paymentScheme,
+          baseSalary: primaryEngagement.baseSalary ? primaryEngagement.baseSalary.toString() : null,
+          baseAllowance: primaryEngagement.baseAllowance ? primaryEngagement.baseAllowance.toString() : null,
           compensationAmount: primaryEngagement.compensationAmount ? primaryEngagement.compensationAmount.toString() : null,
           compensationCurrency: primaryEngagement.compensationCurrency,
           compensationFrequency: primaryEngagement.compensationFrequency,
@@ -196,6 +237,9 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
       endDate: eng.endDate,
       isPrimary: eng.isPrimary,
       isPayrollEligible: eng.isPayrollEligible,
+      paymentScheme: eng.paymentScheme,
+      baseSalary: eng.baseSalary ? eng.baseSalary.toString() : null,
+      baseAllowance: eng.baseAllowance ? eng.baseAllowance.toString() : null,
       compensationAmount: eng.compensationAmount ? eng.compensationAmount.toString() : null,
       compensationCurrency: eng.compensationCurrency,
       compensationFrequency: eng.compensationFrequency,
@@ -204,10 +248,19 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
     branchAssignments: (employee.branchAssignments || []).map((assign) => ({
       id: assign.id,
       branchId: assign.branchId,
+      code: assign.code,
       isPrimary: assign.isPrimary,
       startDate: assign.startDate,
       endDate: assign.endDate,
-      branch: assign.branch ? { id: assign.branch.id, name: assign.branch.name, isActive: assign.branch.isActive } : null
+      branch: assign.branch
+        ? {
+            id: assign.branch.id,
+            name: assign.branch.name,
+            code: assign.branch.code,
+            address: assign.branch.address,
+            isActive: assign.branch.isActive
+          }
+        : null
     })),
     positionAssignments: (employee.positionAssignments || []).map((assign) => ({
       id: assign.id,
@@ -226,13 +279,26 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
     professionalLicense: employee.professionalLicense
       ? {
           applies: employee.professionalLicense.applies,
-          number: employee.professionalLicense.number,
+          licenseNumber: employee.professionalLicense.licenseNumber,
           issuedAt: employee.professionalLicense.issuedAt,
           expiresAt: employee.professionalLicense.expiresAt,
           issuingEntity: employee.professionalLicense.issuingEntity,
           fileUrl: employee.professionalLicense.fileUrl,
           reminderDays: employee.professionalLicense.reminderDays,
           notes: employee.professionalLicense.notes
+        }
+      : null,
+    access: employee.user
+      ? {
+          userId: employee.user.id,
+          email: employee.user.email,
+          name: employee.user.name,
+          roles: employee.user.roles?.map((r) => ({ id: r.role.id, name: r.role.name })) || [],
+          permissions: employee.user.userPermissions?.map((p) => ({
+            id: p.permission.id,
+            key: p.permission.key,
+            description: p.permission.description
+          }))
         }
       : null,
     alerts
