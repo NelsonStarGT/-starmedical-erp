@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { HrEmployeeStatus, NotificationSeverity, NotificationType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api/hr";
-import { createEmployeeSchema, employeeFiltersSchema } from "@/lib/hr/schemas";
+import { createEmployeeSchema, employeeDraftSchema, employeeFiltersSchema } from "@/lib/hr/schemas";
 import { employeeInclude, serializeEmployee } from "@/lib/hr/serializers";
 import { cleanNullableString, computeRetentionUntil, ensurePrimary, parseDateInput } from "@/lib/hr/utils";
 
@@ -18,6 +18,8 @@ function parseSearchParams(req: NextRequest) {
     status: params.get("status") || undefined,
     branchId: params.get("branchId") || undefined,
     legalEntityId: params.get("legalEntityId") || undefined,
+    type: params.get("type") || undefined,
+    relationship: params.get("relationship") || undefined,
     page: params.get("page") || undefined
   });
 }
@@ -30,7 +32,7 @@ async function generateEmployeeCode(tx: Prisma.TransactionClient) {
     if (match) nextNumber = parseInt(match[1], 10) + 1;
   }
   for (let i = 0; i < 10; i++) {
-    const candidate = `EMP-${String(nextNumber + i).padStart(4, "0")}`;
+    const candidate = `EMP-${String(nextNumber + i).padStart(6, "0")}`;
     const exists = await tx.hrEmployee.findUnique({ where: { employeeCode: candidate } });
     if (!exists) return candidate;
   }
@@ -44,7 +46,13 @@ async function createNotification(tx: Prisma.TransactionClient, employeeId: stri
     data: {
       employeeId,
       type,
-      severity: type === NotificationType.LICENSE_EXPIRY ? NotificationSeverity.CRITICAL : NotificationSeverity.WARNING,
+      severity: (() => {
+        const now = new Date();
+        const diffDays = Math.ceil((dueAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        if (type === NotificationType.LICENSE_EXPIRY || diffDays <= 7) return NotificationSeverity.CRITICAL;
+        if (diffDays <= 15) return NotificationSeverity.WARNING;
+        return NotificationSeverity.INFO;
+      })(),
       title,
       entityId,
       dueAt
@@ -53,7 +61,7 @@ async function createNotification(tx: Prisma.TransactionClient, employeeId: stri
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireRole(req, ["ADMIN", "HR_ADMIN", "HR_USER", "VIEWER"]);
+  const auth = requireRole(req, ["ADMIN", "HR_ADMIN", "HR_USER", "STAFF", "VIEWER"]);
   if (auth.errorResponse) return auth.errorResponse;
 
   const parsed = parseSearchParams(req);
@@ -61,7 +69,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Parámetros inválidos", details: parsed.error.flatten().fieldErrors }, { status: 400 });
   }
 
-  const { search, status, branchId, legalEntityId, page } = parsed.data;
+  const { search, status, branchId, legalEntityId, type, relationship, page } = parsed.data;
   const where: Prisma.HrEmployeeWhereInput = { isActive: true };
   if (status) where.status = status;
   if (search) {
@@ -73,7 +81,8 @@ export async function GET(req: NextRequest) {
       { email: { contains: term, mode: "insensitive" } },
       { dpi: { contains: term, mode: "insensitive" } },
       { nit: { contains: term, mode: "insensitive" } },
-      { phone: { contains: term, mode: "insensitive" } }
+      { phoneMobile: { contains: term, mode: "insensitive" } },
+      { phoneHome: { contains: term, mode: "insensitive" } }
     ];
   }
   if (branchId) {
@@ -91,6 +100,16 @@ export async function GET(req: NextRequest) {
         engagements: { some: { legalEntityId } }
       }
     ];
+  }
+  if (type === "INTERNAL") {
+    where.isExternal = false;
+  } else if (type === "EXTERNAL") {
+    where.isExternal = true;
+  }
+  if (relationship === "DEPENDENCIA") {
+    where.engagements = { some: { employmentType: HrEmploymentType.DEPENDENCIA } };
+  } else if (relationship === "SIN_DEPENDENCIA") {
+    where.engagements = { some: { employmentType: HrEmploymentType.HONORARIOS } };
   }
 
   const [total, employees] = await prisma.$transaction([
@@ -121,6 +140,30 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
+    const isDraft = body?.mode === "DRAFT" || body?.onboardingStatus === "DRAFT" || body?.draft === true;
+    if (isDraft) {
+      const parsedDraft = employeeDraftSchema.parse(body || {});
+      if (parsedDraft.dpi) {
+        const existing = await prisma.hrEmployee.findFirst({ where: { dpi: parsedDraft.dpi.trim() } });
+        if (existing) return NextResponse.json({ error: "DPI ya registrado" }, { status: 400 });
+      }
+      const employeeCode = await generateEmployeeCode(prisma);
+      const draft = await prisma.hrEmployee.create({
+        data: {
+          employeeCode,
+          firstName: parsedDraft.firstName?.trim() || null,
+          lastName: parsedDraft.lastName?.trim() || null,
+          dpi: parsedDraft.dpi?.trim() || null,
+          status: HrEmployeeStatus.ACTIVE,
+          isActive: false,
+          onboardingStatus: "DRAFT",
+          onboardingStep: 1,
+          createdById: auth.user?.id || null
+        }
+      });
+      return NextResponse.json({ data: { id: draft.id, employeeCode: draft.employeeCode, onboardingStep: draft.onboardingStep } }, { status: 201 });
+    }
+
     const parsed = createEmployeeSchema.parse(body);
     const status = parsed.status || HrEmployeeStatus.ACTIVE;
 
@@ -174,10 +217,12 @@ export async function POST(req: NextRequest) {
           nit: cleanNullableString(parsed.nit),
           email: cleanNullableString(parsed.email),
           personalEmail: cleanNullableString(parsed.personalEmail),
-          phone: cleanNullableString(parsed.phone),
-          homePhone: parsed.homePhone.trim(),
+          phoneMobile: cleanNullableString(parsed.phoneMobile),
+          phoneHome: parsed.phoneHome?.trim() || null,
           birthDate: parseDateInput(parsed.birthDate, "Fecha de nacimiento"),
-          address: parsed.address.trim(),
+          addressHome: parsed.addressHome.trim(),
+          notes: cleanNullableString(parsed.notes),
+          isExternal: parsed.isExternal ?? false,
           emergencyContactName: parsed.emergencyContactName.trim(),
           emergencyContactPhone: parsed.emergencyContactPhone.trim(),
           residenceProofUrl: parsed.residenceProofUrl.trim(),
@@ -187,6 +232,9 @@ export async function POST(req: NextRequest) {
           status,
           isActive: status !== HrEmployeeStatus.TERMINATED,
           primaryLegalEntityId: primaryEngagement?.legalEntityId || parsed.primaryLegalEntityId || null,
+          onboardingStatus: "ACTIVE",
+          onboardingStep: 3,
+          completedAt: new Date(),
           createdById: auth.user?.id || null
         }
       });
@@ -204,6 +252,8 @@ export async function POST(req: NextRequest) {
             endDate: eng.endDate,
             isPrimary: Boolean(eng.isPrimary),
             isPayrollEligible: eng.isPayrollEligible ?? true,
+            paymentScheme: eng.paymentScheme || "MONTHLY",
+            baseSalary: eng.baseSalary ?? eng.compensationAmount ?? null,
             compensationAmount: eng.compensationAmount || null,
             compensationCurrency: eng.compensationCurrency || "GTQ",
             compensationFrequency: eng.compensationFrequency || "MONTHLY",
@@ -216,9 +266,10 @@ export async function POST(req: NextRequest) {
           data: {
             engagementId: createdEng.id,
             effectiveFrom: eng.startDate,
-            baseSalary: eng.compensationAmount || null,
+            baseSalary: eng.baseSalary ?? eng.compensationAmount ?? null,
             currency: eng.compensationCurrency || "GTQ",
             payFrequency: eng.compensationFrequency || "MONTHLY",
+            paymentScheme: eng.paymentScheme || "MONTHLY",
             allowances: {},
             deductions: {},
             isActive: true,
@@ -232,6 +283,7 @@ export async function POST(req: NextRequest) {
           data: branchAssignments.map((assign) => ({
             employeeId: saved.id,
             branchId: assign.branchId,
+            code: cleanNullableString(assign.code),
             isPrimary: Boolean(assign.isPrimary),
             startDate: assign.startDate,
             endDate: assign.endDate,
@@ -261,6 +313,7 @@ export async function POST(req: NextRequest) {
         const issuedAt = parseDateInput(doc.version.issuedAt, "Fecha de emisión");
         const deliveredAt = parseDateInput(doc.version.deliveredAt, "Fecha de entrega");
         const expiresAt = parseDateInput(doc.version.expiresAt, "Fecha de vencimiento");
+        const viewGrantedUntil = parseDateInput(doc.version.viewGrantedUntil, "Vigencia visibilidad");
         const retentionUntil = computeRetentionUntil(issuedAt, parseDateInput(doc.retentionUntil, "Retención"));
 
         await tx.employeeDocument.create({
@@ -268,6 +321,7 @@ export async function POST(req: NextRequest) {
             id: documentId,
             employeeId: saved.id,
             type: doc.type,
+            visibility: doc.visibility || "PERSONAL",
             title: doc.title.trim(),
             notes: cleanNullableString(doc.notes),
             retentionUntil,
@@ -282,6 +336,8 @@ export async function POST(req: NextRequest) {
                 issuedAt,
                 deliveredAt,
                 expiresAt,
+                canEmployeeView: doc.version.canEmployeeView ?? false,
+                viewGrantedUntil,
                 notes: cleanNullableString(doc.version.notes),
                 uploadedById: auth.user?.id || null
               }
@@ -298,7 +354,7 @@ export async function POST(req: NextRequest) {
           where: { employeeId: saved.id },
           update: {
             applies: parsed.professionalLicense.applies ?? false,
-            number: cleanNullableString(parsed.professionalLicense.number),
+            licenseNumber: cleanNullableString(parsed.professionalLicense.licenseNumber),
             issuedAt: parseDateInput(parsed.professionalLicense.issuedAt, "Emitido colegiado"),
             expiresAt,
             issuingEntity: cleanNullableString(parsed.professionalLicense.issuingEntity),
@@ -309,7 +365,7 @@ export async function POST(req: NextRequest) {
           create: {
             employeeId: saved.id,
             applies: parsed.professionalLicense.applies ?? false,
-            number: cleanNullableString(parsed.professionalLicense.number),
+            licenseNumber: cleanNullableString(parsed.professionalLicense.licenseNumber),
             issuedAt: parseDateInput(parsed.professionalLicense.issuedAt, "Emitido colegiado"),
             expiresAt,
             issuingEntity: cleanNullableString(parsed.professionalLicense.issuingEntity),

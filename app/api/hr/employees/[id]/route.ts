@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { HrEmployeeStatus, NotificationType, Prisma } from "@prisma/client";
+import { HrEmployeeStatus, NotificationSeverity, NotificationType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api/hr";
 import { updateEmployeeSchema } from "@/lib/hr/schemas";
@@ -13,23 +13,25 @@ async function findEmployee(id: string) {
   return prisma.hrEmployee.findUnique({ where: { id }, include: employeeInclude });
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = requireRole(req, ["ADMIN", "HR_ADMIN", "HR_USER", "VIEWER"]);
+export async function GET(req: NextRequest, { params }: { params: { id: string } } | { params: Promise<{ id: string }> }) {
+  const resolvedParams = "then" in params ? await params : params;
+  const auth = requireRole(req, ["ADMIN", "HR_ADMIN", "HR_USER", "STAFF", "VIEWER"]);
   if (auth.errorResponse) return auth.errorResponse;
 
-  const employee = await findEmployee(params.id);
+  const employee = await findEmployee(resolvedParams.id);
   if (!employee) return NextResponse.json({ error: "Empleado no encontrado" }, { status: 404 });
   return NextResponse.json({ data: serializeEmployee(employee) });
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } } | { params: Promise<{ id: string }> }) {
+  const resolvedParams = "then" in params ? await params : params;
   const auth = requireRole(req);
   if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const body = await req.json();
     const parsed = updateEmployeeSchema.parse(body);
-    const employee = await prisma.hrEmployee.findUnique({ where: { id: params.id } });
+    const employee = await prisma.hrEmployee.findUnique({ where: { id: resolvedParams.id } });
     if (!employee) return NextResponse.json({ error: "Empleado no encontrado" }, { status: 404 });
 
     const updateData: Prisma.HrEmployeeUpdateInput = {};
@@ -40,20 +42,26 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (parsed.nit !== undefined) updateData.nit = cleanNullableString(parsed.nit);
     if (parsed.email !== undefined) updateData.email = cleanNullableString(parsed.email);
     if (parsed.personalEmail !== undefined) updateData.personalEmail = cleanNullableString(parsed.personalEmail);
-    if (parsed.phone !== undefined) updateData.phone = cleanNullableString(parsed.phone);
-    if (parsed.homePhone !== undefined) updateData.homePhone = parsed.homePhone ? parsed.homePhone.trim() : null;
+    if (parsed.phoneMobile !== undefined) updateData.phoneMobile = cleanNullableString(parsed.phoneMobile);
+    if (parsed.phoneHome !== undefined) updateData.phoneHome = parsed.phoneHome ? parsed.phoneHome.trim() : null;
     if (parsed.birthDate !== undefined) updateData.birthDate = parseDateInput(parsed.birthDate, "Fecha de nacimiento");
-    if (parsed.address !== undefined) updateData.address = parsed.address ? parsed.address.trim() : null;
+    if (parsed.addressHome !== undefined) updateData.addressHome = parsed.addressHome ? parsed.addressHome.trim() : null;
+    if (parsed.notes !== undefined) updateData.notes = cleanNullableString(parsed.notes);
+    if (parsed.isExternal !== undefined) updateData.isExternal = parsed.isExternal;
     if (parsed.emergencyContactName !== undefined) updateData.emergencyContactName = cleanNullableString(parsed.emergencyContactName);
     if (parsed.emergencyContactPhone !== undefined) updateData.emergencyContactPhone = cleanNullableString(parsed.emergencyContactPhone);
     if (parsed.residenceProofUrl !== undefined) updateData.residenceProofUrl = cleanNullableString(parsed.residenceProofUrl);
     if (parsed.dpiPhotoUrl !== undefined) updateData.dpiPhotoUrl = cleanNullableString(parsed.dpiPhotoUrl);
     if (parsed.rtuFileUrl !== undefined) updateData.rtuFileUrl = cleanNullableString(parsed.rtuFileUrl);
     if (parsed.photoUrl !== undefined) updateData.photoUrl = cleanNullableString(parsed.photoUrl);
+    if (parsed.primaryLegalEntityId !== undefined) updateData.primaryLegalEntityId = cleanNullableString(parsed.primaryLegalEntityId);
     if (parsed.status !== undefined) {
       updateData.status = parsed.status;
       updateData.isActive = parsed.status !== HrEmployeeStatus.TERMINATED;
     }
+    if (parsed.onboardingStatus !== undefined) updateData.onboardingStatus = parsed.onboardingStatus;
+    if (parsed.onboardingStep !== undefined) updateData.onboardingStep = parsed.onboardingStep;
+    if (parsed.completedAt !== undefined) updateData.completedAt = parseDateInput(parsed.completedAt, "Fecha de finalización");
 
     const engagements = parsed.engagements
       ? ensurePrimary(parsed.engagements || []).map((eng) => ({
@@ -97,13 +105,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const saved = await prisma.$transaction(async (tx) => {
       if (engagements) {
-        await tx.employeeEngagement.deleteMany({ where: { employeeId: params.id } });
+        await tx.employeeEngagement.deleteMany({ where: { employeeId: resolvedParams.id } });
         for (const eng of engagements) {
           const engId = eng.id || randomUUID();
           await tx.employeeEngagement.create({
             data: {
               id: engId,
-              employeeId: params.id,
+              employeeId: resolvedParams.id,
               legalEntityId: eng.legalEntityId,
               employmentType: eng.employmentType,
               status: eng.status,
@@ -111,6 +119,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
               endDate: eng.endDate,
               isPrimary: Boolean(eng.isPrimary),
               isPayrollEligible: eng.isPayrollEligible ?? true,
+              paymentScheme: eng.paymentScheme || "MONTHLY",
+              baseSalary: eng.baseSalary ?? eng.compensationAmount ?? null,
               compensationAmount: eng.compensationAmount || null,
               compensationCurrency: eng.compensationCurrency || "GTQ",
               compensationFrequency: eng.compensationFrequency || "MONTHLY",
@@ -122,9 +132,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
             data: {
               engagementId: engId,
               effectiveFrom: eng.startDate,
-              baseSalary: eng.compensationAmount || null,
+              baseSalary: eng.baseSalary ?? eng.compensationAmount ?? null,
               currency: eng.compensationCurrency || "GTQ",
               payFrequency: eng.compensationFrequency || "MONTHLY",
+              paymentScheme: eng.paymentScheme || "MONTHLY",
               allowances: {},
               deductions: {},
               isActive: true,
@@ -137,12 +148,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       }
 
       if (branchAssignments) {
-        await tx.employeeBranchAssignment.deleteMany({ where: { employeeId: params.id } });
+        await tx.employeeBranchAssignment.deleteMany({ where: { employeeId: resolvedParams.id } });
         if (branchAssignments.length) {
           await tx.employeeBranchAssignment.createMany({
             data: branchAssignments.map((assign) => ({
-              employeeId: params.id,
+              employeeId: resolvedParams.id,
               branchId: assign.branchId,
+              code: cleanNullableString(assign.code),
               isPrimary: Boolean(assign.isPrimary),
               startDate: assign.startDate,
               endDate: assign.endDate,
@@ -153,11 +165,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       }
 
       if (positionAssignments) {
-        await tx.employeePositionAssignment.deleteMany({ where: { employeeId: params.id } });
+        await tx.employeePositionAssignment.deleteMany({ where: { employeeId: resolvedParams.id } });
         if (positionAssignments.length) {
           await tx.employeePositionAssignment.createMany({
             data: positionAssignments.map((assign) => ({
-              employeeId: params.id,
+              employeeId: resolvedParams.id,
               positionId: assign.positionId,
               departmentId: cleanNullableString(assign.departmentId),
               isPrimary: Boolean(assign.isPrimary),
@@ -173,10 +185,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       if (parsed.professionalLicense) {
         const expiresAt = parseDateInput(parsed.professionalLicense.expiresAt, "Vence colegiado");
         await tx.professionalLicense.upsert({
-          where: { employeeId: params.id },
+          where: { employeeId: resolvedParams.id },
           update: {
             applies: parsed.professionalLicense.applies ?? false,
-            number: cleanNullableString(parsed.professionalLicense.number),
+            licenseNumber: cleanNullableString(parsed.professionalLicense.licenseNumber),
             issuedAt: parseDateInput(parsed.professionalLicense.issuedAt, "Emitido colegiado"),
             expiresAt,
             issuingEntity: cleanNullableString(parsed.professionalLicense.issuingEntity),
@@ -185,9 +197,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
             notes: cleanNullableString(parsed.professionalLicense.notes)
           },
           create: {
-            employeeId: params.id,
+            employeeId: resolvedParams.id,
             applies: parsed.professionalLicense.applies ?? false,
-            number: cleanNullableString(parsed.professionalLicense.number),
+            licenseNumber: cleanNullableString(parsed.professionalLicense.licenseNumber),
             issuedAt: parseDateInput(parsed.professionalLicense.issuedAt, "Emitido colegiado"),
             expiresAt,
             issuingEntity: cleanNullableString(parsed.professionalLicense.issuingEntity),
@@ -196,14 +208,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
             notes: cleanNullableString(parsed.professionalLicense.notes)
           }
         });
-        await tx.notification.deleteMany({ where: { employeeId: params.id, type: NotificationType.LICENSE_EXPIRY } });
+        await tx.notification.deleteMany({ where: { employeeId: resolvedParams.id, type: NotificationType.LICENSE_EXPIRY } });
         if (expiresAt) {
+          const now = new Date();
+          const diffDays = Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
           await tx.notification.create({
             data: {
-              employeeId: params.id,
+              employeeId: resolvedParams.id,
               type: NotificationType.LICENSE_EXPIRY,
               title: "Colegiado por vencer",
-              entityId: params.id,
+              entityId: resolvedParams.id,
+              severity: diffDays <= 7 ? NotificationSeverity.CRITICAL : NotificationSeverity.WARNING,
               dueAt: expiresAt
             }
           });
@@ -211,11 +226,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       }
 
       await tx.hrEmployee.update({
-        where: { id: params.id },
+        where: { id: resolvedParams.id },
         data: updateData
       });
 
-      return tx.hrEmployee.findUnique({ where: { id: params.id }, include: employeeInclude });
+      return tx.hrEmployee.findUnique({ where: { id: resolvedParams.id }, include: employeeInclude });
     });
 
     return NextResponse.json({ data: serializeEmployee(saved!) });

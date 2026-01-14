@@ -1,79 +1,82 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import {
-  HR_EMPLOYEE_DOCUMENT_TYPES,
-  HR_EMPLOYEE_STATUSES,
-  HR_EMPLOYMENT_TYPES,
-  PAY_FREQUENCIES,
-  type HrBranch,
-  type HrDepartment,
-  type HrPosition,
-  type HrEmployeeDocumentType,
-  type HrEmploymentType,
-  type PayFrequency,
-  type LegalEntitySummary
-} from "@/types/hr";
+import { Badge } from "@/components/ui/Badge";
+import UploadField from "@/components/ui/UploadField";
+import { ToastContainer } from "@/components/ui/Toast";
+import { useToast } from "@/hooks/useToast";
+import type { HrBranch, HrEmployee, HrEmployeeDocumentType, HrPaymentScheme, EmployeeDocument } from "@/types/hr";
+import { HR_EMPLOYEE_DOCUMENT_TYPES, HR_PAYMENT_SCHEMES } from "@/types/hr";
+import { wizardStep1Schema, wizardStep2Schema, wizardStep3Schema, wizardStep4Schema, wizardStep5Schema } from "@/lib/hr/schemas";
 
-type FormValues = {
+const steps = [
+  { id: 1, label: "Identidad" },
+  { id: 2, label: "Contacto" },
+  { id: 3, label: "Ubicación" },
+  { id: 4, label: "Relación" },
+  { id: 5, label: "Compensación" },
+  { id: 6, label: "Documentos" }
+];
+
+type WizardForm = {
   employeeCode: string;
   firstName: string;
   lastName: string;
   dpi: string;
-  nit: string;
-  email: string;
-  personalEmail: string;
-  phone: string;
-  homePhone: string;
-  birthDate: string;
-  address: string;
-  emergencyContactName: string;
-  emergencyContactPhone: string;
-  residenceProofUrl: string;
-  dpiPhotoUrl: string;
-  rtuFileUrl: string;
-  photoUrl: string;
-  startDate: string;
-  endDate: string;
-  legalEntityId: string;
-  employmentType: HrEmploymentType;
-  compensationAmount: string;
-  compensationFrequency: PayFrequency;
+  phoneMobile: string;
+  addressHome: string;
   branchId: string;
-  positionId: string;
-  departmentId: string;
-  licenseApplies: boolean;
-  licenseNumber: string;
-  licenseIssuedAt: string;
-  licenseExpiresAt: string;
-  licenseFileUrl: string;
-  licenseReminderDays: string;
-  documentType: HrEmployeeDocumentType;
-  documentTitle: string;
-  documentFileUrl: string;
-  documentIssuedAt: string;
-  documentDeliveredAt: string;
-  documentExpiresAt: string;
-  documentNotes: string;
+  legalEntityId: string;
+  professionalType: "INTERNAL" | "EXTERNAL";
+  employmentRelation: "DEPENDENCIA" | "SIN_DEPENDENCIA";
+  payScheme: HrPaymentScheme;
+  baseSalary: string;
+  baseAllowance: string;
 };
 
-type DocumentDraft = {
+type LegalEntity = { id: string; name: string; comercialName: string | null };
+
+type DocumentForm = {
   type: HrEmployeeDocumentType;
-  title: string;
-  notes?: string | null;
-  version: {
-    versionNumber: number;
-    fileUrl: string;
-    issuedAt?: string | null;
-    deliveredAt?: string | null;
-    expiresAt?: string | null;
-    notes?: string | null;
-  };
+  visibility: "PERSONAL" | "EMPRESA" | "RESTRINGIDO";
+  issuedAt: string;
+  expiresAt: string;
+  notes: string;
+  fileUrl: string;
+  fileName: string;
+  mime?: string | null;
+};
+
+type HrSettings = { currencyCode: "GTQ" | "USD" };
+
+const emptyForm: WizardForm = {
+  employeeCode: "",
+  firstName: "",
+  lastName: "",
+  dpi: "",
+  phoneMobile: "",
+  addressHome: "",
+  branchId: "",
+  legalEntityId: "",
+  professionalType: "INTERNAL",
+  employmentRelation: "DEPENDENCIA",
+  payScheme: "MONTHLY",
+  baseSalary: "",
+  baseAllowance: ""
+};
+
+const emptyDocument: DocumentForm = {
+  type: "CONTRATO",
+  visibility: "PERSONAL",
+  issuedAt: "",
+  expiresAt: "",
+  notes: "",
+  fileUrl: "",
+  fileName: "",
+  mime: null
 };
 
 async function fetchBranches(): Promise<HrBranch[]> {
@@ -83,529 +86,726 @@ async function fetchBranches(): Promise<HrBranch[]> {
   return payload.data || [];
 }
 
-async function fetchDepartments(): Promise<HrDepartment[]> {
-  const res = await fetch("/api/hr/departments", { cache: "no-store" });
-  if (!res.ok) return [];
-  const payload = await res.json();
-  return payload.data || [];
-}
-
-async function fetchPositions(): Promise<HrPosition[]> {
-  const res = await fetch("/api/hr/positions", { cache: "no-store" });
-  if (!res.ok) return [];
-  const payload = await res.json();
-  return payload.data || [];
-}
-
-async function fetchLegalEntities(): Promise<LegalEntitySummary[]> {
+async function fetchLegalEntities(): Promise<LegalEntity[]> {
   const res = await fetch("/api/finanzas/legal-entities", { cache: "no-store" });
   if (!res.ok) return [];
   const payload = await res.json();
   return payload.data || [];
 }
 
-const employmentLabels: Record<HrEmploymentType, string> = {
-  DEPENDENCIA: "Dependencia",
-  HONORARIOS: "Honorarios",
-  OUTSOURCING: "Outsourcing",
-  TEMPORAL: "Temporal",
-  PRACTICAS: "Prácticas"
-};
+async function fetchSettings(): Promise<HrSettings | null> {
+  const res = await fetch("/api/hr/settings", { cache: "no-store" });
+  if (!res.ok) return null;
+  const payload = await res.json();
+  return payload.data || null;
+}
 
-const steps = ["Datos", "Relación", "Documentos"];
+async function fetchEmployee(id: string): Promise<HrEmployee | null> {
+  const res = await fetch(`/api/hr/employees/${id}`, { cache: "no-store" });
+  if (!res.ok) return null;
+  const payload = await res.json();
+  return payload.data || null;
+}
 
-export default function NewEmployeePage() {
+async function fetchEmployeeDocuments(id: string): Promise<EmployeeDocument[]> {
+  const res = await fetch(`/api/hr/employees/${id}/documents`, { cache: "no-store" });
+  if (!res.ok) return [];
+  const payload = await res.json();
+  return payload.data || [];
+}
+
+function formatCurrency(value?: string | null, currency: "GTQ" | "USD" = "GTQ") {
+  if (!value) return currency === "USD" ? "$0.00" : "Q0.00";
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return `${currency === "USD" ? "$" : "Q"}${value}`;
+  return new Intl.NumberFormat("es-GT", { style: "currency", currency, minimumFractionDigits: 2 }).format(numeric);
+}
+
+export default function EmployeeWizardPage() {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
-  const [step, setStep] = useState(0);
-  const [documents, setDocuments] = useState<DocumentDraft[]>([]);
+  const searchParams = useSearchParams();
+  const { toasts, showToast, dismiss } = useToast();
+  const employeeId = searchParams.get("id");
 
-  const form = useForm<FormValues>({
-    defaultValues: {
-      employeeCode: "",
-      firstName: "",
-      lastName: "",
-      dpi: "",
-      nit: "",
-      email: "",
-      personalEmail: "",
-      phone: "",
-      homePhone: "",
-      birthDate: "",
-      address: "",
-      emergencyContactName: "",
-      emergencyContactPhone: "",
-      residenceProofUrl: "",
-      dpiPhotoUrl: "",
-      rtuFileUrl: "",
-      photoUrl: "",
-      startDate: new Date().toISOString().slice(0, 10),
-      endDate: "",
-      legalEntityId: "",
-      employmentType: HR_EMPLOYMENT_TYPES[0],
-      compensationAmount: "",
-      compensationFrequency: PAY_FREQUENCIES[2],
-      branchId: "",
-      positionId: "",
-      departmentId: "",
-      licenseApplies: false,
-      licenseNumber: "",
-      licenseIssuedAt: "",
-      licenseExpiresAt: "",
-      licenseFileUrl: "",
-      licenseReminderDays: "",
-      documentType: HR_EMPLOYEE_DOCUMENT_TYPES[0],
-      documentTitle: "",
-      documentFileUrl: "",
-      documentIssuedAt: "",
-      documentDeliveredAt: "",
-      documentExpiresAt: "",
-      documentNotes: ""
+  const [form, setForm] = useState<WizardForm>(emptyForm);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [documentForm, setDocumentForm] = useState<DocumentForm>(emptyDocument);
+  const [resumeId, setResumeId] = useState<string | null>(null);
+  const hasHydrated = useRef(false);
+  const draftRequested = useRef(false);
+
+  const branchesQuery = useQuery({ queryKey: ["hr-branches"], queryFn: fetchBranches });
+  const legalEntitiesQuery = useQuery({ queryKey: ["legal-entities"], queryFn: fetchLegalEntities });
+  const settingsQuery = useQuery({ queryKey: ["hr-settings"], queryFn: fetchSettings, staleTime: 30_000, retry: 1 });
+
+  const employeeQuery = useQuery({
+    queryKey: ["hr-employee", employeeId],
+    queryFn: () => fetchEmployee(employeeId as string),
+    enabled: Boolean(employeeId)
+  });
+
+  const documentsQuery = useQuery({
+    queryKey: ["hr-employee-documents", employeeId],
+    queryFn: () => fetchEmployeeDocuments(employeeId as string),
+    enabled: Boolean(employeeId)
+  });
+
+  const createDraftMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/hr/employees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "DRAFT" })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo crear borrador");
+      }
+      return res.json();
+    },
+    onSuccess: (payload) => {
+      const nextId = payload?.data?.id as string | undefined;
+      const code = payload?.data?.employeeCode as string | undefined;
+      if (nextId) {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("hrEmployeeDraftId", nextId);
+        }
+        setForm((prev) => ({ ...prev, employeeCode: code || prev.employeeCode }));
+        router.replace(`/hr/employees/new?id=${nextId}`);
+      }
+    },
+    onError: (err: any) => {
+      showToast(err?.message || "Error creando borrador", "error");
     }
   });
 
-  const branchesQuery = useQuery({ queryKey: ["hr-branches"], queryFn: fetchBranches });
-  const departmentsQuery = useQuery({ queryKey: ["hr-departments"], queryFn: fetchDepartments });
-  const positionsQuery = useQuery({ queryKey: ["hr-positions"], queryFn: fetchPositions });
-  const legalEntitiesQuery = useQuery({ queryKey: ["legal-entities"], queryFn: fetchLegalEntities });
-
-  const loadingCatalogs = branchesQuery.isLoading || positionsQuery.isLoading || legalEntitiesQuery.isLoading;
-
-  useEffect(() => {
-    if (branchesQuery.data && branchesQuery.data.length && !form.getValues("branchId")) {
-      form.setValue("branchId", branchesQuery.data[0].id);
-    }
-  }, [branchesQuery.data, form]);
-
-  useEffect(() => {
-    if (positionsQuery.data && positionsQuery.data.length && !form.getValues("positionId")) {
-      form.setValue("positionId", positionsQuery.data[0].id);
-    }
-  }, [positionsQuery.data, form]);
-
-  useEffect(() => {
-    if (legalEntitiesQuery.data && legalEntitiesQuery.data.length && !form.getValues("legalEntityId")) {
-      form.setValue("legalEntityId", legalEntitiesQuery.data[0].id);
-    }
-  }, [legalEntitiesQuery.data, form]);
-
-  const addDocument = () => {
-    const values = form.getValues();
-    if (!values.documentTitle || !values.documentFileUrl) return;
-    const next: DocumentDraft = {
-      type: values.documentType,
-      title: values.documentTitle,
-      notes: values.documentNotes || null,
-      version: {
-        versionNumber: 1,
-        fileUrl: values.documentFileUrl,
-        issuedAt: values.documentIssuedAt || null,
-        deliveredAt: values.documentDeliveredAt || null,
-        expiresAt: values.documentExpiresAt || null,
-        notes: values.documentNotes || null
+  const updateEmployeeMutation = useMutation({
+    mutationFn: async (payload: Record<string, unknown>) => {
+      if (!employeeId) throw new Error("Sin colaborador");
+      const res = await fetch(`/api/hr/employees/${employeeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo guardar");
       }
-    };
-    setDocuments((prev) => [...prev, next]);
-    form.setValue("documentTitle", "");
-    form.setValue("documentFileUrl", "");
-    form.setValue("documentIssuedAt", "");
-    form.setValue("documentDeliveredAt", "");
-    form.setValue("documentExpiresAt", "");
-    form.setValue("documentNotes", "");
-  };
+      return res.json();
+    },
+    onError: (err: any) => {
+      showToast(err?.message || "Error al guardar", "error");
+    }
+  });
 
-  const removeDocument = (idx: number) => {
-    setDocuments((prev) => prev.filter((_, i) => i !== idx));
-  };
+  const updateCompensationMutation = useMutation({
+    mutationFn: async (payload: { baseSalary?: number; baseAllowance?: number; payScheme?: string }) => {
+      if (!employeeId) throw new Error("Sin colaborador");
+      const res = await fetch(`/api/hr/employees/${employeeId}/compensation/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo actualizar compensación");
+      }
+      return res.json();
+    },
+    onError: (err: any) => {
+      showToast(err?.message || "Error actualizando compensación", "error");
+    }
+  });
 
-  const onSubmit = async (values: FormValues) => {
-    setError(null);
-    const payload = {
-      employeeCode: values.employeeCode || undefined,
-      firstName: values.firstName,
-      lastName: values.lastName,
-      dpi: values.dpi,
-      nit: values.nit || null,
-      email: values.email || null,
-      personalEmail: values.personalEmail || null,
-      phone: values.phone || null,
-      homePhone: values.homePhone,
-      birthDate: values.birthDate || null,
-      address: values.address,
-      emergencyContactName: values.emergencyContactName,
-      emergencyContactPhone: values.emergencyContactPhone,
-      residenceProofUrl: values.residenceProofUrl,
-      dpiPhotoUrl: values.dpiPhotoUrl,
-      rtuFileUrl: values.rtuFileUrl,
-      photoUrl: values.photoUrl || null,
-      status: HR_EMPLOYEE_STATUSES[0],
-      engagements: [
-        {
-          legalEntityId: values.legalEntityId,
-          employmentType: values.employmentType,
-          status: HR_EMPLOYEE_STATUSES[0],
-          startDate: values.startDate,
-          endDate: values.endDate || null,
-          isPrimary: true,
-          isPayrollEligible: true,
-          compensationAmount: values.compensationAmount ? Number(values.compensationAmount) : undefined,
-          compensationCurrency: "GTQ",
-          compensationFrequency: values.compensationFrequency,
-          compensationNotes: null
-        }
-      ],
-      branchAssignments: [
-        {
-          branchId: values.branchId,
-          isPrimary: true,
-          startDate: values.startDate,
-          endDate: values.endDate || null
-        }
-      ],
-      positionAssignments: [
-        {
-          positionId: values.positionId,
-          departmentId: values.departmentId || null,
-          isPrimary: true,
-          startDate: values.startDate,
-          endDate: values.endDate || null
-        }
-      ],
-      documents,
-      professionalLicense: values.licenseApplies
-        ? {
-            applies: true,
-            number: values.licenseNumber || null,
-            issuedAt: values.licenseIssuedAt || null,
-            expiresAt: values.licenseExpiresAt || null,
-            fileUrl: values.licenseFileUrl || null,
-            reminderDays: values.licenseReminderDays ? Number(values.licenseReminderDays) : null
+  const uploadDocumentMutation = useMutation({
+    mutationFn: async (payload: DocumentForm) => {
+      if (!employeeId) throw new Error("Sin colaborador");
+      const res = await fetch(`/api/hr/employees/${employeeId}/documents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: payload.type,
+          title: payload.type,
+          visibility: payload.visibility,
+          notes: payload.notes || null,
+          version: {
+            fileUrl: payload.fileUrl,
+            issuedAt: payload.issuedAt || null,
+            expiresAt: payload.expiresAt || null,
+            notes: payload.notes || null
           }
-        : { applies: false }
-    };
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo adjuntar documento");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      showToast("Documento guardado", "success");
+      setDocumentForm(emptyDocument);
+      void documentsQuery.refetch();
+    },
+    onError: (err: any) => {
+      showToast(err?.message || "Error al guardar documento", "error");
+    }
+  });
 
-    const res = await fetch("/api/hr/employees", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+  const completeMutation = useMutation({
+    mutationFn: async () => {
+      if (!employeeId) throw new Error("Sin colaborador");
+      const res = await fetch(`/api/hr/employees/${employeeId}/complete`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo completar el alta");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("hrEmployeeDraftId");
+      }
+      showToast("Alta completada", "success");
+      router.push("/hr/employees");
+    },
+    onError: (err: any) => {
+      showToast(err?.message || "Error al completar alta", "error");
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!employeeId) {
+      const stored = localStorage.getItem("hrEmployeeDraftId");
+      if (stored) setResumeId(stored);
+    }
+  }, [employeeId]);
+
+  useEffect(() => {
+    if (employeeId || resumeId || draftRequested.current) return;
+    draftRequested.current = true;
+    createDraftMutation.mutate();
+  }, [employeeId, resumeId, createDraftMutation]);
+
+  useEffect(() => {
+    const employee = employeeQuery.data;
+    if (!employee || hasHydrated.current) return;
+    hasHydrated.current = true;
+    const engagementRelation = employee.primaryEngagement?.employmentType === "HONORARIOS" ? "SIN_DEPENDENCIA" : "DEPENDENCIA";
+    setForm((prev) => ({
+      ...prev,
+      employeeCode: employee.employeeCode || prev.employeeCode,
+      firstName: employee.firstName || "",
+      lastName: employee.lastName || "",
+      dpi: employee.dpi || "",
+      phoneMobile: employee.phoneMobile || "",
+      addressHome: employee.addressHome || "",
+      branchId: employee.primaryBranch?.id || "",
+      legalEntityId: employee.primaryEngagement?.legalEntity?.id || "",
+      professionalType: employee.isExternal ? "EXTERNAL" : "INTERNAL",
+      employmentRelation: engagementRelation,
+      payScheme: (employee.primaryEngagement?.paymentScheme as HrPaymentScheme) || "MONTHLY",
+      baseSalary: employee.primaryEngagement?.baseSalary || "",
+      baseAllowance: employee.primaryEngagement?.baseAllowance || ""
+    }));
+    setCurrentStep(employee.onboardingStep || 1);
+  }, [employeeQuery.data]);
+
+  const selectedBranch = useMemo(
+    () => (branchesQuery.data || []).find((branch) => branch.id === form.branchId) || null,
+    [branchesQuery.data, form.branchId]
+  );
+
+  const currencyCode = settingsQuery.data?.currencyCode || "GTQ";
+
+  const handleResume = () => {
+    if (!resumeId) return;
+    router.push(`/hr/employees/new?id=${resumeId}`);
+  };
+
+  const handleCreateNew = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("hrEmployeeDraftId");
+    }
+    setResumeId(null);
+    draftRequested.current = false;
+    createDraftMutation.mutate();
+  };
+
+  const mapErrors = (issues: Record<string, string[] | undefined>) => {
+    const next: Record<string, string> = {};
+    Object.entries(issues).forEach(([key, value]) => {
+      if (value && value.length > 0) next[key] = value[0];
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      setError(err?.error || "No se pudo crear el empleado");
+    return next;
+  };
+
+  const advanceStep = (next: number) => {
+    setErrors({});
+    setCurrentStep(next);
+  };
+
+  const handleNext = async () => {
+    if (!employeeId) return;
+
+    if (currentStep === 1) {
+      const result = wizardStep1Schema.safeParse({
+        firstName: form.firstName,
+        lastName: form.lastName,
+        dpi: form.dpi || null
+      });
+      if (!result.success) {
+        setErrors(mapErrors(result.error.flatten().fieldErrors));
+        return;
+      }
+      await updateEmployeeMutation.mutateAsync({
+        firstName: form.firstName,
+        lastName: form.lastName,
+        dpi: form.dpi ? form.dpi.trim() : null,
+        onboardingStatus: "DRAFT",
+        onboardingStep: 2
+      });
+      advanceStep(2);
       return;
     }
-    const data = await res.json();
-    const id = data?.data?.id;
-    router.push(id ? `/hr/employees/${id}` : "/hr/employees");
+
+    if (currentStep === 2) {
+      const result = wizardStep2Schema.safeParse({
+        phoneMobile: form.phoneMobile,
+        addressHome: form.addressHome
+      });
+      if (!result.success) {
+        setErrors(mapErrors(result.error.flatten().fieldErrors));
+        return;
+      }
+      await updateEmployeeMutation.mutateAsync({
+        phoneMobile: form.phoneMobile,
+        addressHome: form.addressHome,
+        onboardingStatus: "DRAFT",
+        onboardingStep: 3
+      });
+      advanceStep(3);
+      return;
+    }
+
+    if (currentStep === 3) {
+      const result = wizardStep3Schema.safeParse({
+        branchId: form.branchId,
+        legalEntityId: form.legalEntityId || null
+      });
+      if (!result.success) {
+        setErrors(mapErrors(result.error.flatten().fieldErrors));
+        return;
+      }
+      if ((legalEntitiesQuery.data || []).length > 0 && !form.legalEntityId) {
+        setErrors({ legalEntityId: "Selecciona una entidad" });
+        return;
+      }
+      const branchCode = selectedBranch?.code || selectedBranch?.name || "";
+      await updateEmployeeMutation.mutateAsync({
+        branchAssignments: [
+          {
+            branchId: form.branchId,
+            isPrimary: true,
+            code: branchCode
+          }
+        ],
+        onboardingStatus: "DRAFT",
+        onboardingStep: 4
+      });
+      advanceStep(4);
+      return;
+    }
+
+    if (currentStep === 4) {
+      const derivedRelation = form.professionalType === "EXTERNAL" ? "SIN_DEPENDENCIA" : "DEPENDENCIA";
+      const result = wizardStep4Schema.safeParse({
+        professionalType: form.professionalType,
+        employmentRelation: derivedRelation
+      });
+      if (!result.success) {
+        setErrors(mapErrors(result.error.flatten().fieldErrors));
+        return;
+      }
+      const legalEntityId = form.legalEntityId || legalEntitiesQuery.data?.[0]?.id || "";
+      if (!legalEntityId) {
+        setErrors({ legalEntityId: "Selecciona una entidad" });
+        return;
+      }
+      const employmentType = derivedRelation === "DEPENDENCIA" ? "DEPENDENCIA" : "HONORARIOS";
+      await updateEmployeeMutation.mutateAsync({
+        isExternal: form.professionalType === "EXTERNAL",
+        engagements: [
+          {
+            legalEntityId,
+            employmentType,
+            status: "ACTIVE",
+            startDate: new Date().toISOString().slice(0, 10),
+            isPrimary: true,
+            isPayrollEligible: derivedRelation === "DEPENDENCIA",
+            paymentScheme: form.payScheme || "MONTHLY"
+          }
+        ],
+        onboardingStatus: "DRAFT",
+        onboardingStep: 5
+      });
+      setForm((prev) => ({ ...prev, employmentRelation: derivedRelation }));
+      advanceStep(5);
+      return;
+    }
+
+    if (currentStep === 5) {
+      const result = wizardStep5Schema.safeParse({
+        payScheme: form.payScheme,
+        baseSalary: form.baseSalary === "" ? undefined : Number(form.baseSalary),
+        baseAllowance: form.baseAllowance === "" ? undefined : Number(form.baseAllowance)
+      });
+      if (!result.success) {
+        setErrors(mapErrors(result.error.flatten().fieldErrors));
+        return;
+      }
+      if (form.employmentRelation === "DEPENDENCIA" && !form.baseSalary) {
+        setErrors({ baseSalary: "Salario base requerido" });
+        return;
+      }
+      await updateCompensationMutation.mutateAsync({
+        baseSalary: form.baseSalary ? Number(form.baseSalary) : undefined,
+        baseAllowance: form.baseAllowance ? Number(form.baseAllowance) : undefined,
+        payScheme: form.payScheme
+      });
+      await updateEmployeeMutation.mutateAsync({ onboardingStatus: "DRAFT", onboardingStep: 6 });
+      advanceStep(6);
+    }
   };
 
-  const currentStepLabel = useMemo(() => steps[step], [step]);
+  const handleBack = () => {
+    if (currentStep > 1) setCurrentStep((step) => step - 1);
+  };
+
+  const handleSaveExit = async () => {
+    if (employeeId && typeof window !== "undefined") {
+      localStorage.setItem("hrEmployeeDraftId", employeeId);
+    }
+    showToast("Borrador guardado", "success");
+    router.push("/hr/employees");
+  };
+
+  const summaryBranch = selectedBranch?.name || "—";
+  const summaryLocation = selectedBranch?.address || "—";
+  const summaryEntity = (legalEntitiesQuery.data || []).find((e) => e.id === form.legalEntityId);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-slate-500">RRHH</p>
-          <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Nuevo empleado</h1>
-          <p className="text-sm text-slate-500 mt-1">Datos mínimos para activar a un colaborador.</p>
+          <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Alta de colaborador</h1>
         </div>
-        <Link href="/hr/employees" className="text-sm text-brand-primary hover:underline">
-          ← Volver al listado
-        </Link>
-      </div>
-
-      <div className="flex items-center gap-3">
-        {steps.map((label, idx) => (
-          <div
-            key={label}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${idx === step ? "border-brand-primary bg-brand-primary/10 text-brand-primary" : "border-slate-200 text-slate-600"}`}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSaveExit}
+            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
           >
-            <span className="text-xs font-semibold">{idx + 1}</span>
-            <span className="text-sm font-semibold">{label}</span>
-          </div>
-        ))}
+            Guardar y salir
+          </button>
+          <button
+            onClick={() => router.push("/hr/employees")}
+            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Cancelar
+          </button>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Paso {step + 1}: {currentStepLabel}</CardTitle>
+      {employeeId && employeeQuery.isError && (
+        <Card className="border border-rose-200 bg-rose-50">
+          <CardContent className="p-4 flex items-center justify-between">
+            <p className="text-sm text-rose-700">No se pudo cargar el borrador.</p>
+            <button
+              onClick={() => employeeQuery.refetch()}
+              className="rounded-xl border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700"
+            >
+              Reintentar
+            </button>
+          </CardContent>
+        </Card>
+      )}
+
+      {!employeeId && resumeId && (
+        <Card className="border border-slate-200">
+          <CardContent className="p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Tienes un borrador en curso</p>
+              <p className="text-xs text-slate-500">Puedes reanudarlo o crear un nuevo colaborador.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleResume}
+                className="rounded-xl bg-brand-primary px-4 py-2 text-xs font-semibold text-white shadow-soft"
+              >
+                Reanudar
+              </button>
+              <button
+                onClick={handleCreateNew}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700"
+              >
+                Crear nuevo
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="border border-slate-200">
+        <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <CardTitle className="text-base">Progreso</CardTitle>
+            <p className="text-xs text-slate-500">Paso {currentStep} de 6</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {steps.map((step) => (
+              <Badge key={step.id} variant={step.id === currentStep ? "success" : "info"}>
+                {step.id}. {step.label}
+              </Badge>
+            ))}
+          </div>
         </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
-            {step === 0 && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm text-slate-600">Nombres</label>
-                    <input
-                      {...form.register("firstName", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Apellidos</label>
-                    <input
-                      {...form.register("lastName", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Código (opcional)</label>
-                    <input
-                      {...form.register("employeeCode")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="EMP-0003"
-                    />
-                  </div>
+      </Card>
+
+      <Card className="border border-slate-200">
+        <CardHeader>
+          <CardTitle className="text-base">{steps.find((s) => s.id === currentStep)?.label}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          {currentStep === 1 && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-slate-600">Código</label>
+                <input
+                  value={form.employeeCode}
+                  readOnly
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600"
+                />
+              </div>
+              <div />
+              <div className="space-y-1">
+                <label className="text-slate-600">Nombres</label>
+                <input
+                  value={form.firstName}
+                  onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2"
+                />
+                {errors.firstName && <p className="text-xs text-rose-600">{errors.firstName}</p>}
+              </div>
+              <div className="space-y-1">
+                <label className="text-slate-600">Apellidos</label>
+                <input
+                  value={form.lastName}
+                  onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2"
+                />
+                {errors.lastName && <p className="text-xs text-rose-600">{errors.lastName}</p>}
+              </div>
+              <div className="space-y-1">
+                <label className="text-slate-600">DPI (opcional)</label>
+                <input
+                  value={form.dpi}
+                  onChange={(e) => setForm((f) => ({ ...f, dpi: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2"
+                />
+                {errors.dpi && <p className="text-xs text-rose-600">{errors.dpi}</p>}
+              </div>
+            </div>
+          )}
+
+          {currentStep === 2 && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-slate-600">Teléfono</label>
+                <input
+                  value={form.phoneMobile}
+                  onChange={(e) => setForm((f) => ({ ...f, phoneMobile: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2"
+                />
+                {errors.phoneMobile && <p className="text-xs text-rose-600">{errors.phoneMobile}</p>}
+              </div>
+              <div className="space-y-1">
+                <label className="text-slate-600">Dirección de vivienda</label>
+                <input
+                  value={form.addressHome}
+                  onChange={(e) => setForm((f) => ({ ...f, addressHome: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2"
+                />
+                {errors.addressHome && <p className="text-xs text-rose-600">{errors.addressHome}</p>}
+              </div>
+            </div>
+          )}
+
+          {currentStep === 3 && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-slate-600">Sucursal</label>
+                <select
+                  value={form.branchId}
+                  onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"
+                >
+                  <option value="">Selecciona</option>
+                  {(branchesQuery.data || []).map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </select>
+                {errors.branchId && <p className="text-xs text-rose-600">{errors.branchId}</p>}
+              </div>
+              <div className="space-y-1">
+                <label className="text-slate-600">Ubicación laboral</label>
+                <input
+                  value={selectedBranch?.address || ""}
+                  readOnly
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-slate-600">Entidad / Empresa</label>
+                <select
+                  value={form.legalEntityId}
+                  onChange={(e) => setForm((f) => ({ ...f, legalEntityId: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"
+                >
+                  <option value="">Selecciona</option>
+                  {(legalEntitiesQuery.data || []).map((entity) => (
+                    <option key={entity.id} value={entity.id}>
+                      {entity.comercialName || entity.name}
+                    </option>
+                  ))}
+                </select>
+                {errors.legalEntityId && <p className="text-xs text-rose-600">{errors.legalEntityId}</p>}
+              </div>
+            </div>
+          )}
+
+          {currentStep === 4 && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-slate-600">Tipo profesional</label>
+                <select
+                  value={form.professionalType}
+                  onChange={(e) => {
+                    const value = e.target.value as "INTERNAL" | "EXTERNAL";
+                    setForm((f) => ({
+                      ...f,
+                      professionalType: value,
+                      employmentRelation: value === "EXTERNAL" ? "SIN_DEPENDENCIA" : "DEPENDENCIA"
+                    }));
+                  }}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"
+                >
+                  <option value="INTERNAL">Interno</option>
+                  <option value="EXTERNAL">Externo</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-slate-600">Relación laboral</label>
+                <input
+                  value={form.employmentRelation === "DEPENDENCIA" ? "Dependencia" : "Sin dependencia"}
+                  readOnly
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600"
+                />
+              </div>
+            </div>
+          )}
+
+          {currentStep === 5 && (
+            <div className="space-y-3">
+              {form.employmentRelation !== "DEPENDENCIA" && (
+                <p className="text-xs text-slate-500">Relación sin dependencia: salario base opcional.</p>
+              )}
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="space-y-1">
+                  <label className="text-slate-600">Esquema de pago</label>
+                  <select
+                    value={form.payScheme}
+                    onChange={(e) => setForm((f) => ({ ...f, payScheme: e.target.value as HrPaymentScheme }))}
+                    disabled={form.employmentRelation !== "DEPENDENCIA"}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white disabled:bg-slate-50 disabled:text-slate-400"
+                  >
+                    {HR_PAYMENT_SCHEMES.map((scheme) => (
+                      <option key={scheme} value={scheme}>
+                        {scheme}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm text-slate-600">DPI</label>
-                    <input
-                      {...form.register("dpi", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">NIT</label>
-                    <input
-                      {...form.register("nit")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Correo</label>
-                    <input
-                      type="email"
-                      {...form.register("email")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="correo@empresa.com"
-                    />
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-slate-600">Salario base</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.baseSalary}
+                    onChange={(e) => setForm((f) => ({ ...f, baseSalary: e.target.value }))}
+                    disabled={form.employmentRelation !== "DEPENDENCIA"}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 disabled:bg-slate-50 disabled:text-slate-400"
+                  />
+                  {errors.baseSalary && <p className="text-xs text-rose-600">{errors.baseSalary}</p>}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm text-slate-600">Correo personal</label>
-                    <input
-                      type="email"
-                      {...form.register("personalEmail")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="personal@email.com"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Teléfono móvil</label>
-                    <input
-                      {...form.register("phone")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="+502..."
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Teléfono casa</label>
-                    <input
-                      {...form.register("homePhone", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="Casa..."
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm text-slate-600">Contacto emergencia</label>
-                    <input
-                      {...form.register("emergencyContactName", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="Nombre"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Teléfono emergencia</label>
-                    <input
-                      {...form.register("emergencyContactPhone", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="+502..."
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Fecha nacimiento</label>
-                    <input
-                      type="date"
-                      {...form.register("birthDate")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="md:col-span-2">
-                    <label className="text-sm text-slate-600">Dirección</label>
-                    <input
-                      {...form.register("address", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="Dirección completa"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Foto / selfie</label>
-                    <input
-                      {...form.register("photoUrl")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="/uploads/..."
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm text-slate-600">Foto DPI</label>
-                    <input
-                      {...form.register("dpiPhotoUrl", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="/uploads/..."
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">RTU actualizado</label>
-                    <input
-                      {...form.register("rtuFileUrl", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="/uploads/..."
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Comprobante vivienda (agua/luz)</label>
-                    <input
-                      {...form.register("residenceProofUrl", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="/uploads/..."
-                    />
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-slate-600">Bono base fijo</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.baseAllowance}
+                    onChange={(e) => setForm((f) => ({ ...f, baseAllowance: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2"
+                  />
                 </div>
               </div>
-            )}
+              <p className="text-xs text-slate-500">Moneda: {currencyCode}</p>
+            </div>
+          )}
 
-            {step === 1 && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm text-slate-600">Razón social</label>
-                    <select
-                      {...form.register("legalEntityId", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    >
-                      {(legalEntitiesQuery.data || []).map((entity) => (
-                        <option key={entity.id} value={entity.id}>
-                          {entity.comercialName || entity.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Tipo de contratación</label>
-                    <select
-                      {...form.register("employmentType", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    >
-                      {HR_EMPLOYMENT_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {employmentLabels[type]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Fecha de inicio</label>
-                    <input
-                      type="date"
-                      {...form.register("startDate", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm text-slate-600">Sucursal primaria</label>
-                    <select
-                      {...form.register("branchId", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    >
-                      {(branchesQuery.data || []).map((branch) => (
-                        <option key={branch.id} value={branch.id}>
-                          {branch.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Puesto</label>
-                    <select
-                      {...form.register("positionId", { required: true })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    >
-                      {(positionsQuery.data || []).map((pos) => (
-                        <option key={pos.id} value={pos.id}>
-                          {pos.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Departamento (opcional)</label>
-                    <select
-                      {...form.register("departmentId")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    >
-                      <option value="">Sin asignar</option>
-                      {(departmentsQuery.data || []).map((dep) => (
-                        <option key={dep.id} value={dep.id}>
-                          {dep.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm text-slate-600">Salario base</label>
-                    <input
-                      type="number"
-                      {...form.register("compensationAmount")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Frecuencia pago</label>
-                    <select
-                      {...form.register("compensationFrequency")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    >
-                      {PAY_FREQUENCIES.map((freq) => (
-                        <option key={freq} value={freq}>
-                          {freq === "MONTHLY" ? "Mensual" : freq === "BIWEEKLY" ? "Quincenal" : "Semanal"}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Fecha fin (opcional)</label>
-                    <input
-                      type="date"
-                      {...form.register("endDate")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    />
-                  </div>
+          {currentStep === 6 && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-200 p-3">
+                <p className="text-sm font-semibold text-slate-800">Resumen</p>
+                <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-slate-600 md:grid-cols-2">
+                  <p>Nombre: {form.firstName} {form.lastName}</p>
+                  <p>Sucursal: {summaryBranch}</p>
+                  <p>Ubicación: {summaryLocation}</p>
+                  <p>Relación: {form.employmentRelation}</p>
+                  <p>Compensación: {formatCurrency(form.baseSalary || "0", currencyCode)}</p>
+                  <p>Bono base: {formatCurrency(form.baseAllowance || "0", currencyCode)}</p>
                 </div>
               </div>
-            )}
 
-            {step === 2 && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="rounded-xl border border-slate-200 p-3 space-y-3">
+                <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-sm text-slate-600">Tipo documento</label>
+                    <p className="text-sm font-semibold text-slate-800">Documentos</p>
+                    <p className="text-xs text-slate-500">Sube contrato, DPI u otros.</p>
+                  </div>
+                  <button
+                    onClick={() => uploadDocumentMutation.mutate(documentForm)}
+                    disabled={!documentForm.fileUrl || uploadDocumentMutation.isPending}
+                    className="rounded-xl bg-brand-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  >
+                    {uploadDocumentMutation.isPending ? "Guardando..." : "Agregar"}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="text-slate-600">Tipo</label>
                     <select
-                      {...form.register("documentType")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+                      value={documentForm.type}
+                      onChange={(e) => setDocumentForm((f) => ({ ...f, type: e.target.value as HrEmployeeDocumentType }))}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"
                     >
                       {HR_EMPLOYEE_DOCUMENT_TYPES.map((type) => (
                         <option key={type} value={type}>
@@ -614,179 +814,116 @@ export default function NewEmployeePage() {
                       ))}
                     </select>
                   </div>
-                  <div className="md:col-span-2">
-                    <label className="text-sm text-slate-600">Título documento</label>
-                    <input
-                      {...form.register("documentTitle")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="Ej. Contrato indefinido"
-                    />
+                  <div className="space-y-1">
+                    <label className="text-slate-600">Visibilidad</label>
+                    <select
+                      value={documentForm.visibility}
+                      onChange={(e) => setDocumentForm((f) => ({ ...f, visibility: e.target.value as any }))}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"
+                    >
+                      <option value="PERSONAL">Personal</option>
+                      <option value="EMPRESA">Empresa</option>
+                      <option value="RESTRINGIDO">Restringido</option>
+                    </select>
                   </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="md:col-span-2">
-                    <label className="text-sm text-slate-600">Archivo / URL</label>
-                    <input
-                      {...form.register("documentFileUrl")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="/uploads/..."
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Vence</label>
+                  <div className="space-y-1">
+                    <label className="text-slate-600">Emisión</label>
                     <input
                       type="date"
-                      {...form.register("documentExpiresAt")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+                      value={documentForm.issuedAt}
+                      onChange={(e) => setDocumentForm((f) => ({ ...f, issuedAt: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2"
                     />
                   </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm text-slate-600">Emitido</label>
+                  <div className="space-y-1">
+                    <label className="text-slate-600">Vencimiento</label>
                     <input
                       type="date"
-                      {...form.register("documentIssuedAt")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+                      value={documentForm.expiresAt}
+                      onChange={(e) => setDocumentForm((f) => ({ ...f, expiresAt: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2"
                     />
                   </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Entregado</label>
-                    <input
-                      type="date"
-                      {...form.register("documentDeliveredAt")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-600">Notas</label>
-                    <input
-                      {...form.register("documentNotes")}
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                      placeholder="Observaciones"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={addDocument}
-                    className="inline-flex items-center gap-2 rounded-xl border border-dashed border-brand-primary px-4 py-2 text-sm font-semibold text-brand-primary hover:-translate-y-px transition"
-                  >
-                    + Agregar documento
-                  </button>
-                  <p className="text-xs text-slate-500">Sincronizado con retención de 5 años y alertas de vencimiento.</p>
                 </div>
 
-                {documents.length > 0 && (
-                  <div className="rounded-xl border border-slate-200 p-3 space-y-2">
-                    {documents.map((doc, idx) => (
-                      <div key={`${doc.title}-${idx}`} className="flex items-center justify-between text-sm">
-                        <div>
-                          <p className="font-semibold text-slate-900">{doc.title}</p>
-                          <p className="text-xs text-slate-500">
-                            {doc.type} • {doc.version.issuedAt || "Sin fecha"} {doc.version.expiresAt ? `• Vence ${doc.version.expiresAt}` : ""}
-                          </p>
+                <div className="space-y-1">
+                  <label className="text-slate-600">Notas</label>
+                  <textarea
+                    value={documentForm.notes}
+                    onChange={(e) => setDocumentForm((f) => ({ ...f, notes: e.target.value }))}
+                    rows={2}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2"
+                  />
+                </div>
+
+                <UploadField
+                  value={documentForm.fileUrl}
+                  accept="application/pdf,image/*"
+                  onChange={(url, info) =>
+                    setDocumentForm((f) => ({
+                      ...f,
+                      fileUrl: url,
+                      fileName: info?.name || url.split("/").pop() || "Documento",
+                      mime: info?.mime || null
+                    }))
+                  }
+                />
+
+                {documentsQuery.data && documentsQuery.data.length > 0 && (
+                  <div className="space-y-2">
+                    {documentsQuery.data.map((doc) => (
+                      <div key={doc.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-800">{doc.title || doc.type}</span>
+                          {doc.currentVersion?.fileUrl && (
+                            <a
+                              href={doc.currentVersion.fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-brand-primary font-semibold"
+                            >
+                              Ver
+                            </a>
+                          )}
                         </div>
-                        <button onClick={() => removeDocument(idx)} className="text-xs text-rose-600 hover:underline">
-                          Quitar
-                        </button>
+                        <p className="text-slate-500">{doc.visibility}</p>
                       </div>
                     ))}
                   </div>
                 )}
-
-                <div className="pt-2 border-t border-slate-200 space-y-3">
-                  <p className="text-sm font-semibold text-slate-800">Colegiado profesional</p>
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" {...form.register("licenseApplies")} id="licenseApplies" className="h-4 w-4" />
-                    <label htmlFor="licenseApplies" className="text-sm text-slate-700">
-                      Aplica colegiado
-                    </label>
-                  </div>
-                  {form.watch("licenseApplies") && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <label className="text-sm text-slate-600">Número</label>
-                        <input
-                          {...form.register("licenseNumber")}
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm text-slate-600">Emitido</label>
-                        <input
-                          type="date"
-                          {...form.register("licenseIssuedAt")}
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm text-slate-600">Vence</label>
-                        <input
-                          type="date"
-                          {...form.register("licenseExpiresAt")}
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm text-slate-600">Archivo</label>
-                        <input
-                          {...form.register("licenseFileUrl")}
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                          placeholder="/uploads/..."
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm text-slate-600">Recordar antes (días)</label>
-                        <input
-                          type="number"
-                          {...form.register("licenseReminderDays")}
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-                          placeholder="30"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
               </div>
-            )}
-
-            {error && <p className="text-sm text-rose-600">{error}</p>}
-
-            <div className="flex items-center gap-3">
-              {step > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setStep((prev) => Math.max(prev - 1, 0))}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:-translate-y-px transition"
-                >
-                  ← Anterior
-                </button>
-              )}
-              {step < steps.length - 1 ? (
-                <button
-                  type="button"
-                  onClick={() => setStep((prev) => Math.min(prev + 1, steps.length - 1))}
-                  className="inline-flex items-center gap-2 rounded-xl bg-brand-primary px-4 py-2 text-sm font-semibold text-white shadow-soft hover:-translate-y-px transition disabled:opacity-60"
-                  disabled={loadingCatalogs}
-                >
-                  Siguiente →
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={form.formState.isSubmitting || loadingCatalogs}
-                  className="inline-flex items-center gap-2 rounded-xl bg-brand-primary px-4 py-2 text-sm font-semibold text-white shadow-soft hover:-translate-y-px transition disabled:opacity-60"
-                >
-                  {form.formState.isSubmitting ? "Guardando..." : loadingCatalogs ? "Cargando catálogos..." : "Crear empleado"}
-                </button>
-              )}
-              <p className="text-xs text-slate-500">Se generará un código automático si dejas el campo vacío.</p>
             </div>
-          </form>
+          )}
         </CardContent>
       </Card>
+
+      <div className="flex items-center justify-between">
+        <button
+          onClick={handleBack}
+          disabled={currentStep === 1}
+          className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+        >
+          Atrás
+        </button>
+        {currentStep < 6 && (
+          <button
+            onClick={handleNext}
+            disabled={updateEmployeeMutation.isPending || updateCompensationMutation.isPending}
+            className="rounded-xl bg-brand-primary px-6 py-2 text-sm font-semibold text-white shadow-soft disabled:opacity-60"
+          >
+            {updateEmployeeMutation.isPending || updateCompensationMutation.isPending ? "Guardando..." : "Continuar"}
+          </button>
+        )}
+        {currentStep === 6 && (
+          <button
+            onClick={() => completeMutation.mutate()}
+            disabled={completeMutation.isPending}
+            className="rounded-xl bg-brand-primary px-6 py-2 text-sm font-semibold text-white shadow-soft disabled:opacity-60"
+          >
+            {completeMutation.isPending ? "Finalizando..." : "Finalizar alta"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
