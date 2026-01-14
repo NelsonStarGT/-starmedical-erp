@@ -7,7 +7,7 @@ import { cleanNullableString } from "@/lib/hr/utils";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const auth = requireRole(req, ["ADMIN", "HR_ADMIN", "HR_USER", "VIEWER"]);
+  const auth = requireRole(req, ["ADMIN", "HR_ADMIN", "HR_USER", "STAFF", "VIEWER"]);
   if (auth.errorResponse) return auth.errorResponse;
 
   const departments = await prisma.hrDepartment.findMany({

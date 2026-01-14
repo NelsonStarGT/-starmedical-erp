@@ -18,10 +18,19 @@ type EmployeesResponse = {
 };
 
 type WarningAttachment = { id: string; fileUrl: string; fileName: string; mime?: string | null };
-type Warning = { id: string; title: string; description?: string | null; issuedAt: string; cooldownDays: number | null; attachments: WarningAttachment[] };
+type Warning = { id: string; title: string; description?: string | null; issuedAt: string; createdAt?: string; attachments: WarningAttachment[] };
 type WarningsResponse = {
   data: Warning[];
-  meta: { page: number; pageSize: number; total: number; totalPages: number; hasMore: boolean };
+  meta: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasMore: boolean;
+    recentCount?: number;
+    windowDays?: number;
+    threshold?: number;
+  };
 };
 
 type Compensation = {
@@ -33,7 +42,26 @@ type Compensation = {
   bonuses: { id: string; name: string; amount: string; isActive: boolean; createdAt: string }[];
 };
 
-type HrSettings = { currencyCode: "GTQ" | "USD" };
+type HrSettings = { currencyCode: "GTQ" | "USD"; warningWindowDays?: number; warningThreshold?: number };
+
+type DisciplinaryActionItem = {
+  id: string;
+  type: "AMONESTACION" | "SUSPENSION" | "TERMINACION_RECOMENDADA" | "TERMINACION";
+  title: string;
+  description?: string | null;
+  comments?: string | null;
+  status: "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED";
+  startDate?: string | null;
+  endDate?: string | null;
+  issuedAt?: string | null;
+  approvedById?: string | null;
+  attachments: WarningAttachment[];
+};
+
+type DisciplinaryResponse = {
+  data: DisciplinaryActionItem[];
+  meta: { page: number; pageSize: number; total: number; totalPages: number; hasMore: boolean };
+};
 
 type CompensationHistoryItem = {
   id: string;
@@ -57,6 +85,20 @@ const statusVariant: Record<HrEmployeeStatus, "info" | "warning" | "success"> = 
   ACTIVE: "success",
   SUSPENDED: "warning",
   TERMINATED: "warning"
+};
+
+const disciplinaryStatusLabel: Record<DisciplinaryActionItem["status"], string> = {
+  DRAFT: "Borrador",
+  PENDING_APPROVAL: "En revisión",
+  APPROVED: "Aprobada",
+  REJECTED: "Rechazada"
+};
+
+const disciplinaryStatusVariant: Record<DisciplinaryActionItem["status"], "info" | "warning" | "success"> = {
+  DRAFT: "info",
+  PENDING_APPROVAL: "warning",
+  APPROVED: "success",
+  REJECTED: "warning"
 };
 
 async function fetchBranches(): Promise<HrBranch[]> {
@@ -91,7 +133,10 @@ async function fetchEmployees(filters: {
 
 async function fetchWarnings(employeeId?: string, page = 1): Promise<WarningsResponse> {
   if (!employeeId)
-    return { data: [], meta: { page: 1, pageSize: 5, total: 0, totalPages: 1, hasMore: false } };
+    return {
+      data: [],
+      meta: { page: 1, pageSize: 5, total: 0, totalPages: 1, hasMore: false, recentCount: 0, windowDays: 20, threshold: 3 }
+    };
   const res = await fetch(`/api/hr/employees/${employeeId}/warnings?page=${page}`, { cache: "no-store" });
   if (!res.ok) {
     const error = await res.json().catch(() => ({}));
@@ -102,6 +147,17 @@ async function fetchWarnings(employeeId?: string, page = 1): Promise<WarningsRes
     data: payload.data || [],
     meta: payload.meta || { page, pageSize: 5, total: payload.data?.length || 0, totalPages: 1, hasMore: false }
   };
+}
+
+async function fetchDisciplinaryActions(employeeId?: string, page = 1): Promise<DisciplinaryResponse> {
+  if (!employeeId)
+    return { data: [], meta: { page: 1, pageSize: 5, total: 0, totalPages: 1, hasMore: false } };
+  const res = await fetch(`/api/hr/employees/${employeeId}/disciplinary-actions?page=${page}`, { cache: "no-store" });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error?.error || "No se pudo cargar sanciones");
+  }
+  return res.json();
 }
 
 async function fetchCompensation(employeeId?: string): Promise<Compensation | null> {
@@ -180,11 +236,20 @@ type EditForm = {
 
 type WarningFormAttachment = { id: string; fileUrl: string; fileName: string; mime?: string | null };
 type WarningFormState = { title: string; issuedAt: string; notes: string; attachments: WarningFormAttachment[] };
+type DisciplinaryFormState = {
+  type: "AMONESTACION" | "SUSPENSION" | "TERMINACION_RECOMENDADA";
+  reason: string;
+  startDate: string;
+  endDate: string;
+  comments: string;
+  attachments: WarningFormAttachment[];
+};
 type ActiveModal =
   | "DETAIL"
   | "EDIT"
   | "TRANSFER"
   | "WARNING"
+   | "DISCIPLINARY"
   | "SUSPEND"
   | "TERMINATE"
   | "UPLOAD_DOC"
@@ -216,6 +281,17 @@ function emptyWarningForm(): WarningFormState {
   };
 }
 
+function emptyDisciplinaryForm(): DisciplinaryFormState {
+  return {
+    type: "AMONESTACION",
+    reason: "",
+    startDate: todayInputValue(),
+    endDate: "",
+    comments: "",
+    attachments: []
+  };
+}
+
 export default function EmployeesPage() {
   const queryClient = useQueryClient();
   const { toasts, showToast, dismiss } = useToast();
@@ -232,6 +308,7 @@ export default function EmployeesPage() {
   const [createForm, setCreateForm] = useState<CreateForm>(emptyCreateForm());
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [warningForm, setWarningForm] = useState<WarningFormState>(emptyWarningForm());
+  const [disciplinaryForm, setDisciplinaryForm] = useState<DisciplinaryFormState>(emptyDisciplinaryForm());
   const [transferForm, setTransferForm] = useState<{ branchId: string; workLocation: string; startDate: string; comments: string }>({
     branchId: "",
     workLocation: "",
@@ -328,6 +405,15 @@ export default function EmployeesPage() {
     retry: 1,
     staleTime: 30_000
   });
+  const disciplinaryQuery = useInfiniteQuery({
+    queryKey: ["hr-employee-disciplinary", selectedEmployeeId],
+    queryFn: ({ pageParam = 1 }) => fetchDisciplinaryActions(selectedEmployeeId || undefined, Number(pageParam)),
+    enabled: Boolean(selectedEmployeeId),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => (lastPage.meta?.hasMore ? Number(lastPage.meta.page || 1) + 1 : undefined),
+    retry: 1,
+    staleTime: 30_000
+  });
 
   const compensationQuery = useQuery({
     queryKey: ["hr-employee-comp", selectedEmployeeId],
@@ -346,6 +432,12 @@ export default function EmployeesPage() {
   const warningPages = warningsQuery.data?.pages || [];
   const warningItems = warningPages.flatMap((page) => page.data || []);
   const warningsMeta = warningPages[0]?.meta;
+  const warningThreshold = warningsMeta?.threshold ?? settingsQuery.data?.warningThreshold ?? 3;
+  const warningWindowDays = warningsMeta?.windowDays ?? settingsQuery.data?.warningWindowDays ?? 20;
+  const requiresDisciplinaryReview = (warningsMeta?.recentCount ?? 0) >= (warningThreshold ?? 3);
+  const disciplinaryPages = disciplinaryQuery.data?.pages || [];
+  const disciplinaryItems = disciplinaryPages.flatMap((page) => page.data || []);
+  const disciplinaryMeta = disciplinaryPages[0]?.meta;
   const branchAddress = selectedEmployee ? primaryBranchAssignment?.branch?.address || selectedEmployee.primaryBranch?.address || "—" : "—";
   const workLocationLabel = selectedEmployee ? branchAddress || selectedEmployee.workLocation || "—" : "—";
   const documentLinks = useMemo(() => {
@@ -383,6 +475,9 @@ export default function EmployeesPage() {
   useEffect(() => {
     if (activeModal === "WARNING") {
       setWarningForm(emptyWarningForm());
+    }
+    if (activeModal === "DISCIPLINARY") {
+      setDisciplinaryForm(emptyDisciplinaryForm());
     }
   }, [activeModal, selectedEmployeeId]);
 
@@ -499,6 +594,90 @@ export default function EmployeesPage() {
       setErrorMsg(message);
       showToast(message, "error");
     }
+  });
+  const disciplinaryMutation = useMutation({
+    mutationFn: async (payload: DisciplinaryFormState) => {
+      if (!selectedEmployeeId) throw new Error("Sin empleado");
+      const res = await fetch(`/api/hr/employees/${selectedEmployeeId}/disciplinary-actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: payload.type,
+          reason: payload.reason.trim(),
+          startDate: payload.startDate,
+          endDate: payload.endDate || undefined,
+          comments: payload.comments,
+          attachments: payload.attachments
+            .filter((a) => a.fileUrl)
+            .map((a) => ({
+              fileUrl: a.fileUrl,
+              fileName: a.fileName?.trim() || a.fileUrl.split("/").pop() || "Adjunto",
+              mime: a.mime
+            }))
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo registrar la sanción");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      showToast("Sanción registrada", "success");
+      void queryClient.invalidateQueries({ queryKey: ["hr-employee-disciplinary", selectedEmployeeId] });
+      setDisciplinaryForm(emptyDisciplinaryForm());
+      setActiveModal(isDetailOpen ? "DETAIL" : null);
+    },
+    onError: (err: any) => {
+      const message = err?.message || "Error al registrar la sanción";
+      setErrorMsg(message);
+      showToast(message, "error");
+    }
+  });
+  const submitDisciplinaryMutation = useMutation({
+    mutationFn: async (actionId: string) => {
+      const res = await fetch(`/api/hr/disciplinary-actions/${actionId}/submit`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo enviar a aprobación");
+      }
+      return res.json();
+    },
+    onSuccess: (_data, actionId) => {
+      showToast("Enviado a aprobación", "success");
+      void queryClient.invalidateQueries({ queryKey: ["hr-employee-disciplinary", selectedEmployeeId] });
+    },
+    onError: (err: any) => showToast(err?.message || "Error al enviar a aprobación", "error")
+  });
+  const approveDisciplinaryMutation = useMutation({
+    mutationFn: async (actionId: string) => {
+      const res = await fetch(`/api/hr/disciplinary-actions/${actionId}/approve`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo aprobar");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      showToast("Sanción aprobada", "success");
+      void queryClient.invalidateQueries({ queryKey: ["hr-employee-disciplinary", selectedEmployeeId] });
+    },
+    onError: (err: any) => showToast(err?.message || "Error al aprobar", "error")
+  });
+  const rejectDisciplinaryMutation = useMutation({
+    mutationFn: async (actionId: string) => {
+      const res = await fetch(`/api/hr/disciplinary-actions/${actionId}/reject`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo rechazar");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      showToast("Sanción rechazada", "success");
+      void queryClient.invalidateQueries({ queryKey: ["hr-employee-disciplinary", selectedEmployeeId] });
+    },
+    onError: (err: any) => showToast(err?.message || "Error al rechazar", "error")
   });
 
   const activateMutation = useMutation({
@@ -1327,19 +1506,18 @@ export default function EmployeesPage() {
         }
       >
         <div className="space-y-4 text-sm">
-          <div className="space-y-1">
-            <label className="text-slate-600">
-              Título <span className="text-rose-500">*</span>
-            </label>
-            <input
-              value={warningForm.title}
-              onChange={(e) => setWarningForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="Ej. Incumplimiento de horario"
-              className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr,1fr]">
+            <div className="space-y-1">
+              <label className="text-slate-600">
+                Título <span className="text-rose-500">*</span>
+              </label>
+              <input
+                value={warningForm.title}
+                onChange={(e) => setWarningForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="Ej. Incumplimiento de horario"
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+              />
+            </div>
             <div className="space-y-1">
               <label className="text-slate-600">Fecha</label>
               <input
@@ -1349,16 +1527,16 @@ export default function EmployeesPage() {
                 className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-slate-600">Comentarios</label>
-              <textarea
-                value={warningForm.notes}
-                onChange={(e) => setWarningForm((f) => ({ ...f, notes: e.target.value }))}
-                placeholder="Detalle la llamada de atención o acuerdos"
-                rows={4}
-                className="mt-1 w-full min-h-[140px] rounded-xl border border-slate-200 px-3 py-2 shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-              />
-            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-slate-600">Comentarios</label>
+            <textarea
+              value={warningForm.notes}
+              onChange={(e) => setWarningForm((f) => ({ ...f, notes: e.target.value }))}
+              placeholder="Detalle la llamada de atención o acuerdos"
+              className="mt-1 w-full min-h-[180px] rounded-xl border border-slate-200 px-3 py-3 shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+            />
           </div>
 
           <div className="space-y-2">
@@ -1421,6 +1599,171 @@ export default function EmployeesPage() {
                       attachments: f.attachments.map((item) =>
                         item.id === att.id
                           ? { ...item, fileUrl: url, fileName: item.fileName || info?.name || url.split("/").pop() || "", mime: info?.mime || item.mime }
+                          : item
+                      )
+                    }))
+                  }
+                  accept="application/pdf,image/*"
+                  helperText="Arrastra o haz clic para subir (PDF/imagen)"
+                  onUploadSuccess={() => showToast("Archivo cargado", "success")}
+                  onUploadError={(message) => showToast(message, "error")}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal sanción disciplinaria */}
+      <Modal
+        open={activeModal === "DISCIPLINARY"}
+        onClose={closeSubModal}
+        title="Nueva sanción disciplinaria"
+        className="max-w-xl"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button onClick={closeSubModal} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
+              Cancelar
+            </button>
+            <button
+              onClick={() => {
+                if (!disciplinaryForm.reason.trim()) {
+                  showToast("Agrega el motivo de la sanción", "error");
+                  return;
+                }
+                disciplinaryMutation.mutate(disciplinaryForm);
+              }}
+              className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-soft hover:-translate-y-px transition disabled:opacity-60"
+              disabled={disciplinaryMutation.isPending}
+            >
+              {disciplinaryMutation.isPending ? "Guardando..." : "Guardar sanción"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4 text-sm">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.2fr,1fr]">
+            <div className="space-y-1">
+              <label className="text-slate-600">Tipo</label>
+              <select
+                value={disciplinaryForm.type}
+                onChange={(e) => setDisciplinaryForm((f) => ({ ...f, type: e.target.value as DisciplinaryFormState["type"] }))}
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+              >
+                <option value="AMONESTACION">Amonestación</option>
+                <option value="SUSPENSION">Suspensión</option>
+                <option value="TERMINACION_RECOMENDADA">Terminación recomendada</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-slate-600">
+                Motivo <span className="text-rose-500">*</span>
+              </label>
+              <input
+                value={disciplinaryForm.reason}
+                onChange={(e) => setDisciplinaryForm((f) => ({ ...f, reason: e.target.value }))}
+                placeholder="Ej. reincidencia"
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-1">
+              <label className="text-slate-600">Fecha inicio</label>
+              <input
+                type="date"
+                value={disciplinaryForm.startDate}
+                onChange={(e) => setDisciplinaryForm((f) => ({ ...f, startDate: e.target.value }))}
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-slate-600">Fecha fin (opcional)</label>
+              <input
+                type="date"
+                value={disciplinaryForm.endDate}
+                onChange={(e) => setDisciplinaryForm((f) => ({ ...f, endDate: e.target.value }))}
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-slate-600">Comentarios</label>
+            <textarea
+              value={disciplinaryForm.comments}
+              onChange={(e) => setDisciplinaryForm((f) => ({ ...f, comments: e.target.value }))}
+              placeholder="Detalle la sanción, acuerdos o contexto"
+              className="mt-1 w-full min-h-[160px] rounded-xl border border-slate-200 px-3 py-3 shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-slate-600">Adjuntos (opcional)</p>
+                <p className="text-xs text-slate-500">Actas, respaldos o evidencias.</p>
+              </div>
+              <button
+                onClick={() =>
+                  setDisciplinaryForm((f) => ({
+                    ...f,
+                    attachments: [
+                      ...f.attachments,
+                      { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, fileUrl: "", fileName: "" }
+                    ]
+                  }))
+                }
+                className="text-xs font-semibold text-brand-primary hover:underline"
+              >
+                + Agregar adjunto
+              </button>
+            </div>
+            {disciplinaryForm.attachments.length === 0 && (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                Sin adjuntos cargados.
+              </div>
+            )}
+            {disciplinaryForm.attachments.map((att, idx) => (
+              <div key={att.id} className="rounded-xl border border-slate-200 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={att.fileName}
+                    onChange={(e) =>
+                      setDisciplinaryForm((f) => ({
+                        ...f,
+                        attachments: f.attachments.map((item) => (item.id === att.id ? { ...item, fileName: e.target.value } : item))
+                      }))
+                    }
+                    placeholder={`Nombre del archivo ${idx + 1}`}
+                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
+                  />
+                  <button
+                    onClick={() =>
+                      setDisciplinaryForm((f) => ({
+                        ...f,
+                        attachments: f.attachments.filter((item) => item.id !== att.id)
+                      }))
+                    }
+                    className="text-xs font-semibold text-rose-600 hover:text-rose-700"
+                  >
+                    Quitar
+                  </button>
+                </div>
+                <UploadField
+                  value={att.fileUrl}
+                  onChange={(url, info) =>
+                    setDisciplinaryForm((f) => ({
+                      ...f,
+                      attachments: f.attachments.map((item) =>
+                        item.id === att.id
+                          ? {
+                              ...item,
+                              fileUrl: url,
+                              fileName: item.fileName || info?.name || url.split("/").pop() || "",
+                              mime: info?.mime || item.mime
+                            }
                           : item
                       )
                     }))
@@ -1898,6 +2241,17 @@ export default function EmployeesPage() {
               </p>
             </div>
 
+            {requiresDisciplinaryReview && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <Badge variant="warning">Requiere revisión disciplinaria</Badge>
+                  <span>
+                    {warningsMeta?.recentCount ?? warningsMeta?.total ?? 0} llamadas en los últimos {warningWindowDays} días.
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="rounded-xl border border-slate-200 p-3 space-y-2">
               <p className="text-sm font-semibold text-slate-800">Acciones rápidas</p>
               <div className="flex flex-wrap gap-2">
@@ -1949,6 +2303,14 @@ export default function EmployeesPage() {
                   className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"
                 >
                   + Nueva llamada
+                </button>
+                <button
+                  onClick={() => {
+                    openSubModal("DISCIPLINARY");
+                  }}
+                  className="rounded-xl border border-amber-200 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50"
+                >
+                  Sanciones disciplinarias
                 </button>
                 {selectedEmployee.status !== "SUSPENDED" && (
                   <button
@@ -2142,10 +2504,118 @@ export default function EmployeesPage() {
             <div className="rounded-xl border border-slate-200 p-3">
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">Llamadas de atención</p>
-                  <p className="text-xs text-slate-500">{warningsMeta?.total ?? warningItems.length} llamadas</p>
+                  <p className="text-sm font-semibold text-slate-800">Sanciones disciplinarias</p>
+                  <p className="text-xs text-slate-500">{disciplinaryMeta?.total ?? disciplinaryItems.length} registros</p>
                 </div>
-                {warningsMeta && warningsMeta.total >= 3 && <Badge variant="warning">Alerta: {warningsMeta.total}</Badge>}
+                <div className="flex items-center gap-2">
+                  {requiresDisciplinaryReview && <Badge variant="warning">Revisión necesaria</Badge>}
+                  <button
+                    onClick={() => openSubModal("DISCIPLINARY")}
+                    className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Crear sanción
+                  </button>
+                </div>
+              </div>
+              {disciplinaryQuery.isLoading && <p className="text-sm text-slate-500">Cargando...</p>}
+              {disciplinaryQuery.isError && (
+                <div className="flex items-center gap-2 text-sm text-rose-600">
+                  <span>No se pudo cargar las sanciones.</span>
+                  <button
+                    onClick={() => disciplinaryQuery.refetch()}
+                    className="text-xs font-semibold text-brand-primary hover:underline"
+                  >
+                    Reintentar
+                  </button>
+                </div>
+              )}
+              {!disciplinaryQuery.isLoading && disciplinaryItems.length === 0 && <p className="text-sm text-slate-500">Sin sanciones registradas.</p>}
+              <ul className="space-y-2 text-sm">
+                {disciplinaryItems.map((action) => (
+                  <li key={action.id} className="rounded-lg border border-slate-100 px-3 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-1">
+                        <p className="font-semibold text-slate-900">
+                          {action.title} · <span className="text-slate-500">{action.type}</span>
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {formatDate(action.startDate || action.issuedAt || action.createdAt || undefined)}
+                          {action.endDate ? ` · Fin ${formatDate(action.endDate)}` : ""}
+                        </p>
+                        {action.comments && <p className="text-slate-700 line-clamp-2">{action.comments}</p>}
+                      </div>
+                      <Badge variant={disciplinaryStatusVariant[action.status]}>{disciplinaryStatusLabel[action.status]}</Badge>
+                    </div>
+                    {action.attachments && action.attachments.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {action.attachments.map((att) => (
+                          <a
+                            key={att.id}
+                            href={att.fileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            📎 {att.fileName}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {action.status === "DRAFT" && (
+                        <button
+                          onClick={() => submitDisciplinaryMutation.mutate(action.id)}
+                          className="rounded-lg border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-50"
+                          disabled={submitDisciplinaryMutation.isPending}
+                        >
+                          Enviar a aprobación
+                        </button>
+                      )}
+                      {action.status === "PENDING_APPROVAL" && (
+                        <>
+                          <button
+                            onClick={() => approveDisciplinaryMutation.mutate(action.id)}
+                            className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+                            disabled={approveDisciplinaryMutation.isPending}
+                          >
+                            Aprobar
+                          </button>
+                          <button
+                            onClick={() => rejectDisciplinaryMutation.mutate(action.id)}
+                            className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                            disabled={rejectDisciplinaryMutation.isPending}
+                          >
+                            Rechazar
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                {disciplinaryQuery.hasNextPage && (
+                  <button
+                    onClick={() => disciplinaryQuery.fetchNextPage()}
+                    disabled={disciplinaryQuery.isFetchingNextPage}
+                    className="text-sm font-semibold text-brand-primary hover:underline disabled:opacity-60"
+                  >
+                    {disciplinaryQuery.isFetchingNextPage ? "Cargando..." : "Ver más"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">Llamadas de atención</p>
+                  <p className="text-xs text-slate-500">
+                    {warningsMeta?.total ?? warningItems.length} llamadas · {warningsMeta?.recentCount ?? 0} en últimos{" "}
+                    {warningWindowDays} días
+                  </p>
+                </div>
+                {requiresDisciplinaryReview && <Badge variant="warning">Requiere revisión</Badge>}
               </div>
               {warningsQuery.isLoading && <p className="text-sm text-slate-500">Cargando...</p>}
               {warningsQuery.isError && (
@@ -2168,7 +2638,6 @@ export default function EmployeesPage() {
                         <p className="font-semibold text-slate-900">{w.title}</p>
                         <p className="text-xs text-slate-500">{formatDate(w.issuedAt)}</p>
                       </div>
-                      {w.cooldownDays ? <Badge variant="info">Enfriamiento {w.cooldownDays} días</Badge> : null}
                     </div>
                     {w.description ? (
                       <p className="mt-1 text-slate-700 line-clamp-2">{w.description}</p>
@@ -2246,150 +2715,163 @@ export default function EmployeesPage() {
         }
       >
         {selectedEmployee ? (
-          <div className="employee-poster-print space-y-4 rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-6 shadow-lg">
-            <div className="flex flex-col gap-6 lg:flex-row print-gap-tight">
-              <div className="lg:w-1/3">
-                <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm print-card">
-                  <div className="flex items-center gap-4">
-                    {selfieUrl ? (
-                      <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={selfieUrl} alt={selectedEmployee.fullName} className="h-full w-full object-cover" />
-                      </div>
-                    ) : (
-                      <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-slate-200 bg-brand-primary/10 text-xl font-bold text-brand-primary">
-                        {initialsFromName(selectedEmployee.fullName)}
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-2xl font-bold text-slate-900 leading-tight">{selectedEmployee.fullName}</p>
-                      <p className="text-sm text-slate-500">Código: {selectedEmployee.employeeCode || "—"}</p>
-                      <div className="mt-2">
-                        <Badge variant={statusVariant[selectedEmployee.status]}>{statusLabel[selectedEmployee.status]}</Badge>
-                      </div>
+          <div className="employee-poster-print space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-lg">
+            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-gradient-to-r from-sky-50 to-white px-4 py-3 print-card">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-primary text-white text-sm font-bold">
+                  LOGO
+                </div>
+                <div>
+                  <p className="text-lg font-semibold text-slate-900 leading-tight">StarMedical ERP</p>
+                  <p className="text-xs text-slate-500">Ficha del colaborador</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">Código: {selectedEmployee.employeeCode || "—"}</span>
+                <Badge variant={statusVariant[selectedEmployee.status]}>{statusLabel[selectedEmployee.status]}</Badge>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 poster-grid">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm print-card">
+                <div className="flex items-center gap-4 pb-2">
+                  {selfieUrl ? (
+                    <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={selfieUrl} alt={selectedEmployee.fullName} className="h-full w-full object-cover" />
                     </div>
+                  ) : (
+                    <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-slate-200 bg-brand-primary/10 text-xl font-bold text-brand-primary">
+                      {initialsFromName(selectedEmployee.fullName)}
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-2xl font-bold text-slate-900 leading-tight">{selectedEmployee.fullName}</p>
+                    <p className="text-sm text-slate-500">{selectedEmployee.isExternal ? "Externo" : "Interno"}</p>
+                    <p className="text-xs text-slate-500">
+                      Onboarding {selectedEmployee.onboardingStatus || "—"} · Paso {selectedEmployee.onboardingStep || 1}
+                    </p>
                   </div>
-                  <div className="space-y-1 text-sm">
-                    <p className="font-semibold text-slate-800">Sucursal</p>
-                    <p className="text-slate-700">{selectedEmployee.primaryBranch?.name || "—"}</p>
+                </div>
+                <div className="mt-2 grid grid-cols-1 gap-2 text-sm">
+                  <div>
+                    <p className="text-slate-500">Sucursal</p>
+                    <p className="font-semibold text-slate-900">{selectedEmployee.primaryBranch?.name || "—"}</p>
                     <p className="text-xs text-slate-500">{branchAddress}</p>
-                    <p className="font-semibold text-slate-800 pt-2">Ubicación laboral</p>
-                    <p className="text-slate-700">{workLocationLabel || "—"}</p>
-                    <p className="font-semibold text-slate-800 pt-2">Contacto</p>
-                    <p className="text-slate-700">{selectedEmployee.phoneMobile || selectedEmployee.phoneHome || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Ubicación laboral</p>
+                    <p className="font-semibold text-slate-900">{workLocationLabel || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Contacto</p>
+                    <p className="font-semibold text-slate-900">{selectedEmployee.phoneMobile || selectedEmployee.phoneHome || "—"}</p>
                     <p className="text-xs text-slate-500">{selectedEmployee.addressHome || "Dirección no registrada"}</p>
                   </div>
                 </div>
               </div>
-              <div className="flex-1 space-y-4">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm print-card">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                    <p className="text-sm font-semibold text-slate-800">Clasificación</p>
-                    <Badge variant="info">{selectedEmployee.isExternal ? "Externo" : "Interno"}</Badge>
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 text-sm">
-                    <div>
-                      <p className="text-slate-500">Relación laboral</p>
-                      <p className="font-semibold text-slate-900">{relationLabel}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500">Entidad</p>
-                      <p className="font-semibold text-slate-900">
-                        {selectedEmployee.primaryLegalEntity?.name || selectedEmployee.primaryLegalEntity?.comercialName || "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500">Onboarding</p>
-                      <p className="font-semibold text-slate-900">
-                        {selectedEmployee.onboardingStatus || "—"} · Paso {selectedEmployee.onboardingStep || 1}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500">Código de sucursal</p>
-                      <p className="font-semibold text-slate-900">{selectedEmployee.primaryBranch?.code || "—"}</p>
-                    </div>
-                  </div>
-                </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm print-card">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                    <p className="text-sm font-semibold text-slate-800">Compensación</p>
-                    <p className="text-xs text-slate-500">
-                      {compensationQuery.isLoading ? "Cargando..." : selectedEmployee.primaryEngagement?.paymentScheme || "—"}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm print-card">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <p className="text-sm font-semibold text-slate-800">Clasificación</p>
+                  <Badge variant="info">{selectedEmployee.isExternal ? "Externo" : "Interno"}</Badge>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 text-sm">
+                  <div>
+                    <p className="text-slate-500">Relación laboral</p>
+                    <p className="font-semibold text-slate-900">{relationLabel}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Entidad</p>
+                    <p className="font-semibold text-slate-900">
+                      {selectedEmployee.primaryLegalEntity?.name || selectedEmployee.primaryLegalEntity?.comercialName || "—"}
                     </p>
                   </div>
-                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 text-sm">
-                    <div>
-                      <p className="text-slate-500">Salario base</p>
-                      <p className="font-semibold text-slate-900">
-                        {formatCurrency(
-                          compensationQuery.data?.baseSalary ||
-                            selectedEmployee.primaryEngagement?.baseSalary ||
-                            selectedEmployee.primaryEngagement?.compensationAmount ||
-                            "0",
-                          currencyCode
-                        )}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500">Bono base fijo</p>
-                      <p className="font-semibold text-slate-900">{formatCurrency(baseAllowanceValue || "0", currencyCode)}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500">Esquema de pago</p>
-                      <p className="font-semibold text-slate-900">{compensationQuery.data?.paymentScheme || "—"}</p>
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <p className="text-slate-500">Bonos</p>
-                    {compensationQuery.isLoading ? (
-                      <p className="text-sm text-slate-500">Cargando bonos...</p>
-                    ) : compensationQuery.data && compensationQuery.data.bonuses.length > 0 ? (
-                      <ul
-                        className={`mt-1 space-y-1 text-sm ${
-                          compensationQuery.data.bonuses.length > 3 ? "print-limit-3 print-limit-info" : "print-limit-3"
-                        }`}
-                      >
-                        {compensationQuery.data.bonuses.map((b) => (
-                          <li key={b.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-2 py-1">
-                            <span className="font-semibold text-slate-900">{b.name}</span>
-                            <span className="text-slate-700">{formatCurrency(b.amount, currencyCode)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-sm text-slate-500">Sin bonos registrados.</p>
-                    )}
+                  <div>
+                    <p className="text-slate-500">Código de sucursal</p>
+                    <p className="font-semibold text-slate-900">{selectedEmployee.primaryBranch?.code || "—"}</p>
                   </div>
                 </div>
+              </div>
 
-                {documentLinks.length > 0 && (
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm print-card">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <p className="text-sm font-semibold text-slate-800">Documentos</p>
-                      <p className="text-xs text-slate-500">Solo lectura</p>
-                    </div>
-                    <div
-                      className={`mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 ${
-                        documentLinks.length > 3 ? "print-limit-3 print-limit-info" : "print-limit-3"
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm print-card">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <p className="text-sm font-semibold text-slate-800">Compensación</p>
+                  <p className="text-xs text-slate-500">
+                    {compensationQuery.isLoading ? "Cargando..." : selectedEmployee.primaryEngagement?.paymentScheme || "—"}
+                  </p>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 text-sm">
+                  <div>
+                    <p className="text-slate-500">Salario base</p>
+                    <p className="font-semibold text-slate-900">
+                      {formatCurrency(
+                        compensationQuery.data?.baseSalary ||
+                          selectedEmployee.primaryEngagement?.baseSalary ||
+                          selectedEmployee.primaryEngagement?.compensationAmount ||
+                          "0",
+                        currencyCode
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Bono base fijo</p>
+                    <p className="font-semibold text-slate-900">{formatCurrency(baseAllowanceValue || "0", currencyCode)}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Esquema de pago</p>
+                    <p className="font-semibold text-slate-900">{compensationQuery.data?.paymentScheme || "—"}</p>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <p className="text-slate-500">Bonos</p>
+                  {compensationQuery.isLoading ? (
+                    <p className="text-sm text-slate-500">Cargando bonos...</p>
+                  ) : compensationQuery.data && compensationQuery.data.bonuses.length > 0 ? (
+                    <ul
+                      className={`mt-1 space-y-1 text-sm ${
+                        compensationQuery.data.bonuses.length > 3 ? "print-limit-3 print-limit-info" : "print-limit-3"
                       }`}
                     >
-                      {documentLinks.map((doc) => (
-                        <a
-                          key={`${doc.label}-${doc.url}`}
-                          href={doc.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-brand-primary hover:bg-slate-50"
-                        >
-                          {doc.label}
-                          <span className="text-xs text-slate-500">Ver</span>
-                        </a>
+                      {compensationQuery.data.bonuses.map((b) => (
+                        <li key={b.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-2 py-1">
+                          <span className="font-semibold text-slate-900">{b.name}</span>
+                          <span className="text-slate-700">{formatCurrency(b.amount, currencyCode)}</span>
+                        </li>
                       ))}
-                    </div>
-                  </div>
-                )}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-slate-500">Sin bonos registrados.</p>
+                  )}
+                </div>
               </div>
+
+              {documentLinks.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm print-card">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <p className="text-sm font-semibold text-slate-800">Documentos</p>
+                    <p className="text-xs text-slate-500">Solo lectura</p>
+                  </div>
+                  <div
+                    className={`mt-3 grid grid-cols-1 gap-2 ${
+                      documentLinks.length > 3 ? "print-limit-3 print-limit-info" : "print-limit-3"
+                    }`}
+                  >
+                    {documentLinks.map((doc) => (
+                      <a
+                        key={`${doc.label}-${doc.url}`}
+                        href={doc.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-brand-primary hover:bg-slate-50"
+                      >
+                        {doc.label}
+                        <span className="text-xs text-slate-500">Ver</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -2438,6 +2920,11 @@ export default function EmployeesPage() {
             box-shadow: none;
             break-inside: avoid;
             page-break-inside: avoid;
+          }
+          .employee-poster-print .poster-grid {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 10px !important;
           }
           .employee-poster-print .print-card {
             break-inside: avoid;

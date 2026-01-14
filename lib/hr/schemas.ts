@@ -360,5 +360,21 @@ export const branchSchema = z.object({
 });
 
 export const hrSettingsSchema = z.object({
-  currencyCode: z.enum(["GTQ", "USD"]).default("GTQ")
+  currencyCode: z.enum(["GTQ", "USD"]).default("GTQ"),
+  warningWindowDays: z.coerce.number().int().min(1).optional(),
+  warningThreshold: z.coerce.number().int().min(1).optional(),
+  logoUrl: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined))
+});
+
+export const disciplinaryActionSchema = z.object({
+  type: z.enum(["AMONESTACION", "SUSPENSION", "TERMINACION_RECOMENDADA"]),
+  reason: z.string().trim().min(2, "Motivo requerido"),
+  startDate: optionalNullableString,
+  endDate: optionalNullableString,
+  comments: optionalNullableString,
+  attachments: warningAttachmentSchema.array().optional()
 });
