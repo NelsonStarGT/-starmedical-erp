@@ -2213,7 +2213,7 @@ export default function EmployeesPage() {
             </div>
           </div>
         ) : (
-          <p className="text-sm text-slate-600">Selecciona un colaborador.</p>
+          <p className="text-sm text-slate-600">Selecciona un colaborador de la tabla para ver detalles.</p>
         )}
       </Modal>
 
