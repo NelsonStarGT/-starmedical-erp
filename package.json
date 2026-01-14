@@ -12,18 +12,20 @@
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"No tests configured\"",
+    "test": "ts-node --esm -r tsconfig-paths/register tests/onboarding-validators.test.ts",
     "qa": "npm run lint && npm run typecheck && npm run test",
+    "db:check": "prisma validate && prisma migrate status",
     "db:reset": "sh -c 'if [ \"$NODE_ENV\" = \"production\" ]; then echo \"db:reset bloqueado en production\" && exit 1; else npx prisma migrate reset --force; fi'",
     "inventory:reset": "sh -c 'if [ \"$NODE_ENV\" = \"production\" ]; then echo \"inventory:reset bloqueado en production\" && exit 1; else curl -X POST -H \"x-reset-confirm: YES\" -H \"Content-Type: application/json\" -d \"{\\\"mode\\\":\\\"wipe_movements\\\"}\" http://localhost:3000/api/inventario/reset; fi'"
   },
   "dependencies": {
-    "@hookform/resolvers": "^3.9.1",
     "@heroicons/react": "^2.1.5",
-    "@tanstack/react-query": "^5.62.8",
+    "@hookform/resolvers": "^3.9.1",
     "@prisma/client": "^5.22.0",
     "@supabase/supabase-js": "^2.89.0",
+    "@tanstack/react-query": "^5.62.8",
     "bcryptjs": "^2.4.3",
+    "date-fns": "^3.6.0",
     "exceljs": "^4.4.0",
     "jsonwebtoken": "^9.0.3",
     "next": "^16.1.0-canary.20",
@@ -48,6 +50,7 @@
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.3",
     "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.4.5"
   }
 }

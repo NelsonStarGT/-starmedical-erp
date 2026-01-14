@@ -1,3 +1,53 @@
+# StarMedical – Módulo RRHH (SaaS)
+
+- Multi-razón-social, multi-sucursal y puestos con vigencia. Código interno secuencial `EMP-000001` y DPI como identificador legal.
+- Empleado ≠ usuario: relación opcional. Campos de contacto separados (móvil/casa), notas internas y flag `isExternal` para honorarios.
+- Documentos versionados con visibilidad (personal/empresa/restringido) y control de vistas por empleado. Alertas por vencimiento 30/15/7 días y colegiado.
+- Esquema de pago por relación laboral (`MONTHLY/DAILY/PER_SERVICE/HOURLY`), licencias profesionales, asignaciones de sucursal (con código) y puestos.
+- Estructuras base para turnos/asistencia (templates, relojes biométricos, logs, cómputo diario), vacaciones/permisos, disciplina y evaluaciones.
+- Permisos del módulo alineados a `<MODULE>:<AREA>:<ACTION>` (ej. `HR:EMPLOYEES:READ`, `HR:PAYROLL:PUBLISH`, `INV:STOCK:APPROVE`) y roles seed ADMIN/STAFF.
+
+## Cómo correr
+1) `npm install`
+2) `npx prisma generate`
+3) `npx prisma migrate dev --name hr_rrhh_module` (usa `DATABASE_URL` en `.env`)  
+4) Seeds RRHH:
+   - Seguro (default): `npx prisma db seed` → solo catálogos, conceptos y permisos (idempotente).
+   - Demo: `SEED_MODE=demo npx prisma db seed` → crea empleados/demo `DEMO-*` si la BD está vacía (`DEMO_ONLY_IF_EMPTY=true` default).
+   - Forzar demo aun con datos reales: `SEED_MODE=demo DEMO_ONLY_IF_EMPTY=false npx prisma db seed`
+5) `npm run dev` y abre `/hr/employees`
+
+## Seguridad / RBAC
+- Catálogo único en `lib/security/permissionCatalog.ts` con la convención `<MODULE>:<AREA>:<ACTION>` (acciones estándar: READ, WRITE, EDIT, DELETE, APPROVE, PUBLISH, ADMIN). Marca `critical: true` para nómina/finanzas/inventario.
+- Roles seed: ADMIN (todo, isSystem=true) y STAFF (mínimo: ver asistencia/perfil, agenda, inventario read). Seed idempotente los actualiza junto con `RolePermission`.
+- Overrides por usuario (`UserPermission` con efecto `GRANT | DENY`) y cálculo efectivo en `computeUserPermissionProfile` / `buildEffectivePermissionSet`. `hasPermission` respeta DENY incluso si eres ADMIN.
+- API auditada `/api/security/permissions` + UI `/admin/permissions` para asignar por rol o usuario (incluye confirmación extra para permisos críticos y bloqueo del último ADMIN).
+- Para agregar un permiso nuevo: agrega la entrada al catálogo, corre `npx prisma db seed` (safe actualiza/crea), y luego asígnalo desde la matriz visual. No edites permisos directamente en DB.
+
+## Rutas UI
+- `/hr/employees` (listado con alertas de documentos/licencias)
+- `/hr/employees/new` (wizard 3 pasos)
+- `/hr/employees/[id]` (tabs: general, relación, asignaciones, documentos, colegiado)
+
+## Seeds / catálogos
+- Safe (default): LegalEntity (`StarMedical`, `AllenMKT`), Branch (`PAL`, `ESC`), HrDepartment/HrPosition (por nombre), ShiftTemplate base (Diurno 8x5, Sábado 5h, Nocturno), PayrollConcept por `code`, permisos/roles (catálogo completo). No crea empleados ni asistencia.
+- Demo (opt-in): `SEED_MODE=demo npx prisma db seed` agrega empleados `DEMO-*`, asignaciones, engagement, turnos, relojes, logs, un AttendanceDay aprobado, leave aprobado, acción disciplinaria y evaluación. Se omite si hay empleados reales cuando `DEMO_ONLY_IF_EMPTY=true` (default); forzar con `DEMO_ONLY_IF_EMPTY=false`.
+
+## Cierre diario de asistencia
+- Procesa y cierra por día en `/hr/attendance/close`.
+- API:
+  - `POST /api/hr/attendance/close/process-day` → recalcula y detecta issues.
+  - `GET /api/hr/attendance/close/status?date=` → lista por empleado con issues.
+  - `POST /api/hr/attendance/close/resolve` → añadir OUT manual / nota / vincular leave.
+  - `POST /api/hr/attendance/close/close-day` → cierra si no hay bloqueos.
+- Bloqueos: `MISSING_OUT`, `NO_LEAVE_FOR_ABSENCE`, `OVERTIME_PENDING`, `DUPLICATE_LOGS` (requiere revisión). `closeStatus` queda `READY_TO_CLOSE` solo sin issues críticos.
+
+## Alertas y seguridad
+- Documentos y licencias generan severidad según vencimiento (<=7 días crítica, <=15 warning, <=30 info).
+- Edición de documentos exige permiso `HR:DOCS:EDIT`; escritura general requiere `HR:WRITE` o rol ADMIN/HR_ADMIN; lectura permite `HR:READ`.
+
+---
+
 # Inventario – Solicitudes, Órdenes y Reportes automáticos
 
 ## Flujos nuevos

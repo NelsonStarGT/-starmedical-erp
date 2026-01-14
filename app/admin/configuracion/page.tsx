@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { ImageUploader } from "@/components/inventario/ImageUploader";
+import UploadField from "@/components/ui/UploadField";
 import { cn } from "@/lib/utils";
 
 const adminHeaders = { "x-role": "Administrador" };
@@ -973,7 +973,14 @@ export default function ConfiguracionPage() {
               </div>
               <div>
                 <label className="text-xs text-slate-600">Logo</label>
-                <ImageUploader value={appForm.logoUrl} onChange={(url) => setAppForm({ ...appForm, logoUrl: url })} />
+                <UploadField
+                  value={appForm.logoUrl || ""}
+                  onChange={(url) => setAppForm({ ...appForm, logoUrl: url || "" })}
+                  accept="image/*"
+                  helperText="PNG/JPG recomendado, fondo transparente. Máx 20MB."
+                  onUploadError={(message) => setMessages({ error: message || "Error al subir la imagen" })}
+                  onUploadSuccess={() => setMessages({ app: "Logo cargado" })}
+                />
               </div>
               <div className="flex items-center gap-3">
                 <button

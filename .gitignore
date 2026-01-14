@@ -19,3 +19,10 @@ logs
 
 # os
 .DS_Store
+
+# build artifacts
+tsconfig.tsbuildinfo
+
+# uploads / temp
+public/uploads/
+backups/

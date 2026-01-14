@@ -13,10 +13,12 @@ export type SessionUser = {
   name?: string | null;
   roles: string[];
   permissions: string[];
+  deniedPermissions?: string[];
   branchId?: string | null;
+  legalEntityId?: string | null;
 };
 
-function signToken(payload: Omit<SessionUser, "permissions"> & { permissions: string[] }) {
+function signToken(payload: SessionUser) {
   return jwt.sign(payload, AUTH_SECRET, { expiresIn: SESSION_TTL_SECONDS });
 }
 
@@ -39,7 +41,9 @@ export function getSessionUser(req: NextRequest): SessionUser | null {
     name: decoded.name,
     roles: decoded.roles || [],
     permissions: decoded.permissions || [],
-    branchId: decoded.branchId || null
+    deniedPermissions: decoded.deniedPermissions || [],
+    branchId: decoded.branchId || null,
+    legalEntityId: decoded.legalEntityId || null
   };
 }
 

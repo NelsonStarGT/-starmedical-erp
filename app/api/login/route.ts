@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createLoginResponse, validatePassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { auditLog } from "@/lib/audit";
-import { buildPermissionsFromRoles, normalizeRoleName } from "@/lib/rbac";
+import { computeUserPermissionProfile } from "@/lib/security/permissionService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +17,10 @@ export async function POST(request: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } }
+      include: {
+        roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
+        userPermissions: { include: { permission: true } }
+      }
     });
 
     if (!user || !user.isActive) {
@@ -49,18 +52,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Credenciales inválidas" }, { status: 401 });
     }
 
-    const roleNames = user.roles.map((r) => normalizeRoleName(r.role.name));
-    const permissions = buildPermissionsFromRoles(
-      roleNames,
-      user.roles.map((r) => (r.role.permissions || []).map((p) => p.permission.key))
-    );
+    const profile = computeUserPermissionProfile(user);
     const sessionUser = {
       id: user.id,
       email: user.email,
       name: user.name,
-      roles: roleNames,
-      permissions,
-      branchId: user.branchId || null
+      roles: profile.roleNames,
+      permissions: profile.effective,
+      deniedPermissions: profile.denies,
+      branchId: user.branchId || null,
+      legalEntityId: null
     };
 
     await auditLog({

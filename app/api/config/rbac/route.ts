@@ -4,7 +4,7 @@ import { ensureAdmin } from "@/lib/api/admin";
 
 export const dynamic = "force-dynamic";
 
-type PermissionInput = { key: string; description?: string | null };
+type PermissionInput = { key: string; description?: string | null; module?: string; area?: string; action?: string };
 type RoleInput = { name: string; description?: string | null; permissions?: string[] };
 
 function normalizePermissions(raw: any): PermissionInput[] {
@@ -12,7 +12,14 @@ function normalizePermissions(raw: any): PermissionInput[] {
     .map((p) => {
       const key = String(p.key || "").trim();
       if (!key) return null;
-      return { key: key.toUpperCase(), description: p.description || null };
+      const [module, area, action] = key.toUpperCase().split(":");
+      return {
+        key: key.toUpperCase(),
+        description: p.description || null,
+        module: module || "CUSTOM",
+        area: area || "GENERAL",
+        action: action || "READ"
+      };
     })
     .filter(Boolean) as PermissionInput[];
 }
@@ -74,8 +81,19 @@ export async function POST(req: NextRequest) {
       for (const p of permissionsInput) {
         const saved = await tx.permission.upsert({
           where: { key: p.key },
-          update: { description: p.description ?? null },
-          create: { key: p.key, description: p.description ?? null }
+          update: {
+            description: p.description ?? null,
+            module: p.module || "CUSTOM",
+            area: p.area || "GENERAL",
+            action: p.action || "READ"
+          },
+          create: {
+            key: p.key,
+            description: p.description ?? null,
+            module: p.module || "CUSTOM",
+            area: p.area || "GENERAL",
+            action: p.action || "READ"
+          }
         });
         permissionMap.set(p.key, saved.id);
       }

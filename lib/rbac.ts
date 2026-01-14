@@ -1,28 +1,30 @@
 import { NextResponse } from "next/server";
 import type { CrmDeal } from "@prisma/client";
 import type { SessionUser } from "./auth";
+import { ALL_PERMISSION_KEYS, BASE_ROLES } from "./security/permissionCatalog";
 
 export const PERMISSIONS = {
-  LEAD_READ: "crm.lead.read",
-  LEAD_WRITE: "crm.lead.write",
-  DEAL_READ: "crm.deal.read",
-  DEAL_WRITE: "crm.deal.write",
-  QUOTE_READ: "crm.quote.read",
-  QUOTE_WRITE: "crm.quote.write",
-  QUOTE_SEND: "crm.quote.send",
-  QUOTE_APPROVE: "crm.quote.approve",
-  PROPOSAL_READ: "crm.proposal.read",
-  PROPOSAL_WRITE: "crm.proposal.write",
-  PROPOSAL_SEND: "crm.proposal.send",
-  FILE_READ: "crm.files.read",
-  FILE_WRITE: "crm.files.write",
-  CONFIG_READ: "crm.config.read",
-  CONFIG_WRITE: "crm.config.write",
-  AUDIT_READ: "crm.audit.read"
+  LEAD_READ: "CRM:LEADS:READ",
+  LEAD_WRITE: "CRM:LEADS:WRITE",
+  DEAL_READ: "CRM:DEALS:READ",
+  DEAL_WRITE: "CRM:DEALS:WRITE",
+  QUOTE_READ: "CRM:QUOTES:READ",
+  QUOTE_WRITE: "CRM:QUOTES:WRITE",
+  QUOTE_SEND: "CRM:QUOTES:PUBLISH",
+  QUOTE_APPROVE: "CRM:QUOTES:APPROVE",
+  PROPOSAL_READ: "CRM:PROPOSALS:READ",
+  PROPOSAL_WRITE: "CRM:PROPOSALS:WRITE",
+  PROPOSAL_SEND: "CRM:PROPOSALS:PUBLISH",
+  FILE_READ: "CRM:FILES:READ",
+  FILE_WRITE: "CRM:FILES:WRITE",
+  CONFIG_READ: "CRM:SETTINGS:ADMIN",
+  CONFIG_WRITE: "CRM:SETTINGS:ADMIN",
+  AUDIT_READ: "CRM:AUDIT:READ"
 } as const;
 
 const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
-  ADMIN: Object.values(PERMISSIONS),
+  ADMIN: BASE_ROLES.ADMIN.permissions,
+  STAFF: BASE_ROLES.STAFF.permissions,
   SUPERVISOR: [
     PERMISSIONS.LEAD_READ,
     PERMISSIONS.LEAD_WRITE,
@@ -60,6 +62,7 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: "Administrador",
+  STAFF: "Staff",
   SALES: "Ventas",
   SUPERVISOR: "Supervisor",
   RECEPTION: "Recepcion",
@@ -68,29 +71,70 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function normalizeRoleName(role?: string | null) {
   if (!role) return "";
-  const upper = role.toUpperCase();
-  if (ROLE_DEFAULT_PERMISSIONS[upper]) return upper;
-  return upper;
+  return role.trim().toUpperCase().replace(/\s+/g, "_");
+}
+
+export function buildEffectivePermissionSet(params: {
+  roleNames: string[];
+  rolePermissionSets?: string[][];
+  userGrants?: string[];
+  userDenies?: string[];
+  adminHasAll?: boolean;
+}) {
+  const denied = new Set((params.userDenies || []).map((p) => p.toUpperCase()));
+  const allowed = new Set<string>();
+  const inherited = new Set<string>();
+  const normalizedRoles = params.roleNames.map(normalizeRoleName).filter(Boolean);
+  const isAdminRole = normalizedRoles.includes("ADMIN");
+
+  if (isAdminRole && params.adminHasAll !== false) {
+    ALL_PERMISSION_KEYS.forEach((key) => allowed.add(key));
+  }
+
+  normalizedRoles.forEach((role, idx) => {
+    (ROLE_DEFAULT_PERMISSIONS[role] || []).forEach((perm) => {
+      const key = perm.toUpperCase();
+      allowed.add(key);
+      inherited.add(key);
+    });
+    const dbPerms = params.rolePermissionSets?.[idx] || [];
+    dbPerms.forEach((perm) => {
+      const key = perm.toUpperCase();
+      allowed.add(key);
+      inherited.add(key);
+    });
+  });
+
+  (params.userGrants || []).forEach((perm) => allowed.add(perm.toUpperCase()));
+  denied.forEach((perm) => allowed.delete(perm));
+
+  return { allowed, denied, inherited, isAdmin: isAdminRole };
 }
 
 export function buildPermissionsFromRoles(roleNames: string[], dbRolePermissions?: string[][]) {
-  const merged = new Set<string>();
-  roleNames.forEach((role) => {
-    const normalized = normalizeRoleName(role);
-    (ROLE_DEFAULT_PERMISSIONS[normalized] || []).forEach((p) => merged.add(p));
-  });
-  (dbRolePermissions || []).forEach((list) => list.forEach((p) => merged.add(p)));
-  return Array.from(merged);
+  return Array.from(
+    buildEffectivePermissionSet({
+      roleNames,
+      rolePermissionSets: dbRolePermissions,
+      adminHasAll: true
+    }).allowed
+  );
 }
 
 export function hasPermission(user: SessionUser | null, permission: string) {
   if (!user) return false;
+  const key = permission.toUpperCase();
+  const denied = new Set((user.deniedPermissions || []).map((p) => p.toUpperCase()));
+  if (denied.has(key)) return false;
   if (isAdmin(user)) return true;
-  return user.permissions.includes(permission);
+  const allowed = new Set((user.permissions || []).map((p) => p.toUpperCase()));
+  return allowed.has(key);
 }
 
-export function requirePermission(user: SessionUser | null, permission: string) {
-  if (hasPermission(user, permission)) return { errorResponse: null };
+export function requirePermission(user: SessionUser | null, permission: string | string[]) {
+  const list = Array.isArray(permission) ? permission : [permission];
+  const ok = list.every((perm) => hasPermission(user, perm));
+  if (ok) return { errorResponse: null };
   return {
     errorResponse: NextResponse.json({ error: "No autorizado", code: "FORBIDDEN" }, { status: 403 })
   };

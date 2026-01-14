@@ -111,7 +111,7 @@ export function evaluateRule(rule: RuleConfig, ctx: RuleContext, user: any): Rul
       const threshold = Number(params.threshold || 0);
       const amount = Number(resolveField(ctx, params.amountField || "deal.amount") || 0);
       if (amount > threshold) {
-        const perm = params.requiredPermission || "crm.quote.approve";
+        const perm = params.requiredPermission || "CRM:QUOTES:APPROVE";
         if (!hasPermission(user, perm)) {
           return { passed: false, message: rule.message || "Monto requiere aprobación", code: "AMOUNT_APPROVAL_THRESHOLD" };
         }
