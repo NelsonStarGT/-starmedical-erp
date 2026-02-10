@@ -14,11 +14,14 @@ export default async function PortalAppLayout({
 }) {
   const session = await requirePortalSessionContext();
   const fullName = getPortalPersonDisplayName(session.client);
-  const shouldRefresh = session.authSource === "refresh_fallback";
 
   return (
     <div className="min-h-screen">
-      <PortalSessionRefresher enabled={shouldRefresh} />
+      <PortalSessionRefresher
+        enabled
+        authSource={session.authSource}
+        accessExpiresAt={session.expiresAt.getTime()}
+      />
       <header className="border-b border-[#d2e2f6] bg-white/95 backdrop-blur-sm">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div>

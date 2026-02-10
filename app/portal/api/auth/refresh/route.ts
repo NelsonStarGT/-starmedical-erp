@@ -66,7 +66,12 @@ export async function POST(req: NextRequest) {
     } satisfies Prisma.InputJsonObject
   });
 
-  const response = NextResponse.json({ ok: true });
+  const response = NextResponse.json({
+    ok: true,
+    accessExpiresAt: rotated.tokens.accessExpiresAt.getTime(),
+    refreshExpiresAt: rotated.tokens.refreshExpiresAt.getTime(),
+    rotationCounter: rotated.rotationCounter
+  });
   applyPortalSessionCookies(response, rotated.tokens);
   return response;
 }
