@@ -63,12 +63,17 @@ export default function AgendaCitasPage() {
   const citasFiltradas = useMemo(() => {
     return citas.filter((c) => {
       const paciente = pacientes.find((p) => p.id === c.pacienteId);
+      const pacienteLabel = (
+        paciente
+          ? `${paciente.nombre} ${paciente.apellidos || ""}`
+          : c.pacienteDisplayName || [c.pacienteNombre, c.pacienteApellidos].filter(Boolean).join(" ")
+      ).trim();
       const byFecha = filters.fecha ? c.fecha === filters.fecha : true;
       const byMedico = filters.medico ? c.medicoId === filters.medico : true;
       const byEstado = filters.estado ? c.estado === filters.estado : true;
       const bySucursal = filters.sucursal ? c.sucursalId === filters.sucursal : true;
       const byPaciente = filters.paciente
-        ? (paciente ? `${paciente.nombre} ${paciente.apellidos || ""}` : "").toLowerCase().includes(filters.paciente.toLowerCase())
+        ? pacienteLabel.toLowerCase().includes(filters.paciente.toLowerCase())
         : true;
       return byFecha && byMedico && byEstado && bySucursal && byPaciente;
     });
@@ -172,6 +177,14 @@ export default function AgendaCitasPage() {
   );
 
   const getPaciente = (id: string) => pacientes.find((p) => p.id === id);
+  const getPacienteLabel = (cita: Cita) => {
+    const paciente = getPaciente(cita.pacienteId);
+    return (
+      paciente
+        ? `${paciente.nombre} ${paciente.apellidos || ""}`
+        : cita.pacienteDisplayName || [cita.pacienteNombre, cita.pacienteApellidos].filter(Boolean).join(" ")
+    ).trim() || "Paciente";
+  };
   const getMedico = (id: string) => medicosMock.find((m) => m.id === id)?.nombre || "Especialista";
   const getSucursal = (id: string) => sucursalesMock.find((s) => s.id === id)?.nombre || "Sucursal";
   const getTipo = (id: string) => tiposCitaMock.find((t) => t.id === id)?.nombre || "Tipo de cita";
@@ -244,14 +257,12 @@ export default function AgendaCitasPage() {
 
           <div className="md:hidden space-y-2">
             {citasFiltradas.map((c) => {
-              const paciente = getPaciente(c.pacienteId);
+              const pacienteLabel = getPacienteLabel(c);
               return (
                 <div key={c.id} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">
-                        {paciente ? `${paciente.nombre} ${paciente.apellidos || ""}` : "Paciente"}
-                      </p>
+                      <p className="text-sm font-semibold text-slate-900">{pacienteLabel}</p>
                       <p className="text-xs text-slate-500">{getTipo(c.tipoCitaId)}</p>
                     </div>
                     <EstadoBadge estado={c.estado} />
@@ -280,7 +291,7 @@ export default function AgendaCitasPage() {
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
                 {citasFiltradas.map((c) => {
-                  const paciente = getPaciente(c.pacienteId);
+                  const pacienteLabel = getPacienteLabel(c);
                   return (
                     <tr key={c.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 text-sm text-slate-700">{c.fecha}</td>
@@ -288,7 +299,7 @@ export default function AgendaCitasPage() {
                         {c.horaInicio} - {c.horaFin}
                       </td>
                       <td className="px-4 py-3 text-sm font-medium text-slate-900">
-                        {paciente ? `${paciente.nombre} ${paciente.apellidos || ""}` : "Paciente"}
+                        {pacienteLabel}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">{getMedico(c.medicoId)}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{getSucursal(c.sucursalId)}</td>

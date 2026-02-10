@@ -218,6 +218,11 @@ export default function AgendaCalendarPage() {
     const tipo = tiposCitaMock.find((t) => t.id === cita.tipoCitaId);
     const paciente = pacientes.find((p) => p.id === cita.pacienteId);
     const medico = medicosMock.find((m) => m.id === cita.medicoId);
+    const pacienteLabel = (
+      paciente
+        ? `${paciente.nombre} ${paciente.apellidos || ""}`
+        : cita.pacienteDisplayName || [cita.pacienteNombre, cita.pacienteApellidos].filter(Boolean).join(" ")
+    ).trim() || "Paciente";
     const top = (horaToFloat(cita.horaInicio) - hours[0]) * hourHeight;
     const height = (horaToFloat(cita.horaFin) - horaToFloat(cita.horaInicio)) * hourHeight;
     return (
@@ -234,7 +239,7 @@ export default function AgendaCalendarPage() {
         onClick={() => setShowDetalle(cita)}
       >
         <div className="flex items-center justify-between px-3 pt-2">
-          <p className="text-sm font-semibold text-slate-900 truncate">{paciente ? `${paciente.nombre} ${paciente.apellidos || ""}` : "Paciente"}</p>
+          <p className="text-sm font-semibold text-slate-900 truncate">{pacienteLabel}</p>
           <EstadoBadge estado={cita.estado} className="px-2 py-0.5 text-[11px]" />
         </div>
         <div className="px-3 text-xs text-slate-600">

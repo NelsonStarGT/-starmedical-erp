@@ -37,6 +37,10 @@ export function AppointmentCard({
   onExpediente
 }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const pacienteLabel = (
+    paciente ? `${paciente.nombre} ${paciente.apellidos || ""}` : cita.pacienteDisplayName || "Paciente"
+  ).trim();
+
   return (
     <div
       className={cn(
@@ -54,7 +58,7 @@ export function AppointmentCard({
         <div className="flex-1 space-y-1">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-semibold text-slate-900 truncate">
-              {paciente ? `${paciente.nombre} ${paciente.apellidos || ""}` : "Paciente"} · {cita.horaInicio}
+              {pacienteLabel} · {cita.horaInicio}
             </p>
             <EstadoBadge estado={cita.estado} className="px-2 py-0.5 text-[11px]" />
           </div>
