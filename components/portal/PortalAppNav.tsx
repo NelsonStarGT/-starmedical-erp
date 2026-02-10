@@ -14,6 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/portal/app/appointments/new", label: "Solicitar cita" },
   { href: "/portal/app/invoices", label: "Mis facturas" },
   { href: "/portal/app/results", label: "Mis resultados" },
+  { href: "/portal/app/membership", label: "Mi membresía" },
   { href: "/portal/app/profile", label: "Mi perfil" }
 ];
 

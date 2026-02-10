@@ -26,6 +26,7 @@ export type PortalAppointmentItem = {
   notes: string | null;
   typeName: string | null;
   siteName: string | null;
+  patientName: string | null;
   source: "APPOINTMENT" | "VISIT";
 };
 
@@ -74,8 +75,125 @@ export type PortalResultItem = {
   fileAssetId: string | null;
 };
 
+export type PortalMembershipSummary = {
+  hasMembership: boolean;
+  planName: string | null;
+  used: number;
+  total: number;
+  benefits: string[];
+  isPlaceholder: boolean;
+};
+
+const warnedMissingMembershipDelegateContexts = new Set<string>();
+const warnedMembershipSchemaFallbackContexts = new Set<string>();
+
+const PORTAL_MEMBERSHIP_CONTRACT_SELECT = {
+  id: true,
+  MembershipPlan: {
+    select: {
+      name: true,
+      MembershipBenefit: {
+        where: { active: true },
+        orderBy: { createdAt: "asc" },
+        take: 6,
+        select: {
+          id: true,
+          kind: true,
+          targetType: true,
+          discountPercent: true,
+          includedQty: true
+        }
+      }
+    }
+  },
+  MembershipUsage: {
+    select: {
+      benefitId: true
+    }
+  }
+} as const satisfies Prisma.MembershipContractSelect;
+
+type PortalMembershipContractRow = Prisma.MembershipContractGetPayload<{
+  select: typeof PORTAL_MEMBERSHIP_CONTRACT_SELECT;
+}>;
+
+type MembershipContractDelegate = {
+  findFirst?: (args: Prisma.MembershipContractFindFirstArgs) => Promise<PortalMembershipContractRow | null>;
+};
+
 function decimalToNumber(value: Prisma.Decimal | number) {
   return typeof value === "number" ? value : Number(value);
+}
+
+function warnDevMissingMembershipDelegate(context: string) {
+  if (process.env.NODE_ENV === "production") return;
+  if (warnedMissingMembershipDelegateContexts.has(context)) return;
+  warnedMissingMembershipDelegateContexts.add(context);
+  console.warn(
+    `[DEV][db] ${context}: prisma.membershipContract delegate no disponible. ` +
+      "Ejecuta `npx prisma generate` y verifica migraciones de membresías."
+  );
+}
+
+function toErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function isMembershipSchemaMismatchError(error: unknown) {
+  if (!error) return false;
+
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === "P2022") return true;
+  }
+
+  const message = toErrorMessage(error).toLowerCase();
+  if (message.includes("unknown field") || message.includes("unknown argument") || message.includes("unknown arg")) {
+    return (
+      message.includes("membershipcontract") ||
+      message.includes("membershipplan") ||
+      message.includes("membershipusage") ||
+      message.includes("membershipbenefit")
+    );
+  }
+
+  if (message.includes("does not exist")) {
+    return (
+      message.includes("membershipcontract") ||
+      message.includes("membershipplan") ||
+      message.includes("membershipusage") ||
+      message.includes("membershipbenefit")
+    );
+  }
+
+  return false;
+}
+
+function warnDevMembershipSchemaFallback(context: string, error: unknown) {
+  if (process.env.NODE_ENV === "production") return;
+  if (warnedMembershipSchemaFallbackContexts.has(context)) return;
+  warnedMembershipSchemaFallbackContexts.add(context);
+  console.warn(
+    `[DEV][db] ${context}: esquema de membresías no compatible. ` +
+      "Aplicando placeholder para no romper el portal. Ejecuta migraciones y `npx prisma generate`. " +
+      `Details: ${toErrorMessage(error)}`
+  );
+}
+
+function getMembershipContractDelegate() {
+  return (prisma as unknown as { membershipContract?: MembershipContractDelegate }).membershipContract;
+}
+
+function buildPortalMembershipPlaceholder(): PortalMembershipSummary {
+  return {
+    hasMembership: false,
+    planName: null,
+    used: 0,
+    total: 0,
+    benefits: [],
+    isPlaceholder: true
+  };
 }
 
 function fallbackOnMissingTable<T>(context: string, fallback: T) {
@@ -93,6 +211,15 @@ function normalizeNullable(value?: string | null) {
   return normalized || null;
 }
 
+function humanizeMembershipEnum(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(" ");
+}
+
 function getPersonDisplayNameFromSession(client: PortalSessionClient) {
   return getPortalPersonDisplayName({
     firstName: client.firstName,
@@ -100,6 +227,22 @@ function getPersonDisplayNameFromSession(client: PortalSessionClient) {
     lastName: client.lastName,
     secondLastName: client.secondLastName
   });
+}
+
+function getPortalPatientDisplayName(input: {
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  secondLastName: string | null;
+  companyName: string | null;
+}) {
+  const personName = getPortalPersonDisplayName({
+    firstName: input.firstName,
+    middleName: input.middleName,
+    lastName: input.lastName,
+    secondLastName: input.secondLastName
+  });
+  return personName || normalizeNullable(input.companyName);
 }
 
 async function findPortalPartyIdsByHeuristic(client: PortalSessionClient) {
@@ -236,7 +379,7 @@ export async function getPortalAppointments(clientId: string): Promise<{
 }> {
   const now = new Date();
 
-  const [upcomingRows, historyRows, visitRows] = await Promise.all([
+  const [upcomingRows, historyRows, visitRows, patientRow] = await Promise.all([
     prisma.appointment.findMany({
       where: { patientId: clientId, date: { gte: now } },
       orderBy: { date: "asc" },
@@ -244,6 +387,7 @@ export async function getPortalAppointments(clientId: string): Promise<{
       select: {
         id: true,
         date: true,
+        branchId: true,
         durationMin: true,
         status: true,
         paymentStatus: true,
@@ -255,6 +399,7 @@ export async function getPortalAppointments(clientId: string): Promise<{
         Array<{
           id: string;
           date: Date;
+          branchId: string;
           durationMin: number;
           status: string;
           paymentStatus: string;
@@ -270,6 +415,7 @@ export async function getPortalAppointments(clientId: string): Promise<{
       select: {
         id: true,
         date: true,
+        branchId: true,
         durationMin: true,
         status: true,
         paymentStatus: true,
@@ -281,6 +427,7 @@ export async function getPortalAppointments(clientId: string): Promise<{
         Array<{
           id: string;
           date: Date;
+          branchId: string;
           durationMin: number;
           status: string;
           paymentStatus: string;
@@ -312,8 +459,51 @@ export async function getPortalAppointments(clientId: string): Promise<{
           site: { name: string };
         }>
       >("portal.data.visit.findMany", [])
+    ),
+    prisma.clientProfile.findUnique({
+      where: { id: clientId },
+      select: {
+        firstName: true,
+        middleName: true,
+        lastName: true,
+        secondLastName: true,
+        companyName: true
+      }
+    }).catch(
+      fallbackOnMissingTable<{
+        firstName: string | null;
+        middleName: string | null;
+        lastName: string | null;
+        secondLastName: string | null;
+        companyName: string | null;
+      } | null>("portal.data.clientProfile.findUnique", null)
     )
   ]);
+
+  const branchIds = Array.from(
+    new Set([...upcomingRows.map((row) => row.branchId), ...historyRows.map((row) => row.branchId)].filter((id) => Boolean(id)))
+  );
+  const branchRows = branchIds.length
+    ? await prisma.branch
+        .findMany({
+          where: { id: { in: branchIds } },
+          select: { id: true, name: true }
+        })
+        .catch(
+          fallbackOnMissingTable<Array<{ id: string; name: string }>>("portal.data.branch.findMany", [])
+        )
+    : [];
+  const branchNameById = new Map(branchRows.map((row) => [row.id, row.name]));
+
+  const patientName = patientRow
+    ? getPortalPatientDisplayName({
+        firstName: patientRow.firstName,
+        middleName: patientRow.middleName,
+        lastName: patientRow.lastName,
+        secondLastName: patientRow.secondLastName,
+        companyName: patientRow.companyName
+      })
+    : null;
 
   const upcoming = upcomingRows.map((row) => ({
     id: row.id,
@@ -323,7 +513,8 @@ export async function getPortalAppointments(clientId: string): Promise<{
     paymentStatus: row.paymentStatus,
     notes: row.notes ?? null,
     typeName: row.type.name,
-    siteName: null,
+    siteName: branchNameById.get(row.branchId) || null,
+    patientName,
     source: "APPOINTMENT" as const
   }));
 
@@ -335,7 +526,8 @@ export async function getPortalAppointments(clientId: string): Promise<{
     paymentStatus: row.paymentStatus,
     notes: row.notes ?? null,
     typeName: row.type.name,
-    siteName: null,
+    siteName: branchNameById.get(row.branchId) || null,
+    patientName,
     source: "APPOINTMENT" as const
   }));
 
@@ -348,8 +540,11 @@ export async function getPortalAppointments(clientId: string): Promise<{
     notes: row.notes ?? null,
     typeName: row.currentArea,
     siteName: row.site.name,
+    patientName,
     source: "VISIT" as const
   }));
+
+  // TODO(portal/admin): Recepción debe mostrar patient fullName desde la relación Appointment.patient cuando se habilite en schema.
 
   const history = [...historyAppointments, ...historyVisits]
     .sort((a, b) => b.date.getTime() - a.date.getTime())
@@ -397,6 +592,81 @@ export async function getPortalInvoices(client: PortalSessionClient): Promise<Po
     warning: "No se encontró vinculación de facturación verificada para este perfil.",
     source: "heuristic_none"
   };
+}
+
+function formatMembershipBenefitLabel(
+  benefit: PortalMembershipContractRow["MembershipPlan"]["MembershipBenefit"][number]
+) {
+  const target = humanizeMembershipEnum(benefit.targetType);
+  const discountPercent = benefit.discountPercent ? decimalToNumber(benefit.discountPercent) : null;
+  const includedQty = benefit.includedQty ? decimalToNumber(benefit.includedQty) : null;
+
+  if (discountPercent && discountPercent > 0) {
+    return `${target}: ${discountPercent}% de descuento`;
+  }
+
+  if (includedQty && includedQty > 0) {
+    return `${target}: ${includedQty} incluidos`;
+  }
+
+  return `${target} (${humanizeMembershipEnum(benefit.kind)})`;
+}
+
+export async function getPortalMembershipSummary(clientId: string): Promise<PortalMembershipSummary> {
+  const delegate = getMembershipContractDelegate();
+  if (!delegate?.findFirst) {
+    warnDevMissingMembershipDelegate("portal.data.membership.contract.findFirst");
+    return buildPortalMembershipPlaceholder();
+  }
+
+  try {
+    const contract = await delegate.findFirst({
+      where: {
+        ownerId: clientId,
+        status: "ACTIVO",
+        OR: [{ endAt: null }, { endAt: { gte: new Date() } }]
+      },
+      orderBy: { startAt: "desc" },
+      select: PORTAL_MEMBERSHIP_CONTRACT_SELECT
+    });
+
+    if (!contract) {
+      return {
+        hasMembership: false,
+        planName: null,
+        used: 0,
+        total: 0,
+        benefits: [],
+        isPlaceholder: false
+      };
+    }
+
+    const benefits = contract.MembershipPlan.MembershipBenefit.map(formatMembershipBenefitLabel).slice(0, 6);
+    const usedBenefits = new Set(
+      contract.MembershipUsage.map((usage) => usage.benefitId).filter((value): value is string => Boolean(value))
+    );
+    const total = benefits.length;
+    const used = total > 0 ? Math.min(total, usedBenefits.size) : usedBenefits.size;
+
+    return {
+      hasMembership: true,
+      planName: contract.MembershipPlan.name,
+      used,
+      total,
+      benefits,
+      isPlaceholder: false
+    };
+  } catch (error) {
+    if (isPrismaMissingTableError(error)) {
+      warnDevMissingTable("portal.data.membership.contract.findFirst", error);
+      return buildPortalMembershipPlaceholder();
+    }
+    if (isMembershipSchemaMismatchError(error)) {
+      warnDevMembershipSchemaFallback("portal.data.membership.contract.findFirst", error);
+      return buildPortalMembershipPlaceholder();
+    }
+    throw error;
+  }
 }
 
 export async function getPortalResults(clientId: string): Promise<{

@@ -51,11 +51,9 @@ export default async function PortalDashboardPage() {
   return (
     <section className="space-y-6">
       <div className="rounded-2xl border border-[#d2e2f6] bg-white p-6 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">Resumen del paciente</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">PORTAL DEL PACIENTE</p>
         <h2 className="mt-2 text-2xl font-semibold text-slate-900">Panel principal</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Desde aquí puedes revisar tus citas, facturas y resultados sin necesidad de navegar por el ERP interno.
-        </p>
+        <p className="mt-2 text-sm text-slate-600">Bienvenido. Aquí puedes gestionar tus citas, facturas y membresías.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -72,7 +70,7 @@ export default async function PortalDashboardPage() {
         ))}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Link
           href="/portal/app/appointments"
           className="rounded-2xl border border-[#cde7e4] bg-[#eff8f7] p-5 shadow-sm transition hover:shadow-md"
@@ -102,6 +100,15 @@ export default async function PortalDashboardPage() {
           <p className="mt-1 text-sm text-slate-600">
             Visualiza órdenes recientes de laboratorio e imagen diagnóstica.
           </p>
+        </Link>
+
+        <Link
+          href="/portal/app/membership"
+          className="rounded-2xl border border-[#d7ebfb] bg-[#f4faff] p-5 shadow-sm transition hover:shadow-md"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2e75ba]">Acceso rápido</p>
+          <h3 className="mt-2 text-lg font-semibold text-slate-900">Mi membresía</h3>
+          <p className="mt-1 text-sm text-slate-600">Consulta estado de tu plan y beneficios disponibles.</p>
         </Link>
       </div>
 
