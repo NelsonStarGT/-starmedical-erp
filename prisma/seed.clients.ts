@@ -15,6 +15,12 @@ const BASE_DOCUMENT_TYPES = [
   "Otros"
 ] as const;
 
+const DOCUMENT_TYPE_ALIASES: Array<{ legacy: string; canonical: (typeof BASE_DOCUMENT_TYPES)[number] }> = [
+  { legacy: "Policíacos", canonical: "Policiacos" },
+  { legacy: "Recibo de teléfono", canonical: "Recibo de telefono" },
+  { legacy: "Recibo teléfono", canonical: "Recibo de telefono" }
+];
+
 function assertDevOnly() {
   if (process.env.NODE_ENV === "production") {
     throw new Error("[seed:clients] bloqueado en production.");
@@ -56,6 +62,38 @@ async function ensureClientCatalogDefaults() {
         name,
         isActive: true
       }
+    });
+  }
+
+  for (const { legacy, canonical } of DOCUMENT_TYPE_ALIASES) {
+    const legacyRow = await prisma.clientCatalogItem.findFirst({
+      where: {
+        type: ClientCatalogType.DOCUMENT_TYPE,
+        name: legacy
+      },
+      select: { id: true }
+    });
+    if (!legacyRow) continue;
+
+    const canonicalRow = await prisma.clientCatalogItem.findFirst({
+      where: {
+        type: ClientCatalogType.DOCUMENT_TYPE,
+        name: canonical
+      },
+      select: { id: true }
+    });
+
+    if (canonicalRow) {
+      await prisma.clientCatalogItem.update({
+        where: { id: legacyRow.id },
+        data: { isActive: false }
+      });
+      continue;
+    }
+
+    await prisma.clientCatalogItem.update({
+      where: { id: legacyRow.id },
+      data: { name: canonical, isActive: true }
     });
   }
 }
