@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ClientContactRelationType } from "@prisma/client";
+import type { ClientContactRelationType } from "@prisma/client";
 import { Link2, Mail, Phone, PlusCircle, User, UserCheck2 } from "lucide-react";
 import { actionAddClientContact } from "@/app/admin/clientes/actions";
 import ContactLinker from "@/components/clients/ContactLinker";
@@ -31,6 +31,13 @@ const RELATION_LABELS: Record<ClientContactRelationType, string> = {
   OTHER: "Otro"
 };
 
+const CONTACT_RELATION_VALUES = {
+  FAMILY: "FAMILY",
+  WORK: "WORK",
+  FRIEND: "FRIEND",
+  OTHER: "OTHER"
+} as const;
+
 export default function ClientContactsPanel({ clientId, contacts }: { clientId: string; contacts: ContactRow[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -39,7 +46,7 @@ export default function ClientContactsPanel({ clientId, contacts }: { clientId: 
   const [linkedPerson, setLinkedPerson] = useState<ClientProfileLookupItem | null>(null);
   const [form, setForm] = useState(() => ({
     name: "",
-    relationType: ClientContactRelationType.OTHER as ClientContactRelationType,
+    relationType: CONTACT_RELATION_VALUES.OTHER as ClientContactRelationType,
     role: "",
     email: "",
     phone: "",
@@ -69,7 +76,7 @@ export default function ClientContactsPanel({ clientId, contacts }: { clientId: 
         });
         setForm({
           name: "",
-          relationType: ClientContactRelationType.OTHER,
+          relationType: CONTACT_RELATION_VALUES.OTHER,
           role: "",
           email: "",
           phone: "",
@@ -202,10 +209,10 @@ export default function ClientContactsPanel({ clientId, contacts }: { clientId: 
             }
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
           >
-            <option value={ClientContactRelationType.FAMILY}>Familiar</option>
-            <option value={ClientContactRelationType.WORK}>Trabajo</option>
-            <option value={ClientContactRelationType.FRIEND}>Amigo</option>
-            <option value={ClientContactRelationType.OTHER}>Otro</option>
+            <option value={CONTACT_RELATION_VALUES.FAMILY}>Familiar</option>
+            <option value={CONTACT_RELATION_VALUES.WORK}>Trabajo</option>
+            <option value={CONTACT_RELATION_VALUES.FRIEND}>Amigo</option>
+            <option value={CONTACT_RELATION_VALUES.OTHER}>Otro</option>
           </select>
 
           <input

@@ -126,6 +126,81 @@ function firstValue(value?: string | string[]) {
   return value;
 }
 
+function isPrismaSchemaMismatchError(error: unknown): boolean {
+  if (!error) return false;
+
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === "P2022") return true;
+  }
+
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("unknown field") ||
+    message.includes("unknown argument") ||
+    message.includes("unknown arg") ||
+    (message.includes("column") && message.includes("does not exist"))
+  );
+}
+
+function warnDevClientsCompat(context: string, error: unknown) {
+  if (process.env.NODE_ENV === "production") return;
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(
+    `[DEV][clients] ${context}: fallback por schema mismatch. ` +
+      "Ejecuta `npm run db:migrate:deploy` y `npm run db:generate`. " +
+      `Details: ${message}`
+  );
+}
+
+async function safeSupportsClientContactExtendedColumns(context = "clients.detail.contacts.columns"): Promise<boolean> {
+  try {
+    await prisma.clientContact.findFirst({
+      select: {
+        id: true,
+        relationType: true,
+        linkedPersonClientId: true,
+        isEmergencyContact: true
+      }
+    });
+    return true;
+  } catch (error) {
+    if (isPrismaMissingTableError(error)) {
+      warnDevMissingTable(`${context}.clientContact.findFirst`, error);
+      return false;
+    }
+    if (isPrismaSchemaMismatchError(error)) {
+      warnDevClientsCompat(`${context}.clientContact.findFirst`, error);
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function safeSupportsClientNoteExtendedColumns(context = "clients.detail.notes.columns"): Promise<boolean> {
+  try {
+    await prisma.clientNote.findFirst({
+      select: {
+        id: true,
+        title: true,
+        noteType: true,
+        visibility: true
+      }
+    });
+    return true;
+  } catch (error) {
+    if (isPrismaMissingTableError(error)) {
+      warnDevMissingTable(`${context}.clientNote.findFirst`, error);
+      return false;
+    }
+    if (isPrismaSchemaMismatchError(error)) {
+      warnDevClientsCompat(`${context}.clientNote.findFirst`, error);
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function safeRequiredDocRulesFindMany(args: Prisma.ClientRequiredDocumentRuleFindManyArgs): Promise<RequiredDocRuleRow[]> {
   const delegate = (prisma as unknown as { clientRequiredDocumentRule?: RequiredDocRulesDelegate }).clientRequiredDocumentRule;
   if (!delegate?.findMany) {
@@ -388,6 +463,11 @@ export default async function ClientePortalPage({
     return item.show ? item.show(client.type) : true;
   });
   const activeTab = visibleTabs.some((t) => t.key === tab) ? tab : "resumen";
+  const [supportsContactExtendedColumns, supportsNoteExtendedColumns] = await Promise.all([
+    activeTab === "contactos" ? safeSupportsClientContactExtendedColumns("clients.detail") : Promise.resolve(false),
+    activeTab === "notas" ? safeSupportsClientNoteExtendedColumns("clients.detail") : Promise.resolve(false)
+  ]);
+
   const documentsData =
     activeTab === "documentos"
       ? await prisma.clientDocument.findMany({
@@ -825,74 +905,123 @@ export default async function ClientePortalPage({
       {activeTab === "contactos" && (
         <ClientContactsPanel
           clientId={client.id}
-          contacts={(await prisma.clientContact.findMany({
-            where: { clientId },
-            orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
-            select: {
-              id: true,
-              name: true,
-              relationType: true,
-              role: true,
-              email: true,
-              phone: true,
-              isEmergencyContact: true,
-              isPrimary: true,
-              linkedPersonClientId: true,
-              linkedPerson: {
-                select: {
-                  id: true,
-                  type: true,
-                  companyName: true,
-                  tradeName: true,
-                  nit: true,
-                  firstName: true,
-                  middleName: true,
-                  lastName: true,
-                  secondLastName: true,
-                  dpi: true
-                }
-              }
-            }
-          })).map((contact) => ({
-            id: contact.id,
-            name: contact.name,
-            relationType: contact.relationType,
-            role: contact.role,
-            email: contact.email,
-            phone: contact.phone,
-            isEmergencyContact: contact.isEmergencyContact,
-            isPrimary: contact.isPrimary,
-            linkedPersonClientId: contact.linkedPersonClientId,
-            linkedPersonLabel: contact.linkedPerson ? getEntityLabel(contact.linkedPerson) : null
-          }))}
+          contacts={
+            supportsContactExtendedColumns
+              ? (
+                  await prisma.clientContact.findMany({
+                    where: { clientId },
+                    orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
+                    select: {
+                      id: true,
+                      name: true,
+                      relationType: true,
+                      role: true,
+                      email: true,
+                      phone: true,
+                      isEmergencyContact: true,
+                      isPrimary: true,
+                      linkedPersonClientId: true,
+                      linkedPerson: {
+                        select: {
+                          id: true,
+                          type: true,
+                          companyName: true,
+                          tradeName: true,
+                          nit: true,
+                          firstName: true,
+                          middleName: true,
+                          lastName: true,
+                          secondLastName: true,
+                          dpi: true
+                        }
+                      }
+                    }
+                  })
+                ).map((contact) => ({
+                  id: contact.id,
+                  name: contact.name,
+                  relationType: contact.relationType,
+                  role: contact.role,
+                  email: contact.email,
+                  phone: contact.phone,
+                  isEmergencyContact: contact.isEmergencyContact,
+                  isPrimary: contact.isPrimary,
+                  linkedPersonClientId: contact.linkedPersonClientId,
+                  linkedPersonLabel: contact.linkedPerson ? getEntityLabel(contact.linkedPerson) : null
+                }))
+              : (
+                  await prisma.clientContact.findMany({
+                    where: { clientId },
+                    orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
+                    select: { id: true, name: true, role: true, email: true, phone: true, isPrimary: true }
+                  })
+                ).map((contact) => ({
+                  id: contact.id,
+                  name: contact.name,
+                  relationType: "OTHER",
+                  role: contact.role,
+                  email: contact.email,
+                  phone: contact.phone,
+                  isEmergencyContact: false,
+                  isPrimary: contact.isPrimary,
+                  linkedPersonClientId: null,
+                  linkedPersonLabel: null
+                }))
+          }
         />
       )}
 
       {activeTab === "notas" && (
         <ClientNotesPanel
           clientId={client.id}
-          notes={(await prisma.clientNote.findMany({
-            where: { clientId },
-            orderBy: { createdAt: "desc" },
-            take: 50,
-            select: {
-              id: true,
-              title: true,
-              body: true,
-              noteType: true,
-              visibility: true,
-              createdAt: true,
-              actor: { select: { name: true, email: true } }
-            }
-          })).map((note) => ({
-            id: note.id,
-            title: note.title,
-            body: note.body,
-            noteType: note.noteType,
-            visibility: note.visibility,
-            createdAt: note.createdAt.toISOString(),
-            actorLabel: note.actor?.name ?? note.actor?.email ?? null
-          }))}
+          notes={
+            supportsNoteExtendedColumns
+              ? (
+                  await prisma.clientNote.findMany({
+                    where: { clientId },
+                    orderBy: { createdAt: "desc" },
+                    take: 50,
+                    select: {
+                      id: true,
+                      title: true,
+                      body: true,
+                      noteType: true,
+                      visibility: true,
+                      createdAt: true,
+                      actor: { select: { name: true, email: true } }
+                    }
+                  })
+                ).map((note) => ({
+                  id: note.id,
+                  title: note.title,
+                  body: note.body,
+                  noteType: note.noteType,
+                  visibility: note.visibility,
+                  createdAt: note.createdAt.toISOString(),
+                  actorLabel: note.actor?.name ?? note.actor?.email ?? null
+                }))
+              : (
+                  await prisma.clientNote.findMany({
+                    where: { clientId },
+                    orderBy: { createdAt: "desc" },
+                    take: 50,
+                    select: {
+                      id: true,
+                      body: true,
+                      createdAt: true,
+                      actor: { select: { name: true, email: true } }
+                    }
+                  })
+                ).map((note) => ({
+                  id: note.id,
+                  title: null,
+                  body: note.body,
+                  noteType: "ADMIN",
+                  visibility: "INTERNA",
+                  createdAt: note.createdAt.toISOString(),
+                  actorLabel: note.actor?.name ?? note.actor?.email ?? null
+                }))
+          }
         />
       )}
 

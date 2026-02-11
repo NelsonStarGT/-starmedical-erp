@@ -3,17 +3,15 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import {
-  ClientContactRelationType,
   ClientAffiliationPayerType,
   ClientAffiliationStatus,
   ClientCatalogType,
   ClientDocumentApprovalStatus,
   ClientLocationType,
-  ClientNoteType,
-  ClientNoteVisibility,
   Prisma,
   ClientProfileType
 } from "@prisma/client";
+import type { ClientContactRelationType, ClientNoteType, ClientNoteVisibility } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
 import { getSessionUserFromCookies, type SessionUser } from "@/lib/auth";
@@ -72,6 +70,81 @@ function normalizeRequired(value: string | undefined | null, message: string) {
   return trimmed;
 }
 
+function isPrismaSchemaMismatchError(error: unknown): boolean {
+  if (!error) return false;
+
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === "P2022") return true;
+  }
+
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("unknown field") ||
+    message.includes("unknown argument") ||
+    message.includes("unknown arg") ||
+    (message.includes("column") && message.includes("does not exist"))
+  );
+}
+
+function warnDevClientsCompat(context: string, error: unknown) {
+  if (process.env.NODE_ENV === "production") return;
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(
+    `[DEV][clients] ${context}: fallback por schema mismatch. ` +
+      "Ejecuta `npm run db:migrate:deploy` y `npm run db:generate`. " +
+      `Details: ${message}`
+  );
+}
+
+async function safeSupportsClientContactExtendedColumns(context = "clients.actions.contacts.columns"): Promise<boolean> {
+  try {
+    await prisma.clientContact.findFirst({
+      select: {
+        id: true,
+        relationType: true,
+        linkedPersonClientId: true,
+        isEmergencyContact: true
+      }
+    });
+    return true;
+  } catch (error) {
+    if (isPrismaMissingTableError(error)) {
+      warnDevMissingTable(`${context}.clientContact.findFirst`, error);
+      return false;
+    }
+    if (isPrismaSchemaMismatchError(error)) {
+      warnDevClientsCompat(`${context}.clientContact.findFirst`, error);
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function safeSupportsClientNoteExtendedColumns(context = "clients.actions.notes.columns"): Promise<boolean> {
+  try {
+    await prisma.clientNote.findFirst({
+      select: {
+        id: true,
+        title: true,
+        noteType: true,
+        visibility: true
+      }
+    });
+    return true;
+  } catch (error) {
+    if (isPrismaMissingTableError(error)) {
+      warnDevMissingTable(`${context}.clientNote.findFirst`, error);
+      return false;
+    }
+    if (isPrismaSchemaMismatchError(error)) {
+      warnDevClientsCompat(`${context}.clientNote.findFirst`, error);
+      return false;
+    }
+    throw error;
+  }
+}
+
 function normalizeIdList(values: Iterable<FormDataEntryValue | string>) {
   const ids = new Set<string>();
   for (const raw of values) {
@@ -81,6 +154,38 @@ function normalizeIdList(values: Iterable<FormDataEntryValue | string>) {
     ids.add(trimmed);
   }
   return Array.from(ids);
+}
+
+const CONTACT_RELATION_VALUES = ["FAMILY", "WORK", "FRIEND", "OTHER"] as const;
+const NOTE_TYPE_VALUES = ["ADMIN", "RECEPCION", "CLINICA", "OTRA"] as const;
+const NOTE_VISIBILITY_VALUES = ["INTERNA", "VISIBLE_PACIENTE"] as const;
+
+type ContactRelationValue = (typeof CONTACT_RELATION_VALUES)[number];
+type ClientNoteTypeValue = (typeof NOTE_TYPE_VALUES)[number];
+type ClientNoteVisibilityValue = (typeof NOTE_VISIBILITY_VALUES)[number];
+
+function normalizeContactRelationType(value: string | null | undefined): ContactRelationValue {
+  const normalized = (value ?? "").trim().toUpperCase();
+  if ((CONTACT_RELATION_VALUES as readonly string[]).includes(normalized)) {
+    return normalized as ContactRelationValue;
+  }
+  throw new Error("Tipo de relación inválido.");
+}
+
+function normalizeClientNoteType(value: string | null | undefined): ClientNoteTypeValue {
+  const normalized = (value ?? "").trim().toUpperCase();
+  if ((NOTE_TYPE_VALUES as readonly string[]).includes(normalized)) {
+    return normalized as ClientNoteTypeValue;
+  }
+  throw new Error("Tipo de nota inválido.");
+}
+
+function normalizeClientNoteVisibility(value: string | null | undefined): ClientNoteVisibilityValue {
+  const normalized = (value ?? "").trim().toUpperCase();
+  if ((NOTE_VISIBILITY_VALUES as readonly string[]).includes(normalized)) {
+    return normalized as ClientNoteVisibilityValue;
+  }
+  throw new Error("Visibilidad inválida.");
 }
 
 const REQUIRED_DOCS_MIGRATION_ERROR =
@@ -2289,11 +2394,9 @@ export async function actionAddClientContact(input: {
   const user = await requireAdminUser();
   const clientId = normalizeRequired(input.clientId, "Cliente inválido.");
   await resolveActiveClientProfile(clientId);
+  const supportsContactExtendedColumns = await safeSupportsClientContactExtendedColumns("clients.actions.addContact");
 
-  const relationType = input.relationType ?? ClientContactRelationType.OTHER;
-  if (!Object.values(ClientContactRelationType).includes(relationType)) {
-    throw new Error("Tipo de relación inválido.");
-  }
+  const relationType = normalizeContactRelationType(input.relationType ?? "OTHER");
 
   const linkedPersonClientId = normalizeOptional(input.linkedPersonClientId);
   let linkedPersonName: string | null = null;
@@ -2349,13 +2452,19 @@ export async function actionAddClientContact(input: {
       data: {
         clientId,
         name,
-        relationType,
         role,
         phone,
         email,
-        linkedPersonClientId,
-        isEmergencyContact,
-        isPrimary
+        ...(supportsContactExtendedColumns
+          ? {
+              relationType: relationType as ClientContactRelationType,
+              linkedPersonClientId,
+              isEmergencyContact,
+              isPrimary
+            }
+          : {
+              isPrimary
+            })
       },
       select: { id: true }
     });
@@ -2390,15 +2499,27 @@ export async function actionAddClientNote(input: {
   const user = await requireAdminUser();
   const clientId = normalizeRequired(input.clientId, "Cliente inválido.");
   await resolveActiveClientProfile(clientId);
+  const supportsNoteExtendedColumns = await safeSupportsClientNoteExtendedColumns("clients.actions.addNote");
   const title = normalizeOptional(input.title);
   const body = normalizeRequired(input.body, "Nota requerida.");
-  const noteType = input.noteType ?? ClientNoteType.ADMIN;
-  const visibility = input.visibility ?? ClientNoteVisibility.INTERNA;
-  if (!Object.values(ClientNoteType).includes(noteType)) throw new Error("Tipo de nota inválido.");
-  if (!Object.values(ClientNoteVisibility).includes(visibility)) throw new Error("Visibilidad inválida.");
+  const noteType = normalizeClientNoteType(input.noteType ?? "ADMIN");
+  const visibility = normalizeClientNoteVisibility(input.visibility ?? "INTERNA");
 
   const created = await prisma.clientNote.create({
-    data: { clientId, title, body, noteType, visibility, actorId: user.id },
+    data: supportsNoteExtendedColumns
+      ? {
+          clientId,
+          title,
+          body,
+          noteType: noteType as ClientNoteType,
+          visibility: visibility as ClientNoteVisibility,
+          actorId: user.id
+        }
+      : {
+          clientId,
+          body,
+          actorId: user.id
+        },
     select: { id: true }
   });
 

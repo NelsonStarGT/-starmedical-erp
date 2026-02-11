@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { ClientNoteType, ClientNoteVisibility } from "@prisma/client";
+import type { ClientNoteType, ClientNoteVisibility } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { PlusCircle } from "lucide-react";
 import { actionAddClientNote } from "@/app/admin/clientes/actions";
@@ -29,6 +29,18 @@ const VISIBILITY_LABELS: Record<ClientNoteVisibility, string> = {
   VISIBLE_PACIENTE: "Visible paciente"
 };
 
+const NOTE_TYPE_VALUES = {
+  ADMIN: "ADMIN",
+  RECEPCION: "RECEPCION",
+  CLINICA: "CLINICA",
+  OTRA: "OTRA"
+} as const;
+
+const NOTE_VISIBILITY_VALUES = {
+  INTERNA: "INTERNA",
+  VISIBLE_PACIENTE: "VISIBLE_PACIENTE"
+} as const;
+
 export default function ClientNotesPanel({ clientId, notes }: { clientId: string; notes: NoteRow[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -36,8 +48,8 @@ export default function ClientNotesPanel({ clientId, notes }: { clientId: string
   const [form, setForm] = useState(() => ({
     title: "",
     body: "",
-    noteType: ClientNoteType.ADMIN as ClientNoteType,
-    visibility: ClientNoteVisibility.INTERNA as ClientNoteVisibility
+    noteType: NOTE_TYPE_VALUES.ADMIN as ClientNoteType,
+    visibility: NOTE_VISIBILITY_VALUES.INTERNA as ClientNoteVisibility
   }));
 
   const canSubmit = useMemo(() => Boolean(form.body.trim()), [form.body]);
@@ -56,8 +68,8 @@ export default function ClientNotesPanel({ clientId, notes }: { clientId: string
         setForm({
           title: "",
           body: "",
-          noteType: ClientNoteType.ADMIN,
-          visibility: ClientNoteVisibility.INTERNA
+          noteType: NOTE_TYPE_VALUES.ADMIN,
+          visibility: NOTE_VISIBILITY_VALUES.INTERNA
         });
         setError(null);
         router.refresh();
@@ -84,7 +96,7 @@ export default function ClientNotesPanel({ clientId, notes }: { clientId: string
                   <span
                     className={cn(
                       "rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-                      note.visibility === ClientNoteVisibility.INTERNA
+                      note.visibility === NOTE_VISIBILITY_VALUES.INTERNA
                         ? "border-slate-200 bg-slate-50 text-slate-600"
                         : "border-sky-200 bg-sky-50 text-sky-700"
                     )}
@@ -128,10 +140,10 @@ export default function ClientNotesPanel({ clientId, notes }: { clientId: string
             }
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
           >
-            <option value={ClientNoteType.ADMIN}>Administrativa</option>
-            <option value={ClientNoteType.RECEPCION}>Recepción</option>
-            <option value={ClientNoteType.CLINICA}>Clínica</option>
-            <option value={ClientNoteType.OTRA}>Otra</option>
+            <option value={NOTE_TYPE_VALUES.ADMIN}>Administrativa</option>
+            <option value={NOTE_TYPE_VALUES.RECEPCION}>Recepción</option>
+            <option value={NOTE_TYPE_VALUES.CLINICA}>Clínica</option>
+            <option value={NOTE_TYPE_VALUES.OTRA}>Otra</option>
           </select>
 
           <select
@@ -144,8 +156,8 @@ export default function ClientNotesPanel({ clientId, notes }: { clientId: string
             }
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
           >
-            <option value={ClientNoteVisibility.INTERNA}>Interna</option>
-            <option value={ClientNoteVisibility.VISIBLE_PACIENTE}>Visible paciente</option>
+            <option value={NOTE_VISIBILITY_VALUES.INTERNA}>Interna</option>
+            <option value={NOTE_VISIBILITY_VALUES.VISIBLE_PACIENTE}>Visible paciente</option>
           </select>
         </div>
 
