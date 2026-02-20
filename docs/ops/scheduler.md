@@ -40,6 +40,11 @@ Ejecutar snapshots automáticos de `health` y `metrics` por tenant, con persiste
 - `OPS_SCHEDULER_TICK_SECONDS` (default `30`)
 - `OPS_SCHEDULER_LOCK_TTL_SECONDS` (default `110`)
 - `OPS_ALERT_COOLDOWN_SECONDS` (default `600`)
+- `OPS_ALERTS_ENABLED` (`true|false`, default `true`)
+
+## Lockdown
+- En `production`, si no hay `REDIS_URL`, el scheduler queda deshabilitado por seguridad.
+- El fallback de lock en memoria se permite solo en no-producción.
 
 ## Multi-tenant
 - Tenant discovery:

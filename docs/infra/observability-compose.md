@@ -51,6 +51,12 @@ Metrics payload per service includes:
 UI:
 - `/admin/configuracion/operaciones/alertas`
 
+Lockdown toggles:
+- `OPS_SCHEDULER_ENABLED`
+- `OPS_ALERTS_ENABLED`
+- `OPS_SCHEDULER_TICK_SECONDS`
+- `OPS_ALERT_COOLDOWN_SECONDS`
+
 ## Multi-tenant ready
 - Compose project name: `starmedical-${TENANT_ID:-local}`.
 - Metrics are filtered by compose project label.
