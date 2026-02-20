@@ -9,6 +9,7 @@ import type {
   OpsSchedulerRecipients
 } from "@/lib/ops/types";
 
+// NO-TOUCH ZONE (OPS cierre): reglas de alerta/dedupe usadas por scheduler y hand-off.
 type PreviousHealthState = {
   status: "ok" | "degraded" | "down";
   services: Record<string, string>;
@@ -81,6 +82,11 @@ function normalizeRecipients(input: OpsSchedulerRecipients) {
     .slice(0, 30);
 
   return { emails, whatsapp };
+}
+
+export function areOpsAlertsEnabled() {
+  const toggle = String(process.env.OPS_ALERTS_ENABLED || "true").trim().toLowerCase();
+  return !(toggle === "0" || toggle === "false" || toggle === "no");
 }
 
 function createAlert(input: {
@@ -293,6 +299,10 @@ export async function notifyOpsAlert(input: {
   channels: OpsSchedulerChannels;
   recipients: OpsSchedulerRecipients;
 }) {
+  if (!areOpsAlertsEnabled()) {
+    return { emailSent: false, whatsappSent: false };
+  }
+
   const tenantId = String(input.tenantId || "local").trim() || "local";
   const recipients = normalizeRecipients(input.recipients);
 

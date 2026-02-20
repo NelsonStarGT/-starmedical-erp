@@ -15,6 +15,7 @@ import {
 } from "@/lib/ops/store";
 import type { SessionUser } from "@/lib/auth";
 
+// NO-TOUCH ZONE (OPS cierre): scheduler tenant-aware + locking + auditoría SYSTEM.
 type SchedulerTrigger = "interval" | "manual" | "bootstrap";
 
 type TenantSchedulerResult = {
@@ -70,6 +71,10 @@ function getRedisUrl() {
   return String(process.env.REDIS_URL || "").trim();
 }
 
+function allowMemoryLockFallback() {
+  return process.env.NODE_ENV !== "production";
+}
+
 async function getRedis() {
   const url = getRedisUrl();
   if (!url) return null;
@@ -113,9 +118,17 @@ async function acquireTenantLock(tenantId: string, token: string) {
     };
   }
 
+  if (!allowMemoryLockFallback()) {
+    return {
+      acquired: false,
+      reason: "lock_backend_unavailable",
+      release: async () => undefined
+    };
+  }
+
   const memoryLocks = getMemoryLocks();
   if (memoryLocks.has(key)) {
-    return { acquired: false, release: async () => undefined };
+    return { acquired: false, reason: "lock_busy", release: async () => undefined };
   }
   memoryLocks.set(key, token);
   return {
@@ -185,7 +198,7 @@ async function runTenantScheduler(input: {
       tenantId,
       requestId,
       status: "skipped",
-      reason: "lock_busy",
+      reason: lock.reason || "lock_busy",
       alertsCreated: 0
     };
   }
@@ -399,6 +412,10 @@ async function runOpsSchedulerIntervalCycle() {
 
 export function ensureOpsSchedulerStarted() {
   if (!schedulerEnabled()) return false;
+  if (!allowMemoryLockFallback() && !getRedisUrl()) {
+    console.warn("[ops.scheduler] disabled: REDIS_URL requerido en production para lock distribuido");
+    return false;
+  }
   if (globalThis.__opsSchedulerStarted) return true;
 
   globalThis.__opsSchedulerStarted = true;
