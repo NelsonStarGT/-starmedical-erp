@@ -5435,3 +5435,81 @@ enum LabRole {
   LAB_SUPERVISOR
   LAB_ADMIN
 }
+
+model OpsMetricsSnapshot {
+  id           String                     @id @default(cuid())
+  createdAt    DateTime                   @default(now())
+  tenantId     String?
+  branchId     String?
+  projectName  String
+  range        String
+  status       String
+  durationMs   Int?
+  requestId    String?
+  source       String?
+  buildCommit  String?
+  buildVersion String?
+  services     OpsMetricsSnapshotService[]
+
+  @@index([tenantId, createdAt])
+  @@index([status, createdAt])
+  @@index([requestId])
+}
+
+model OpsMetricsSnapshotService {
+  id            String             @id @default(cuid())
+  snapshotId    String
+  tenantId      String?
+  serviceKey    String
+  status        String
+  cpuPercent    Float?
+  memoryBytes   BigInt?
+  memoryPercent Float?
+  netRxBps      Float?
+  netTxBps      Float?
+  bandwidthBps  Float?
+  checkedAt     DateTime           @default(now())
+  createdAt     DateTime           @default(now())
+  snapshot      OpsMetricsSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([snapshotId])
+  @@index([tenantId, checkedAt])
+  @@index([serviceKey, status, checkedAt])
+}
+
+model OpsAlertEvent {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  tenantId      String?
+  branchId      String?
+  level         String
+  type          String
+  fromStatus    String?
+  toStatus      String?
+  serviceKey    String?
+  summary       String
+  detailJson    Json?
+  dedupeKey     String
+  cooldownUntil DateTime?
+  requestId     String?
+  source        String?
+
+  @@index([tenantId, createdAt])
+  @@index([type, level, createdAt])
+  @@index([serviceKey, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model OpsSchedulerConfig {
+  id               String   @id @default(cuid())
+  tenantId         String
+  enabled          Boolean  @default(true)
+  frequencySeconds Int      @default(120)
+  channelsJson     Json?
+  recipientsJson   Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([tenantId])
+  @@index([updatedAt])
+}
