@@ -1,0 +1,395 @@
+name: starmedical-${TENANT_ID:-local}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: starmedical
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TENANT_ID: ${TENANT_ID:-local}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata-local:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d starmedical -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 2048m
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      TENANT_ID: ${TENANT_ID:-local}
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data-local:/data
+    mem_limit: 768m
+    cpus: 0.75
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+      mc mb -p local/processing-artifacts || true;
+      mc anonymous set none local/processing-artifacts || true;
+      exit 0;
+      "
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  processing-service:
+    build:
+      context: .
+      dockerfile: services/processing-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      REDIS_URL: redis://redis:6379
+      QUEUE_NAME: processing.jobs
+      PROCESSING_SERVICE_TOKEN: processing-local-token
+      PROCESSING_HMAC_SECRET: processing-local-hmac
+      PROCESSING_REQUIRE_HMAC: "true"
+      PROCESSING_CALLBACK_TOKEN: processing-callback-local-token
+      PROCESSING_CALLBACK_HMAC_SECRET: processing-callback-local-hmac
+      PROCESSING_CALLBACK_RETRIES: 3
+      STORAGE_PROVIDER: s3
+      STORAGE_BUCKET: processing-artifacts
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_FORCE_PATH_STYLE: "true"
+      S3_SIGNED_URL_EXPIRES_SEC: 900
+      MAX_FILE_MB: 8
+      MAX_ROWS: 5000
+      MAX_COLS: 80
+      JOB_TIMEOUT_MS: 15000
+      CONCURRENCY: 2
+      RATE_LIMIT_PER_MINUTE: 30
+      TENANT_ID: ${TENANT_ID:-local}
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1536m
+    cpus: 1.5
+    healthcheck:
+      test: ["CMD", "node", "-e", "Promise.all([fetch('http://127.0.0.1:4000/healthz'), fetch('http://127.0.0.1:4000/readyz')]).then(rs=>process.exit(rs.every(r=>r.ok)?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=10s
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 512m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=2d
+      - --web.enable-lifecycle
+    depends_on:
+      cadvisor:
+        condition: service_healthy
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data-local:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 768m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    volumes:
+      - /:/host:ro,rslave
+    profiles:
+      - ops
+    mem_limit: 256m
+    cpus: 0.25
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  ops-agent:
+    build:
+      context: .
+      dockerfile: services/ops-agent/Dockerfile
+    working_dir: /workspace
+    command: ["node", "/app/dist/index.js"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4700
+      OPS_AGENT_TOKEN: ops-agent-local-token
+      OPS_AGENT_HMAC_SECRET: ops-agent-local-hmac
+      OPS_AGENT_RATE_LIMIT_PER_MINUTE: 60
+      OPS_AGENT_NONCE_TTL_MS: 300000
+      OPS_AGENT_ALLOWLIST: "127.0.0.1,::1"
+      OPS_PROJECT_PREFIX: starmedical
+      OPS_DEFAULT_TENANT: ${TENANT_ID:-local}
+      OPS_COMPOSE_FILE: /workspace/docker-compose.local.yml
+      OPS_OVERRIDE_DIR: /workspace/docker/ops
+      OPS_APP_RESET_URL: http://app:3000/api/internal/ops/reset-data
+      OPS_APP_RESET_TOKEN: ops-reset-local-token
+      OPS_APP_RESET_HMAC_SECRET: ops-reset-local-hmac
+      PROMETHEUS_URL: http://prometheus:9090
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    volumes:
+      - ./:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4700/healthz >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  app:
+    image: node:20
+    working_dir: /workspace
+    command: >
+      sh -ec '
+      if [ ! -d /workspace/node_modules ] || [ -z "$$(ls -A /workspace/node_modules 2>/dev/null)" ]; then
+        npm ci --no-audit --no-fund || npm install --no-audit --no-fund;
+      fi;
+      npx prisma generate;
+      npm run dev -- --hostname 0.0.0.0 --port 3000
+      '
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/starmedical
+      REDIS_URL: redis://redis:6379
+      PORTAL_RATE_LIMIT_BACKEND: redis
+      PROCESSING_SERVICE_URL: http://processing-service:4000
+      PROCESSING_SERVICE_TOKEN: processing-local-token
+      PROCESSING_HMAC_SECRET: processing-local-hmac
+      PROCESSING_REQUIRE_HMAC: "true"
+      PROCESSING_CALLBACK_TOKEN: processing-callback-local-token
+      PROCESSING_CALLBACK_HMAC_SECRET: processing-callback-local-hmac
+      PROCESSING_CALLBACK_BASE_URL: http://app:3000
+      OPS_HEALTH_TOKEN: ops-health-local-token
+      OPS_AGENT_URL: http://ops-agent:4700
+      OPS_AGENT_TOKEN: ops-agent-local-token
+      OPS_AGENT_HMAC_SECRET: ops-agent-local-hmac
+      OPS_RESET_INTERNAL_TOKEN: ops-reset-local-token
+      OPS_RESET_INTERNAL_HMAC_SECRET: ops-reset-local-hmac
+      PROMETHEUS_URL: http://prometheus:9090
+      TENANT_ID: ${TENANT_ID:-local}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      processing-service:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+      ops-agent:
+        condition: service_healthy
+    volumes:
+      - ./:/workspace
+      - app-node-modules-local:/workspace/node_modules
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/internal/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    mem_limit: 2048m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  ops-health-scheduler:
+    image: curlimages/curl:8.12.1
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      OPS_HEALTH_TOKEN: ops-health-local-token
+      OPS_HEALTH_INTERVAL_SEC: ${OPS_HEALTH_INTERVAL_SEC:-300}
+    command: >
+      sh -ec '
+      echo "ops-health-scheduler: interval=$${OPS_HEALTH_INTERVAL_SEC}s";
+      while true; do
+        curl --fail --silent --show-error \
+          -H "Authorization: Bearer $${OPS_HEALTH_TOKEN}" \
+          "http://app:3000/api/internal/ops/health?persist=1&source=compose_scheduler" \
+          >/tmp/health.json || true;
+        sleep "$${OPS_HEALTH_INTERVAL_SEC}";
+      done
+      '
+    mem_limit: 128m
+    cpus: 0.1
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pgdata-local:
+  minio-data-local:
+  prometheus-data-local:
+  app-node-modules-local:
