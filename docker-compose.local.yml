@@ -269,7 +269,8 @@ services:
       prometheus:
         condition: service_healthy
     volumes:
-      - ./:/workspace
+      - ./:/workspace:ro
+      - ./docker/ops:/workspace/docker/ops
       - /var/run/docker.sock:/var/run/docker.sock
     read_only: true
     tmpfs:
