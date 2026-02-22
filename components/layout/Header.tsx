@@ -8,7 +8,26 @@ import { navSections } from "./nav";
 
 const navItems = navSections.flatMap((section) => section.items ?? []);
 
-export default function Header() {
+type HeaderProps = {
+  showDevBanner?: boolean;
+  activeBranchId?: string | null;
+  activeBranchName?: string | null;
+  activeBranchOptions?: Array<{ id: string; name: string; code: string | null; isActive: boolean }>;
+  canSwitchActiveBranch?: boolean;
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
+  canAccessReception?: boolean;
+  canAccessMedicalCommissions?: boolean;
+  canAccessMedicalOperations?: boolean;
+  canAccessMedicalConfig?: boolean;
+  canAccessPortales?: boolean;
+};
+
+export default function Header({
+  showDevBanner = false,
+  activeBranchName = null,
+  onToggleSidebar
+}: HeaderProps = {}) {
   const router = useRouter();
   const [userName, setUserName] = useState("Usuario");
   const [loading, setLoading] = useState(false);
@@ -41,8 +60,20 @@ export default function Header() {
 
   return (
     <>
+      {showDevBanner ? (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800 sm:px-6">
+          Entorno de desarrollo activo
+        </div>
+      ) : null}
       <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-xl border-b border-white/60 shadow-[0_10px_30px_rgba(10,116,255,0.08)] px-4 py-3 sm:px-6 sm:py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
+          <button
+            className="hidden lg:inline-flex items-center justify-center rounded-xl border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
+            onClick={onToggleSidebar}
+            aria-label="Colapsar menu lateral"
+          >
+            <Bars3Icon className="h-5 w-5" />
+          </button>
           <button
             className="lg:hidden inline-flex items-center justify-center rounded-xl border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
             onClick={() => setMobileOpen(true)}
@@ -53,6 +84,7 @@ export default function Header() {
           <div>
             <p className="text-[11px] uppercase tracking-[0.25rem] text-brand-navy/70">StarMedical ERP</p>
             <h1 className="text-xl font-semibold text-brand-navy leading-tight">Panel administrativo</h1>
+            {activeBranchName ? <p className="text-xs text-slate-500">Sucursal activa: {activeBranchName}</p> : null}
           </div>
         </div>
         <div className="flex items-center gap-4">

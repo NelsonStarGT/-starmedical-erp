@@ -50,8 +50,8 @@ async function loadCreateServer() {
   process.env.OPS_DEFAULT_TENANT = process.env.OPS_DEFAULT_TENANT || "local";
   process.env.OPS_PROJECT_PREFIX = process.env.OPS_PROJECT_PREFIX || "starmedical";
 
-  const module = await import("../server.js");
-  createServerFn = module.createServer;
+  const serverModule = await import("../server.js");
+  createServerFn = serverModule.createServer;
   return createServerFn;
 }
 

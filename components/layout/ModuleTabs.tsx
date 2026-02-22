@@ -12,6 +12,7 @@ export type ModuleTab = {
 
 type Props = {
   tabs: ModuleTab[];
+  variant?: string;
 };
 
 export default function ModuleTabs({ tabs }: Props) {

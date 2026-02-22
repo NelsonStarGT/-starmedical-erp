@@ -31,13 +31,9 @@ type TenantSchedulerResult = {
 type RedisClient = ReturnType<typeof createClient>;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __opsSchedulerStarted: boolean | undefined;
-  // eslint-disable-next-line no-var
   var __opsSchedulerTimer: NodeJS.Timeout | undefined;
-  // eslint-disable-next-line no-var
   var __opsSchedulerRunning: boolean | undefined;
-  // eslint-disable-next-line no-var
   var __opsSchedulerMemoryLocks: Map<string, string> | undefined;
 }
 

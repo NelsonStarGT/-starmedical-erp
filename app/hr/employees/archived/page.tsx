@@ -57,7 +57,7 @@ async function fetchArchived(filters: {
   return json as ArchivedResponse;
 }
 
-const statusTone: Record<HrEmployeeStatus, { label: string; variant: "info" | "warning" | "success" | "neutral" }> = {
+const statusTone: Record<string, { label: string; variant: "info" | "warning" | "success" | "neutral" }> = {
   ACTIVE: { label: "Activo", variant: "success" },
   SUSPENDED: { label: "Suspendido", variant: "warning" },
   TERMINATED: { label: "Terminado", variant: "warning" },

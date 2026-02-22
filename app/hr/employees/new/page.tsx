@@ -927,3 +927,11 @@ function EmployeeWizardContent() {
     </div>
   );
 }
+
+export default function EmployeeWizardPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-500">Cargando formulario...</div>}>
+      <EmployeeWizardContent />
+    </Suspense>
+  );
+}

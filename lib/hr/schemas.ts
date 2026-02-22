@@ -126,6 +126,16 @@ export const employeeFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).default(1)
 });
 
+export const archivedEmployeeFiltersSchema = z.object({
+  search: optionalString,
+  branchId: optionalString,
+  type: z.enum(["INTERNAL", "EXTERNAL"]).optional(),
+  relationship: z.enum(["DEPENDENCIA", "SIN_DEPENDENCIA"]).optional(),
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  page: z.coerce.number().int().min(1).default(1)
+});
+
 export const onboardingDraftSchema = z
   .object({
     firstName: optionalNullableString,
@@ -367,7 +377,19 @@ export const hrSettingsSchema = z.object({
     .string()
     .trim()
     .optional()
-    .transform((v) => (v && v.length > 0 ? v : undefined))
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
+  logoFileKey: optionalNullableString,
+  attendanceEmailEnabled: z.boolean().optional(),
+  attendanceAdminRecipients: z.array(z.string().trim().email()).optional(),
+  photoSafetyEnabled: z.boolean().optional(),
+  openaiEnabled: z.boolean().optional(),
+  openaiApiKey: optionalNullableString,
+  defaultTimezone: optionalNullableString,
+  attendanceStartTime: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .optional(),
+  attendanceLateToleranceMinutes: z.coerce.number().int().min(0).max(180).optional()
 });
 
 export const disciplinaryActionSchema = z.object({

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies as nextCookies } from "next/headers";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { AUTH_COOKIE_NAME } from "./constants";
@@ -15,6 +16,10 @@ export type SessionUser = {
   permissions: string[];
   deniedPermissions?: string[];
   branchId?: string | null;
+  tenantId?: string | null;
+  branchAccessMode?: "LOCKED" | "SWITCH" | null;
+  allowedBranchIds?: string[];
+  canSwitchBranch?: boolean;
   legalEntityId?: string | null;
 };
 
@@ -43,6 +48,10 @@ export function getSessionUser(req: NextRequest): SessionUser | null {
     permissions: decoded.permissions || [],
     deniedPermissions: decoded.deniedPermissions || [],
     branchId: decoded.branchId || null,
+    tenantId: decoded.tenantId || null,
+    branchAccessMode: decoded.branchAccessMode || null,
+    allowedBranchIds: Array.isArray(decoded.allowedBranchIds) ? decoded.allowedBranchIds : [],
+    canSwitchBranch: Boolean(decoded.canSwitchBranch),
     legalEntityId: decoded.legalEntityId || null
   };
 }
@@ -89,4 +98,29 @@ export const hasValidSession = (cookieValue?: string | null) => {
 
 export async function validatePassword(password: string, hash: string) {
   return bcrypt.compare(password, hash);
+}
+
+export async function getSessionUserFromCookies(
+  cookieStore?: Awaited<ReturnType<typeof nextCookies>> | Promise<Awaited<ReturnType<typeof nextCookies>>>
+) {
+  const storeCandidate = typeof cookieStore === "function" ? (cookieStore as any)() : cookieStore || nextCookies();
+  const resolvedStore = await storeCandidate;
+  const token = typeof (resolvedStore as any).get === "function" ? resolvedStore.get(AUTH_COOKIE_NAME)?.value : undefined;
+  if (!token) return null;
+  const decoded = verifyToken(token);
+  if (!decoded?.id || !decoded?.email) return null;
+  return {
+    id: decoded.id,
+    email: decoded.email,
+    name: decoded.name,
+    roles: decoded.roles || [],
+    permissions: decoded.permissions || [],
+    deniedPermissions: decoded.deniedPermissions || [],
+    branchId: decoded.branchId || null,
+    tenantId: decoded.tenantId || null,
+    branchAccessMode: decoded.branchAccessMode || null,
+    allowedBranchIds: Array.isArray(decoded.allowedBranchIds) ? decoded.allowedBranchIds : [],
+    canSwitchBranch: Boolean(decoded.canSwitchBranch),
+    legalEntityId: decoded.legalEntityId || null
+  } as SessionUser;
 }

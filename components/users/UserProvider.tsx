@@ -16,6 +16,7 @@ import {
 type UserContextValue = {
   usuarios: Usuario[];
   roles: Role[];
+  rolesOperativos: Role[];
   sucursales: Sucursal[];
   tiposContrato: TipoContrato[];
   tiposJornada: TipoJornada[];
@@ -174,6 +175,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     () => ({
       usuarios,
       roles,
+      rolesOperativos: roles,
       sucursales,
       tiposContrato,
       tiposJornada,
