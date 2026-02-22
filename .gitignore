@@ -8,3 +8,4 @@ coverage
 .env.*
 .prisma/client
 .DS_Store
+tsconfig.tsbuildinfo
