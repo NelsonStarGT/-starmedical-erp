@@ -25,6 +25,8 @@ jobs:
         run: npm run lint
       - name: Typecheck
         run: npm run typecheck
+      - name: Tests (baseline)
+        run: npm run test:baseline
 
   prisma-drift:
     runs-on: ubuntu-latest
@@ -82,4 +84,3 @@ jobs:
         run: npm run db:migrate:status
       - name: Drift check (DB vs migrations)
         run: npm run db:migrate:diff
-
