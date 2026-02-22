@@ -46,3 +46,11 @@
 ## Qué NO hacer
 - No ejecutar `prisma migrate deploy` antes de que Postgres esté listo.
 - No pegar líneas con `#` en terminal como si fueran comando (en `zsh` puede romper el pegado/ejecución).
+
+## Política de tests
+- Baseline diario (obligatorio): `npm test` (alias detallado: `npm run test:baseline`).
+- Legacy/integration (manual): `npm run test:legacy` (muestra estado y razón de skip).
+- Ejecución real de legacy para diagnóstico: `npm run test:legacy:run`.
+- Suite legacy actual: `tests/memberships.db.test.ts` (depende de runtime/schema legacy).
+- Ticket de seguimiento: `TEST-LEGACY-001`.
+- En CI se ejecuta baseline (`lint`, `typecheck`, `test:baseline`), no `test:legacy`.

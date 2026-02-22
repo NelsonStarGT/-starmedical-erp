@@ -17,6 +17,16 @@
    - Forzar demo aun con datos reales: `SEED_MODE=demo DEMO_ONLY_IF_EMPTY=false npx prisma db seed`
 5) `npm run dev` y abre `/hr/employees`
 
+## Tests (baseline vs legacy)
+- Baseline local/CI: `npm test` (o `npm run test:baseline`)
+  - Ejecuta suites unitarias/smoke estables de `tests/**/*.test.ts` y `src/tests/**/*.test.ts`.
+- Legacy/integration: `npm run test:legacy`
+  - Hoy incluye `tests/memberships.db.test.ts`, aislado por dependencia de esquema/runtime legacy (sale `SKIP` con razón).
+  - Para ejecutar realmente la suite legacy: `npm run test:legacy:run`.
+  - Ticket de reactivación: `TEST-LEGACY-001`.
+- CI (`.github/workflows/ci.yml`) corre: `lint` + `typecheck` + `test:baseline`.
+- CI no corre `test:legacy` por diseño hasta cerrar el ticket de migración.
+
 ## Seguridad / RBAC
 - Catálogo único en `lib/security/permissionCatalog.ts` con la convención `<MODULE>:<AREA>:<ACTION>` (acciones estándar: READ, WRITE, EDIT, DELETE, APPROVE, PUBLISH, ADMIN). Marca `critical: true` para nómina/finanzas/inventario.
 - Roles seed: ADMIN (todo, isSystem=true) y STAFF (mínimo: ver asistencia/perfil, agenda, inventario read). Seed idempotente los actualiza junto con `RolePermission`.
