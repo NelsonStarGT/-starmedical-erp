@@ -67,10 +67,13 @@ function normalizeOptional(value?: string | null) {
   return trimmed ? trimmed : null;
 }
 
+type GeoDivisionDataSourceLiteral = "official" | "operational";
+
+// Evita romper typecheck si el Prisma Client se desfasó respecto al schema.
 const GEO_DIVISION_DATA_SOURCE = {
   official: "official",
   operational: "operational"
-} as const;
+} as const satisfies Record<GeoDivisionDataSourceLiteral, GeoDivisionDataSourceLiteral>;
 
 function normalizeRequired(value: string | undefined | null, message: string) {
   const trimmed = value?.trim();
