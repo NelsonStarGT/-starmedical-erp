@@ -5,9 +5,12 @@ import { revalidatePath } from "next/cache";
 import {
   ClientAffiliationPayerType,
   ClientAffiliationStatus,
+  ClientBloodType,
   ClientCatalogType,
   ClientDocumentApprovalStatus,
   ClientLocationType,
+  InsurerBillingCutoffMode,
+  InsurerBillingType,
   Prisma,
   ClientProfileType
 } from "@prisma/client";
@@ -64,10 +67,331 @@ function normalizeOptional(value?: string | null) {
   return trimmed ? trimmed : null;
 }
 
+const GEO_DIVISION_DATA_SOURCE = {
+  official: "official",
+  operational: "operational"
+} as const;
+
 function normalizeRequired(value: string | undefined | null, message: string) {
   const trimmed = value?.trim();
   if (!trimmed) throw new Error(message);
   return trimmed;
+}
+
+function normalizeSourceToken(value: string | null | undefined) {
+  if (!value) return "";
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function isReferralSource(code?: string | null, name?: string | null) {
+  const token = normalizeSourceToken(code || name || "");
+  return token.includes("REFER");
+}
+
+function isSocialMediaSource(code?: string | null, name?: string | null) {
+  const token = normalizeSourceToken(code || name || "");
+  return token.includes("SOCIAL") || token.includes("REDES");
+}
+
+function isOtherSource(code?: string | null, name?: string | null) {
+  const token = normalizeSourceToken(code || name || "");
+  return token === "OTRO" || token === "OTHER";
+}
+
+function parseOptionalDate(value?: string | null) {
+  const normalized = normalizeOptional(value);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Fecha inválida.");
+  }
+  return parsed;
+}
+
+function calculateAgeYears(birthDate: Date, reference = new Date()) {
+  let age = reference.getFullYear() - birthDate.getFullYear();
+  const monthDiff = reference.getMonth() - birthDate.getMonth();
+  const dayDiff = reference.getDate() - birthDate.getDate();
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) age -= 1;
+  return age;
+}
+
+function isMinorClient(birthDate: Date | null) {
+  if (!birthDate) return false;
+  return calculateAgeYears(birthDate) < 18;
+}
+
+function normalizeIdentifierValue(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizePhoneValue(value: string) {
+  return value.trim().replace(/[^\d+]/g, "");
+}
+
+const BLOOD_TYPE_CANONICAL: ReadonlyArray<ClientBloodType> = [
+  "A_POS",
+  "A_NEG",
+  "B_POS",
+  "B_NEG",
+  "AB_POS",
+  "AB_NEG",
+  "O_POS",
+  "O_NEG",
+  "DESCONOCIDO"
+];
+
+function resolveClientBloodType(value?: string | null): ClientBloodType {
+  const token = normalizeSourceToken(value ?? "");
+  if (!token) return "DESCONOCIDO";
+
+  if (token === "A" || token === "A_POS" || token === "APOS" || token === "A_POSITIVO") return "A_POS";
+  if (token === "A_NEG" || token === "ANEG" || token === "A_NEGATIVO") return "A_NEG";
+  if (token === "B" || token === "B_POS" || token === "BPOS" || token === "B_POSITIVO") return "B_POS";
+  if (token === "B_NEG" || token === "BNEG" || token === "B_NEGATIVO") return "B_NEG";
+  if (token === "AB" || token === "AB_POS" || token === "ABPOS" || token === "AB_POSITIVO") return "AB_POS";
+  if (token === "AB_NEG" || token === "ABNEG" || token === "AB_NEGATIVO") return "AB_NEG";
+  if (token === "O" || token === "O_POS" || token === "OPOS" || token === "O_POSITIVO") return "O_POS";
+  if (token === "O_NEG" || token === "ONEG" || token === "O_NEGATIVO") return "O_NEG";
+  if (token === "UNKNOWN" || token === "DESCONOCIDO") return "DESCONOCIDO";
+
+  if ((BLOOD_TYPE_CANONICAL as readonly string[]).includes(token)) {
+    return token as ClientBloodType;
+  }
+  return "DESCONOCIDO";
+}
+
+type AcquisitionResolutionResult = {
+  sourceId: string | null;
+  detailOptionId: string | null;
+  otherNote: string | null;
+  sourceCode: string | null;
+  sourceName: string | null;
+  requiresReferral: boolean;
+};
+
+async function resolveDocumentTypeByHints(
+  tx: Prisma.TransactionClient,
+  preferredTokens: string[]
+): Promise<string | null> {
+  const docs = await tx.clientCatalogItem.findMany({
+    where: { type: ClientCatalogType.DOCUMENT_TYPE, isActive: true },
+    select: { id: true, name: true }
+  });
+  if (!docs.length) return null;
+
+  const byToken = docs.map((item) => ({
+    id: item.id,
+    token: normalizeSourceToken(item.name)
+  }));
+
+  for (const preferred of preferredTokens) {
+    const token = normalizeSourceToken(preferred);
+    const exact = byToken.find((item) => item.token === token);
+    if (exact) return exact.id;
+  }
+
+  for (const preferred of preferredTokens) {
+    const token = normalizeSourceToken(preferred);
+    const fuzzy = byToken.find((item) => item.token.includes(token) || token.includes(item.token));
+    if (fuzzy) return fuzzy.id;
+  }
+
+  return docs[0]?.id ?? null;
+}
+
+async function resolveCountryIdByName(tx: Prisma.TransactionClient, countryName: string | null) {
+  if (!countryName) return null;
+  const row = await tx.geoCountry.findFirst({
+    where: { name: { equals: countryName, mode: "insensitive" } },
+    select: { id: true }
+  });
+  return row?.id ?? null;
+}
+
+async function createPrimaryClientIdentifier(tx: Prisma.TransactionClient, input: {
+  clientId: string;
+  value: string | null;
+  countryId?: string | null;
+  preferredDocumentTypeTokens: string[];
+}) {
+  const raw = normalizeOptional(input.value);
+  if (!raw) return;
+  const valueNormalized = normalizeIdentifierValue(raw);
+  if (!valueNormalized) return;
+
+  const documentTypeId = await resolveDocumentTypeByHints(tx, input.preferredDocumentTypeTokens);
+  await tx.clientIdentifier.create({
+    data: {
+      clientId: input.clientId,
+      countryId: input.countryId ?? null,
+      documentTypeId,
+      value: raw,
+      valueNormalized,
+      isPrimary: true,
+      isActive: true
+    }
+  });
+}
+
+async function createPrimaryClientPhone(tx: Prisma.TransactionClient, input: {
+  clientId: string;
+  phone: string | null;
+  countryIso2?: string | null;
+}) {
+  const raw = normalizeOptional(input.phone);
+  if (!raw) return;
+  const number = normalizePhoneValue(raw);
+  if (!number) return;
+
+  const countryCode = normalizeSourceToken(input.countryIso2 ?? "").slice(0, 2) || "XX";
+  const e164 = number.startsWith("+") ? number : null;
+
+  await tx.clientPhone.create({
+    data: {
+      clientId: input.clientId,
+      countryCode,
+      number,
+      e164,
+      isPrimary: true,
+      isActive: true
+    }
+  });
+}
+
+async function assertCatalogItemActive(
+  tx: Prisma.TransactionClient,
+  input: { id: string | null; type: ClientCatalogType; message: string }
+) {
+  if (!input.id) return null;
+  const item = await tx.clientCatalogItem.findFirst({
+    where: { id: input.id, type: input.type, isActive: true },
+    select: { id: true }
+  });
+  if (!item) throw new Error(input.message);
+  return item.id;
+}
+
+async function resolveResponsibleAdultPerson(
+  tx: Prisma.TransactionClient,
+  responsibleClientId: string
+) {
+  const responsible = await tx.clientProfile.findFirst({
+    where: { id: responsibleClientId, type: ClientProfileType.PERSON, deletedAt: null },
+    select: { id: true, birthDate: true }
+  });
+  if (!responsible) throw new Error("Responsable inválido. Debe ser una persona activa.");
+  if (!responsible.birthDate || calculateAgeYears(responsible.birthDate) < 18) {
+    throw new Error("El responsable debe ser mayor de edad.");
+  }
+  return responsible;
+}
+
+async function resolveAcquisitionInput(
+  tx: Prisma.TransactionClient,
+  input: {
+    acquisitionSourceId?: string;
+    acquisitionDetailOptionId?: string;
+    acquisitionOtherNote?: string;
+  }
+): Promise<AcquisitionResolutionResult> {
+  const sourceId = normalizeOptional(input.acquisitionSourceId);
+  const detailOptionId = normalizeOptional(input.acquisitionDetailOptionId);
+  const otherNote = normalizeOptional(input.acquisitionOtherNote);
+
+  if (!sourceId) {
+    return {
+      sourceId: null,
+      detailOptionId: null,
+      otherNote: null,
+      sourceCode: null,
+      sourceName: null,
+      requiresReferral: false
+    };
+  }
+
+  const source = await tx.clientAcquisitionSource.findFirst({
+    where: { id: sourceId, isActive: true },
+    select: { id: true, code: true, name: true }
+  });
+  if (!source) throw new Error("Canal de adquisición inválido o inactivo.");
+
+  const social = isSocialMediaSource(source.code, source.name);
+  const other = isOtherSource(source.code, source.name);
+  const referral = isReferralSource(source.code, source.name);
+
+  let normalizedDetailOptionId: string | null = null;
+  if (social) {
+    const requiredId = normalizeRequired(detailOptionId, "Selecciona la red social.");
+    const detail = await tx.clientAcquisitionDetailOption.findFirst({
+      where: { id: requiredId, sourceId: source.id, isActive: true },
+      select: { id: true }
+    });
+    if (!detail) throw new Error("Detalle de canal inválido para redes sociales.");
+    normalizedDetailOptionId = detail.id;
+  }
+
+  let normalizedOtherNote: string | null = null;
+  if (other) {
+    const note = normalizeRequired(otherNote, "Describe cómo nos conoció.");
+    if (note.length > 150) throw new Error("La descripción del canal no puede exceder 150 caracteres.");
+    normalizedOtherNote = note;
+  }
+
+  return {
+    sourceId: source.id,
+    detailOptionId: normalizedDetailOptionId,
+    otherNote: normalizedOtherNote,
+    sourceCode: source.code ?? null,
+    sourceName: source.name,
+    requiresReferral: referral
+  };
+}
+
+async function createReferralIfNeeded(
+  tx: Prisma.TransactionClient,
+  input: {
+    referredClientId: string;
+    referredByClientId?: string;
+    requiresReferral: boolean;
+  }
+) {
+  if (!input.requiresReferral) return { referrerClientId: null as string | null, created: false };
+
+  const referrerClientId = normalizeRequired(input.referredByClientId, "Debes seleccionar el cliente referente.");
+  if (referrerClientId === input.referredClientId) {
+    throw new Error("Un cliente no puede referirse a sí mismo.");
+  }
+
+  const exists = await tx.clientProfile.findFirst({
+    where: { id: referrerClientId, deletedAt: null },
+    select: { id: true }
+  });
+  if (!exists) throw new Error("El cliente referente no existe o está inactivo.");
+
+  try {
+    await tx.clientReferral.create({
+      data: {
+        referrerClientId,
+        referredClientId: input.referredClientId
+      }
+    });
+    return { referrerClientId, created: true };
+  } catch (error: any) {
+    if (error?.code === "P2002") {
+      return { referrerClientId, created: false };
+    }
+    throw error;
+  }
 }
 
 function isPrismaSchemaMismatchError(error: unknown): boolean {
@@ -563,12 +887,25 @@ async function enforceSinglePrimaryPayer(tx: AffiliationTx, personClientId: stri
 export async function actionCreatePersonClient(input: {
   firstName: string;
   middleName?: string;
+  thirdName?: string;
   lastName: string;
   secondLastName?: string;
+  thirdLastName?: string;
   dpi: string;
   phone: string;
   phoneCountryIso2?: string;
   email?: string;
+  birthDate?: string;
+  bloodType?: string;
+  professionCatalogId?: string;
+  maritalStatusId?: string;
+  academicLevelId?: string;
+  responsibleClientId?: string;
+  guardianRelationshipTypeId?: string;
+  acquisitionSourceId?: string;
+  acquisitionDetailOptionId?: string;
+  acquisitionOtherNote?: string;
+  referredByClientId?: string;
   addressGeneral?: string;
   addressHome?: string;
   addressWork?: string;
@@ -577,6 +914,8 @@ export async function actionCreatePersonClient(input: {
   geoAdmin2Id?: string;
   geoAdmin3Id?: string;
   geoPostalCode?: string;
+  geoFreeState?: string;
+  geoFreeCity?: string;
   affiliations?: Array<{
     entityType?: ClientProfileType;
     entityClientId: string;
@@ -592,7 +931,9 @@ export async function actionCreatePersonClient(input: {
   const firstName = normalizeRequired(input.firstName, "Primer nombre requerido.");
   const lastName = normalizeRequired(input.lastName, "Primer apellido requerido.");
   const middleName = normalizeOptional(input.middleName);
+  const thirdName = normalizeOptional(input.thirdName);
   const secondLastName = normalizeOptional(input.secondLastName);
+  const thirdLastName = normalizeOptional(input.thirdLastName);
 
   const dpi = normalizeRequired(input.dpi, "DPI requerido.");
   const dpiParsed = dpiSchema.safeParse(dpi);
@@ -601,10 +942,24 @@ export async function actionCreatePersonClient(input: {
   const phone = normalizeRequired(input.phone, "Teléfono requerido.");
   const email = normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
+  const birthDate = parseOptionalDate(input.birthDate);
+  if (birthDate && birthDate.getTime() > Date.now()) {
+    throw new Error("La fecha de nacimiento no puede ser futura.");
+  }
+  const bloodType = resolveClientBloodType(input.bloodType);
+  const professionCatalogId = normalizeOptional(input.professionCatalogId);
+  const maritalStatusId = normalizeOptional(input.maritalStatusId);
+  const academicLevelId = normalizeOptional(input.academicLevelId);
+  const responsibleClientId = normalizeOptional(input.responsibleClientId);
+  const guardianRelationshipTypeId = normalizeOptional(input.guardianRelationshipTypeId);
+  const requiresResponsible = isMinorClient(birthDate);
 
   const addressGeneral = normalizeOptional(input.addressGeneral);
   const addressHome = normalizeOptional(input.addressHome);
   const addressWork = normalizeOptional(input.addressWork);
+  const geoPostalCode = normalizeOptional(input.geoPostalCode);
+  const geoFreeState = normalizeOptional(input.geoFreeState);
+  const geoFreeCity = normalizeOptional(input.geoFreeCity);
   const geo = await resolveGeoSelection({
     geoCountryId: input.geoCountryId,
     geoAdmin1Id: input.geoAdmin1Id,
@@ -617,27 +972,135 @@ export async function actionCreatePersonClient(input: {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      if (professionCatalogId) {
+        const profession = await tx.clientCatalogItem.findFirst({
+          where: {
+            id: professionCatalogId,
+            type: ClientCatalogType.PERSON_PROFESSION,
+            isActive: true
+          },
+          select: { id: true }
+        });
+        if (!profession) throw new Error("Profesión inválida o inactiva.");
+      }
+
+      const maritalStatusIdResolved = await assertCatalogItemActive(tx, {
+        id: maritalStatusId,
+        type: ClientCatalogType.MARITAL_STATUS,
+        message: "Estado civil inválido o inactivo."
+      });
+      const academicLevelIdResolved = await assertCatalogItemActive(tx, {
+        id: academicLevelId,
+        type: ClientCatalogType.ACADEMIC_LEVEL,
+        message: "Nivel académico inválido o inactivo."
+      });
+      const guardianRelationshipTypeIdResolved = await assertCatalogItemActive(tx, {
+        id: guardianRelationshipTypeId,
+        type: ClientCatalogType.RELATIONSHIP_TYPE,
+        message: "Tipo de parentesco inválido o inactivo."
+      });
+
+      let responsible: { id: string; birthDate: Date | null } | null = null;
+      if (requiresResponsible) {
+        const responsibleId = normalizeRequired(
+          responsibleClientId,
+          "Menor de edad: debes seleccionar responsable."
+        );
+        responsible = await resolveResponsibleAdultPerson(tx, responsibleId);
+      }
+
+      const acquisition = await resolveAcquisitionInput(tx, {
+        acquisitionSourceId: input.acquisitionSourceId,
+        acquisitionDetailOptionId: input.acquisitionDetailOptionId,
+        acquisitionOtherNote: input.acquisitionOtherNote
+      });
+
       const created = await tx.clientProfile.create({
         data: {
           type: ClientProfileType.PERSON,
           firstName,
           middleName,
+          thirdName,
           lastName,
           secondLastName,
+          thirdLastName,
+          birthDate,
+          bloodType,
+          professionCatalogId,
           dpi,
           phone,
           email,
           address: addressGeneral,
-          city: geo.admin2Name,
-          department: geo.admin1Name,
+          city: geo.admin2Name ?? geoFreeCity,
+          department: geo.admin1Name ?? geoFreeState,
           country: geo.countryName,
+          acquisitionSourceId: acquisition.sourceId,
+          acquisitionDetailOptionId: acquisition.detailOptionId,
+          acquisitionOtherNote: acquisition.otherNote,
           statusId: defaultStatusId
         },
         select: { id: true }
       });
 
+      const referralResult = await createReferralIfNeeded(tx, {
+        referredClientId: created.id,
+        referredByClientId: input.referredByClientId,
+        requiresReferral: acquisition.requiresReferral
+      });
+
+      await tx.clientDemographicData.create({
+        data: {
+          clientId: created.id,
+          maritalStatusId: maritalStatusIdResolved,
+          academicLevelId: academicLevelIdResolved,
+          responsibleClientId: responsible?.id ?? null
+        }
+      });
+
+      if (requiresResponsible && responsible) {
+        await tx.clientGuardianRelation.create({
+          data: {
+            minorClientId: created.id,
+            guardianClientId: responsible.id,
+            relationshipTypeId: guardianRelationshipTypeIdResolved
+          }
+        });
+      }
+
+      await createPrimaryClientIdentifier(tx, {
+        clientId: created.id,
+        value: dpi,
+        countryId: geo.geoCountryId,
+        preferredDocumentTypeTokens: ["DPI", "CEDULA", "IDENTIDAD", "PASAPORTE"]
+      });
+
+      await createPrimaryClientPhone(tx, {
+        clientId: created.id,
+        phone,
+        countryIso2: input.phoneCountryIso2
+      });
+
       const locations: Array<{ type: ClientLocationType; address: string; isPrimary?: boolean }> = [];
-      if (addressGeneral) locations.push({ type: ClientLocationType.GENERAL, address: addressGeneral, isPrimary: true });
+      const hasGeoContext = Boolean(
+        geo.geoCountryId ||
+          geo.geoAdmin1Id ||
+          geo.geoAdmin2Id ||
+          geo.geoAdmin3Id ||
+          geoPostalCode ||
+          geoFreeState ||
+          geoFreeCity
+      );
+      const inferredGeneralAddress =
+        addressGeneral ||
+        [geo.admin2Name ?? geoFreeCity, geo.admin1Name ?? geoFreeState, geo.countryName]
+          .filter(Boolean)
+          .join(", ")
+          .trim() ||
+        null;
+
+      if (inferredGeneralAddress && (addressGeneral || hasGeoContext)) {
+        locations.push({ type: ClientLocationType.GENERAL, address: inferredGeneralAddress, isPrimary: true });
+      }
       if (addressHome) locations.push({ type: ClientLocationType.HOME, address: addressHome });
       if (addressWork) locations.push({ type: ClientLocationType.WORK, address: addressWork });
 
@@ -652,8 +1115,11 @@ export async function actionCreatePersonClient(input: {
             geoAdmin1Id: loc.type === ClientLocationType.GENERAL ? geo.geoAdmin1Id : null,
             geoAdmin2Id: loc.type === ClientLocationType.GENERAL ? geo.geoAdmin2Id : null,
             geoAdmin3Id: loc.type === ClientLocationType.GENERAL ? geo.geoAdmin3Id : null,
-            department: loc.type === ClientLocationType.GENERAL ? geo.admin1Name : null,
-            city: loc.type === ClientLocationType.GENERAL ? geo.admin2Name : null,
+            freeState: loc.type === ClientLocationType.GENERAL ? geoFreeState : null,
+            freeCity: loc.type === ClientLocationType.GENERAL ? geoFreeCity : null,
+            postalCode: loc.type === ClientLocationType.GENERAL ? geoPostalCode : null,
+            department: loc.type === ClientLocationType.GENERAL ? geo.admin1Name ?? geoFreeState : null,
+            city: loc.type === ClientLocationType.GENERAL ? geo.admin2Name ?? geoFreeCity : null,
             country: loc.type === ClientLocationType.GENERAL ? geo.countryName : null
           }))
         });
@@ -726,7 +1192,15 @@ export async function actionCreatePersonClient(input: {
         metadata: {
           type: "PERSON",
           affiliationsCount: affiliations.length + 1,
-          defaultAffiliation: "INTERNAL"
+          defaultAffiliation: "INTERNAL",
+          acquisitionSourceId: acquisition.sourceId,
+          acquisitionSourceCode: acquisition.sourceCode,
+          acquisitionDetailOptionId: acquisition.detailOptionId,
+          referredByClientId: referralResult.referrerClientId,
+          maritalStatusId: maritalStatusIdResolved,
+          academicLevelId: academicLevelIdResolved,
+          responsibleClientId: responsible?.id ?? null,
+          isMinor: requiresResponsible
         }
       });
 
@@ -750,7 +1224,12 @@ export async function actionCreateCompanyClient(input: {
   address: string;
   city: string;
   department: string;
-  country?: string;
+  country: string;
+  companyCategoryId?: string;
+  acquisitionSourceId?: string;
+  acquisitionDetailOptionId?: string;
+  acquisitionOtherNote?: string;
+  referredByClientId?: string;
   phone?: string;
   phoneCountryIso2?: string;
   email?: string;
@@ -763,7 +1242,8 @@ export async function actionCreateCompanyClient(input: {
   const address = normalizeRequired(input.address, "Dirección requerida.");
   const city = normalizeRequired(input.city, "Ciudad requerida.");
   const department = normalizeRequired(input.department, "Departamento requerido.");
-  const country = normalizeOptional(input.country);
+  const country = normalizeRequired(input.country, "País requerido.");
+  const companyCategoryId = normalizeOptional(input.companyCategoryId);
   const phone = normalizeOptional(input.phone);
   const email = normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
@@ -772,6 +1252,24 @@ export async function actionCreateCompanyClient(input: {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      if (companyCategoryId) {
+        const category = await tx.clientCatalogItem.findFirst({
+          where: {
+            id: companyCategoryId,
+            type: ClientCatalogType.COMPANY_CATEGORY,
+            isActive: true
+          },
+          select: { id: true }
+        });
+        if (!category) throw new Error("Categoría de empresa inválida o inactiva.");
+      }
+
+      const acquisition = await resolveAcquisitionInput(tx, {
+        acquisitionSourceId: input.acquisitionSourceId,
+        acquisitionDetailOptionId: input.acquisitionDetailOptionId,
+        acquisitionOtherNote: input.acquisitionOtherNote
+      });
+
       const created = await tx.clientProfile.create({
         data: {
           type: ClientProfileType.COMPANY,
@@ -782,6 +1280,10 @@ export async function actionCreateCompanyClient(input: {
           city,
           department,
           country,
+          companyCategoryId,
+          acquisitionSourceId: acquisition.sourceId,
+          acquisitionDetailOptionId: acquisition.detailOptionId,
+          acquisitionOtherNote: acquisition.otherNote,
           phone,
           email,
           statusId: defaultStatusId
@@ -789,11 +1291,31 @@ export async function actionCreateCompanyClient(input: {
         select: { id: true }
       });
 
+      const countryId = await resolveCountryIdByName(tx, country);
+      await createPrimaryClientIdentifier(tx, {
+        clientId: created.id,
+        value: nit,
+        countryId,
+        preferredDocumentTypeTokens: ["NIT", "RFC", "RUC", "CUIT", "TAX_ID"]
+      });
+      await createPrimaryClientPhone(tx, {
+        clientId: created.id,
+        phone,
+        countryIso2: input.phoneCountryIso2
+      });
+
+      const referralResult = await createReferralIfNeeded(tx, {
+        referredClientId: created.id,
+        referredByClientId: input.referredByClientId,
+        requiresReferral: acquisition.requiresReferral
+      });
+
       await tx.clientLocation.create({
         data: {
           clientId: created.id,
-          type: ClientLocationType.BUSINESS,
+          type: ClientLocationType.MAIN,
           address,
+          addressLine1: address,
           city,
           department,
           country,
@@ -806,7 +1328,14 @@ export async function actionCreateCompanyClient(input: {
         actorRole: user.roles?.[0] ?? null,
         clientId: created.id,
         action: "CLIENT_CREATED",
-        metadata: { type: "COMPANY" }
+        metadata: {
+          type: "COMPANY",
+          companyCategoryId,
+          acquisitionSourceId: acquisition.sourceId,
+          acquisitionSourceCode: acquisition.sourceCode,
+          acquisitionDetailOptionId: acquisition.detailOptionId,
+          referredByClientId: referralResult.referrerClientId
+        }
       });
 
       return created;
@@ -825,11 +1354,19 @@ export async function actionCreateCompanyClient(input: {
 export async function actionCreateInstitutionClient(input: {
   name: string;
   institutionTypeId: string;
+  institutionCategoryId?: string;
+  institutionIsPayer?: boolean;
+  institutionIsGroupOrganizer?: boolean;
+  institutionIsSponsor?: boolean;
   nit?: string;
   address: string;
   city: string;
   department: string;
-  country?: string;
+  country: string;
+  acquisitionSourceId?: string;
+  acquisitionDetailOptionId?: string;
+  acquisitionOtherNote?: string;
+  referredByClientId?: string;
   phone?: string;
   phoneCountryIso2?: string;
   email?: string;
@@ -838,11 +1375,16 @@ export async function actionCreateInstitutionClient(input: {
 
   const companyName = normalizeRequired(input.name, "Nombre de institución requerido.");
   const institutionTypeId = normalizeRequired(input.institutionTypeId, "Tipo de institución requerido.");
+  const institutionCategoryId = normalizeOptional(input.institutionCategoryId);
+  const institutionIsPayer = Boolean(input.institutionIsPayer);
+  const institutionIsGroupOrganizer = Boolean(input.institutionIsGroupOrganizer);
+  const institutionIsSponsor = Boolean(input.institutionIsSponsor);
   const nit = normalizeOptional(input.nit);
+  if (institutionIsPayer && !nit) throw new Error("NIT requerido para institución pagadora.");
   const address = normalizeRequired(input.address, "Dirección requerida.");
   const city = normalizeRequired(input.city, "Ciudad requerida.");
   const department = normalizeRequired(input.department, "Departamento requerido.");
-  const country = normalizeOptional(input.country);
+  const country = normalizeRequired(input.country, "País requerido.");
   const phone = normalizeOptional(input.phone);
   const email = normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
@@ -857,16 +1399,41 @@ export async function actionCreateInstitutionClient(input: {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      if (institutionCategoryId) {
+        const category = await tx.clientCatalogItem.findFirst({
+          where: {
+            id: institutionCategoryId,
+            type: ClientCatalogType.INSTITUTION_CATEGORY,
+            isActive: true
+          },
+          select: { id: true }
+        });
+        if (!category) throw new Error("Categoría de institución inválida o inactiva.");
+      }
+
+      const acquisition = await resolveAcquisitionInput(tx, {
+        acquisitionSourceId: input.acquisitionSourceId,
+        acquisitionDetailOptionId: input.acquisitionDetailOptionId,
+        acquisitionOtherNote: input.acquisitionOtherNote
+      });
+
       const created = await tx.clientProfile.create({
         data: {
           type: ClientProfileType.INSTITUTION,
           companyName,
           institutionTypeId,
+          institutionCategoryId,
+          institutionIsPayer,
+          institutionIsGroupOrganizer,
+          institutionIsSponsor,
           nit,
           address,
           city,
           department,
           country,
+          acquisitionSourceId: acquisition.sourceId,
+          acquisitionDetailOptionId: acquisition.detailOptionId,
+          acquisitionOtherNote: acquisition.otherNote,
           phone,
           email,
           statusId: defaultStatusId
@@ -874,11 +1441,31 @@ export async function actionCreateInstitutionClient(input: {
         select: { id: true }
       });
 
+      const countryId = await resolveCountryIdByName(tx, country);
+      await createPrimaryClientIdentifier(tx, {
+        clientId: created.id,
+        value: nit,
+        countryId,
+        preferredDocumentTypeTokens: ["NIT", "RFC", "RUC", "CUIT", "TAX_ID"]
+      });
+      await createPrimaryClientPhone(tx, {
+        clientId: created.id,
+        phone,
+        countryIso2: input.phoneCountryIso2
+      });
+
+      const referralResult = await createReferralIfNeeded(tx, {
+        referredClientId: created.id,
+        referredByClientId: input.referredByClientId,
+        requiresReferral: acquisition.requiresReferral
+      });
+
       await tx.clientLocation.create({
         data: {
           clientId: created.id,
-          type: ClientLocationType.BUSINESS,
+          type: ClientLocationType.MAIN,
           address,
+          addressLine1: address,
           city,
           department,
           country,
@@ -891,7 +1478,18 @@ export async function actionCreateInstitutionClient(input: {
         actorRole: user.roles?.[0] ?? null,
         clientId: created.id,
         action: "CLIENT_CREATED",
-        metadata: { type: "INSTITUTION", institutionTypeId }
+        metadata: {
+          type: "INSTITUTION",
+          institutionTypeId,
+          institutionCategoryId,
+          institutionIsPayer,
+          institutionIsGroupOrganizer,
+          institutionIsSponsor,
+          acquisitionSourceId: acquisition.sourceId,
+          acquisitionSourceCode: acquisition.sourceCode,
+          acquisitionDetailOptionId: acquisition.detailOptionId,
+          referredByClientId: referralResult.referrerClientId
+        }
       });
 
       return created;
@@ -908,24 +1506,46 @@ export async function actionCreateInstitutionClient(input: {
 }
 
 export async function actionCreateInsurerClient(input: {
-  name: string;
-  nit?: string;
+  name?: string;
+  legalName?: string;
+  tradeName?: string;
+  nit: string;
   address?: string;
   city?: string;
   department?: string;
-  country?: string;
+  country: string;
+  acquisitionSourceId?: string;
+  acquisitionDetailOptionId?: string;
+  acquisitionOtherNote?: string;
+  referredByClientId?: string;
+  insurerCutoffMode?: InsurerBillingCutoffMode | null;
+  insurerCutoffDay?: number | null;
+  insurerBillingType?: InsurerBillingType | null;
+  insurerDiscountRules?: Prisma.InputJsonValue;
+  insurerManualRulePriority?: boolean;
   phone?: string;
   phoneCountryIso2?: string;
   email?: string;
 }) {
   const user = await requireAdminUser();
 
-  const companyName = normalizeRequired(input.name, "Nombre de aseguradora requerido.");
-  const nit = normalizeOptional(input.nit);
+  const companyName = normalizeRequired(input.legalName ?? input.name, "Razón social requerida.");
+  const tradeName = normalizeOptional(input.tradeName);
+  const nit = normalizeRequired(input.nit, "Documento fiscal requerido.");
   const address = normalizeOptional(input.address);
   const city = normalizeOptional(input.city);
   const department = normalizeOptional(input.department);
-  const country = normalizeOptional(input.country);
+  const country = normalizeRequired(input.country, "País requerido.");
+  const insurerCutoffMode = input.insurerCutoffMode ?? null;
+  const insurerCutoffDay = input.insurerCutoffDay ?? null;
+  const insurerBillingType = input.insurerBillingType ?? null;
+  const insurerManualRulePriority = Boolean(input.insurerManualRulePriority);
+  const insurerDiscountRules = input.insurerDiscountRules ?? null;
+  if (insurerCutoffMode === InsurerBillingCutoffMode.DAY_OF_MONTH) {
+    if (!insurerCutoffDay || insurerCutoffDay < 1 || insurerCutoffDay > 31) {
+      throw new Error("El día de corte debe estar entre 1 y 31.");
+    }
+  }
   const phone = normalizeOptional(input.phone);
   const email = normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
@@ -934,15 +1554,30 @@ export async function actionCreateInsurerClient(input: {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      const acquisition = await resolveAcquisitionInput(tx, {
+        acquisitionSourceId: input.acquisitionSourceId,
+        acquisitionDetailOptionId: input.acquisitionDetailOptionId,
+        acquisitionOtherNote: input.acquisitionOtherNote
+      });
+
       const created = await tx.clientProfile.create({
         data: {
           type: ClientProfileType.INSURER,
           companyName,
+          tradeName,
           nit,
           address,
           city,
           department,
           country,
+          acquisitionSourceId: acquisition.sourceId,
+          acquisitionDetailOptionId: acquisition.detailOptionId,
+          acquisitionOtherNote: acquisition.otherNote,
+          insurerCutoffMode,
+          insurerCutoffDay: insurerCutoffMode === InsurerBillingCutoffMode.DAY_OF_MONTH ? insurerCutoffDay : null,
+          insurerBillingType,
+          insurerDiscountRules: insurerDiscountRules ?? undefined,
+          insurerManualRulePriority,
           phone,
           email,
           statusId: defaultStatusId
@@ -950,12 +1585,32 @@ export async function actionCreateInsurerClient(input: {
         select: { id: true }
       });
 
+      const countryId = await resolveCountryIdByName(tx, country);
+      await createPrimaryClientIdentifier(tx, {
+        clientId: created.id,
+        value: nit,
+        countryId,
+        preferredDocumentTypeTokens: ["NIT", "RFC", "RUC", "CUIT", "TAX_ID"]
+      });
+      await createPrimaryClientPhone(tx, {
+        clientId: created.id,
+        phone,
+        countryIso2: input.phoneCountryIso2
+      });
+
+      const referralResult = await createReferralIfNeeded(tx, {
+        referredClientId: created.id,
+        referredByClientId: input.referredByClientId,
+        requiresReferral: acquisition.requiresReferral
+      });
+
       if (address) {
         await tx.clientLocation.create({
           data: {
             clientId: created.id,
-            type: ClientLocationType.BUSINESS,
+            type: ClientLocationType.MAIN,
             address,
+            addressLine1: address,
             city,
             department,
             country,
@@ -969,7 +1624,16 @@ export async function actionCreateInsurerClient(input: {
         actorRole: user.roles?.[0] ?? null,
         clientId: created.id,
         action: "CLIENT_CREATED",
-        metadata: { type: "INSURER" }
+        metadata: {
+          type: "INSURER",
+          acquisitionSourceId: acquisition.sourceId,
+          acquisitionSourceCode: acquisition.sourceCode,
+          acquisitionDetailOptionId: acquisition.detailOptionId,
+          referredByClientId: referralResult.referrerClientId,
+          insurerCutoffMode,
+          insurerCutoffDay: insurerCutoffMode === InsurerBillingCutoffMode.DAY_OF_MONTH ? insurerCutoffDay : null,
+          insurerBillingType
+        }
       });
 
       return created;
@@ -1050,6 +1714,65 @@ export async function actionSearchClientProfiles(input: {
       };
     })
   };
+}
+
+export async function actionListClientAcquisitionSources(input?: { includeInactive?: boolean }) {
+  await requireAdminUser();
+  const includeInactive = Boolean(input?.includeInactive);
+  const rows = await prisma.clientAcquisitionSource.findMany({
+    where: includeInactive ? undefined : { isActive: true },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      category: true,
+      isActive: true
+    }
+  });
+
+  return { items: rows };
+}
+
+export async function actionListClientAcquisitionDetailOptions(input: { sourceId: string; includeInactive?: boolean }) {
+  await requireAdminUser();
+  const sourceId = normalizeRequired(input.sourceId, "Canal requerido.");
+  const includeInactive = Boolean(input.includeInactive);
+  const rows = await prisma.clientAcquisitionDetailOption.findMany({
+    where: {
+      sourceId,
+      ...(includeInactive ? {} : { isActive: true })
+    },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      sourceId: true,
+      code: true,
+      name: true,
+      isActive: true
+    }
+  });
+
+  return { items: rows };
+}
+
+export async function actionListClientCatalogItems(input: { type: ClientCatalogType; includeInactive?: boolean }) {
+  await requireAdminUser();
+  const rows = await prisma.clientCatalogItem.findMany({
+    where: {
+      type: input.type,
+      ...(input.includeInactive ? {} : { isActive: true })
+    },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      isActive: true
+    }
+  });
+
+  return { items: rows };
 }
 
 export async function actionCheckPersonDpi(input: { dpi: string; excludeClientId?: string }) {
@@ -1208,6 +1931,328 @@ export async function actionListGeoAdmin3(input: {
   });
 
   return { items: rows };
+}
+
+export async function actionListGeoExplorerCountries(input?: {
+  q?: string;
+  limit?: number;
+  status?: "all" | "active" | "inactive";
+  coverage?: "all" | "empty" | "with";
+  source?: "all" | "official" | "operational";
+}) {
+  await requireAdminUser();
+
+  const q = input?.q?.trim() ?? "";
+  const limit = Math.min(Math.max(input?.limit ?? 350, 25), 500);
+  const status = input?.status ?? "all";
+  const coverage = input?.coverage ?? "all";
+  const source = input?.source ?? "all";
+
+  const whereCountry: Prisma.GeoCountryWhereInput = {
+    ...(status === "active" ? { isActive: true } : {}),
+    ...(status === "inactive" ? { isActive: false } : {}),
+    ...(q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" } },
+            { iso2: { contains: q.toUpperCase() } },
+            { iso3: { contains: q.toUpperCase() } }
+          ]
+        }
+      : {})
+  };
+
+  const rows = await prisma.geoCountry.findMany({
+    where: whereCountry,
+    orderBy: [{ name: "asc" }],
+    take: limit,
+    select: {
+      id: true,
+      iso2: true,
+      iso3: true,
+      name: true,
+      isActive: true,
+      meta: {
+        select: {
+          level1Label: true,
+          level2Label: true,
+          level3Label: true,
+          maxLevel: true
+        }
+      }
+    }
+  });
+
+  if (!rows.length) return { items: [] as Array<Record<string, unknown>> };
+
+  const countryIds = rows.map((row) => row.id);
+
+  const [level1Counts, sourceCounts] = await Promise.all([
+    prisma.geoDivision.groupBy({
+      by: ["countryId"],
+      where: {
+        countryId: { in: countryIds },
+        level: 1,
+        ...(source === "official"
+          ? { dataSource: GEO_DIVISION_DATA_SOURCE.official }
+          : source === "operational"
+            ? { dataSource: GEO_DIVISION_DATA_SOURCE.operational }
+            : {})
+      },
+      _count: { _all: true }
+    }),
+    prisma.geoDivision.groupBy({
+      by: ["countryId", "dataSource"],
+      where: { countryId: { in: countryIds } },
+      _count: { _all: true }
+    })
+  ]);
+
+  const level1ByCountry = new Map(level1Counts.map((row) => [row.countryId, row._count._all]));
+  const sourceByCountry = new Map<
+    string,
+    {
+      official: number;
+      operational: number;
+    }
+  >();
+
+  for (const row of sourceCounts) {
+    const current = sourceByCountry.get(row.countryId) ?? { official: 0, operational: 0 };
+    if (row.dataSource === GEO_DIVISION_DATA_SOURCE.official) {
+      current.official += row._count._all;
+    } else {
+      current.operational += row._count._all;
+    }
+    sourceByCountry.set(row.countryId, current);
+  }
+
+  const items = rows
+    .map((row) => {
+      const level1Count = level1ByCountry.get(row.id) ?? 0;
+      const sourceStats = sourceByCountry.get(row.id) ?? { official: 0, operational: 0 };
+      return {
+        id: row.id,
+        code: row.iso2,
+        iso3: row.iso3,
+        name: row.name,
+        isActive: row.isActive,
+        level1Count,
+        officialCount: sourceStats.official,
+        operationalCount: sourceStats.operational,
+        isEmpty: level1Count === 0,
+        meta: row.meta
+      };
+    })
+    .filter((row) => {
+      if (coverage === "empty") return row.isEmpty;
+      if (coverage === "with") return !row.isEmpty;
+      return true;
+    })
+    .filter((row) => {
+      if (source === "official") return row.officialCount > 0;
+      if (source === "operational") return row.operationalCount > 0;
+      return true;
+    });
+
+  return { items };
+}
+
+export async function actionListGeoDivisions(input: {
+  countryId: string;
+  level: number;
+  parentId?: string | null;
+  q?: string;
+  limit?: number;
+  onlyActive?: boolean;
+  source?: "all" | "official" | "operational";
+}) {
+  await requireAdminUser();
+
+  const countryId = normalizeRequired(input.countryId, "País requerido.");
+  const level = Math.min(8, Math.max(1, Number(input.level || 1)));
+  const parentId = normalizeOptional(input.parentId);
+  const q = input.q?.trim() ?? "";
+  const limit = Math.min(Math.max(input.limit ?? 500, 20), 2000);
+  const onlyActive = input.onlyActive !== false;
+  const source = input.source ?? "all";
+
+  const rows = await prisma.geoDivision.findMany({
+    where: {
+      countryId,
+      level,
+      ...(typeof input.parentId !== "undefined" ? { parentId } : {}),
+      ...(onlyActive ? { isActive: true } : {}),
+      ...(source === "official"
+        ? { dataSource: GEO_DIVISION_DATA_SOURCE.official }
+        : source === "operational"
+          ? { dataSource: GEO_DIVISION_DATA_SOURCE.operational }
+          : {}),
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { code: { contains: q, mode: "insensitive" } }
+            ]
+          }
+        : {})
+    },
+    orderBy: [{ name: "asc" }],
+    take: limit,
+    select: {
+      id: true,
+      countryId: true,
+      level: true,
+      code: true,
+      name: true,
+      parentId: true,
+      dataSource: true,
+      isActive: true
+    }
+  });
+
+  return { items: rows };
+}
+
+async function resolveGeoDivisionSubtreeIds(rootId: string) {
+  const visited = new Set<string>();
+  const queue: string[] = [rootId];
+
+  while (queue.length) {
+    const currentIds = queue.splice(0, 100);
+    for (const id of currentIds) visited.add(id);
+
+    const children = await prisma.geoDivision.findMany({
+      where: { parentId: { in: currentIds } },
+      select: { id: true }
+    });
+    for (const child of children) {
+      if (!visited.has(child.id)) queue.push(child.id);
+    }
+  }
+
+  return Array.from(visited);
+}
+
+export async function actionSetGeoDivisionActive(input: {
+  id: string;
+  isActive: boolean;
+  includeSubtree?: boolean;
+}) {
+  const user = await requireAdminUser();
+  const id = normalizeRequired(input.id, "División inválida.");
+  const isActive = Boolean(input.isActive);
+  const includeSubtree = Boolean(input.includeSubtree);
+
+  const existing = await prisma.geoDivision.findUnique({
+    where: { id },
+    select: { id: true, isActive: true }
+  });
+  if (!existing) throw new Error("División no encontrada.");
+
+  const ids = includeSubtree ? await resolveGeoDivisionSubtreeIds(id) : [id];
+  await prisma.geoDivision.updateMany({
+    where: { id: { in: ids } },
+    data: { isActive }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_GEO_DIVISION_STATUS_CHANGED",
+      entityType: "GeoDivision",
+      entityId: id,
+      metadata: {
+        before: existing.isActive,
+        after: isActive,
+        includeSubtree,
+        affectedCount: ids.length
+      }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  return { ok: true, affectedCount: ids.length };
+}
+
+export async function actionCreateGeoDivision(input: {
+  countryId: string;
+  level: number;
+  code: string;
+  name: string;
+  parentId?: string | null;
+  dataSource?: "official" | "operational";
+}) {
+  const user = await requireAdminUser();
+  const countryId = normalizeRequired(input.countryId, "País requerido.");
+  const level = Math.min(8, Math.max(1, Number(input.level || 1)));
+  const code = normalizeRequired(input.code, "Código requerido.");
+  const name = normalizeRequired(input.name, "Nombre requerido.");
+  const parentId = normalizeOptional(input.parentId);
+  const dataSource =
+    input.dataSource === "official" ? GEO_DIVISION_DATA_SOURCE.official : GEO_DIVISION_DATA_SOURCE.operational;
+
+  const country = await prisma.geoCountry.findUnique({
+    where: { id: countryId },
+    select: { id: true }
+  });
+  if (!country) throw new Error("País inválido.");
+
+  if (level > 1) {
+    if (!parentId) throw new Error("Debes seleccionar división padre.");
+    const parent = await prisma.geoDivision.findUnique({
+      where: { id: parentId },
+      select: { id: true, countryId: true, level: true }
+    });
+    if (!parent || parent.countryId !== countryId) throw new Error("División padre inválida.");
+    if (parent.level !== level - 1) throw new Error("La división padre no corresponde al nivel anterior.");
+  }
+
+  const existing = await prisma.geoDivision.findFirst({
+    where: {
+      countryId,
+      level,
+      parentId,
+      OR: [{ code: { equals: code, mode: "insensitive" } }, { name: { equals: name, mode: "insensitive" } }]
+    },
+    select: { id: true }
+  });
+  if (existing) {
+    throw new Error("Ya existe una división con ese código o nombre en el nivel seleccionado.");
+  }
+
+  const created = await prisma.geoDivision.create({
+    data: {
+      countryId,
+      level,
+      code,
+      name,
+      parentId,
+      dataSource,
+      isActive: true
+    },
+    select: { id: true }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_GEO_DIVISION_CREATED",
+      entityType: "GeoDivision",
+      entityId: created.id,
+      metadata: {
+        countryId,
+        level,
+        parentId,
+        dataSource
+      }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  return { id: created.id };
 }
 
 export async function actionAddClientAffiliation(input: {
@@ -2342,6 +3387,8 @@ export async function actionAddClientLocation(input: {
   geoAdmin2Id?: string;
   geoAdmin3Id?: string;
   postalCode?: string;
+  freeState?: string;
+  freeCity?: string;
   label?: string;
   isPrimary?: boolean;
 }) {
@@ -2368,6 +3415,8 @@ export async function actionAddClientLocation(input: {
       geoAdmin1Id: geo.geoAdmin1Id,
       geoAdmin2Id: geo.geoAdmin2Id,
       geoAdmin3Id: geo.geoAdmin3Id,
+      freeState: normalizeOptional(input.freeState),
+      freeCity: normalizeOptional(input.freeCity),
       postalCode: normalizeOptional(input.postalCode),
       label: normalizeOptional(input.label),
       isPrimary: Boolean(input.isPrimary)
@@ -2799,6 +3848,248 @@ export async function actionUpdateClientCatalogItem(input: { id: string; name: s
     if (err?.code === "P2002") throw new Error("Ya existe un item con ese nombre.");
     throw err;
   }
+}
+
+export async function actionCreateClientAcquisitionSource(input: {
+  name: string;
+  code?: string;
+  category?: string;
+}) {
+  const user = await requireAdminUser();
+  const name = normalizeRequired(input.name, "Nombre requerido.");
+  const code = normalizeOptional(input.code) ? normalizeSourceToken(input.code) : null;
+  const category = normalizeOptional(input.category);
+
+  try {
+    const created = await prisma.clientAcquisitionSource.create({
+      data: {
+        name,
+        code,
+        category,
+        isActive: true
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_ACQUISITION_SOURCE_CREATED",
+        entityType: "ClientAcquisitionSource",
+        entityId: created.id,
+        metadata: { name, code, category }
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    return { id: created.id };
+  } catch (err: any) {
+    if (err?.code === "P2002") {
+      throw new Error("Ya existe un canal con ese nombre o código.");
+    }
+    throw err;
+  }
+}
+
+export async function actionUpdateClientAcquisitionSource(input: {
+  id: string;
+  name: string;
+  code?: string;
+  category?: string;
+}) {
+  const user = await requireAdminUser();
+  const id = normalizeRequired(input.id, "Canal inválido.");
+  const name = normalizeRequired(input.name, "Nombre requerido.");
+  const code = normalizeOptional(input.code) ? normalizeSourceToken(input.code) : null;
+  const category = normalizeOptional(input.category);
+
+  const existing = await prisma.clientAcquisitionSource.findUnique({
+    where: { id },
+    select: { id: true, name: true, code: true, category: true }
+  });
+  if (!existing) throw new Error("Canal no encontrado.");
+
+  try {
+    await prisma.clientAcquisitionSource.update({
+      where: { id },
+      data: { name, code, category }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_ACQUISITION_SOURCE_UPDATED",
+        entityType: "ClientAcquisitionSource",
+        entityId: id,
+        before: existing as Prisma.InputJsonValue,
+        after: { name, code, category } as Prisma.InputJsonValue
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    return { ok: true };
+  } catch (err: any) {
+    if (err?.code === "P2002") {
+      throw new Error("Ya existe un canal con ese nombre o código.");
+    }
+    throw err;
+  }
+}
+
+export async function actionSetClientAcquisitionSourceActive(input: { id: string; isActive: boolean }) {
+  const user = await requireAdminUser();
+  const id = normalizeRequired(input.id, "Canal inválido.");
+  const isActive = Boolean(input.isActive);
+
+  const existing = await prisma.clientAcquisitionSource.findUnique({
+    where: { id },
+    select: { id: true, isActive: true }
+  });
+  if (!existing) throw new Error("Canal no encontrado.");
+
+  await prisma.clientAcquisitionSource.update({
+    where: { id },
+    data: { isActive }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_ACQUISITION_SOURCE_STATUS_CHANGED",
+      entityType: "ClientAcquisitionSource",
+      entityId: id,
+      metadata: { before: existing.isActive, after: isActive }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  return { ok: true };
+}
+
+export async function actionCreateClientAcquisitionDetailOption(input: {
+  sourceId: string;
+  name: string;
+  code?: string;
+}) {
+  const user = await requireAdminUser();
+  const sourceId = normalizeRequired(input.sourceId, "Canal requerido.");
+  const name = normalizeRequired(input.name, "Nombre requerido.");
+  const code = normalizeOptional(input.code) ? normalizeSourceToken(input.code) : normalizeSourceToken(name);
+
+  const source = await prisma.clientAcquisitionSource.findUnique({
+    where: { id: sourceId },
+    select: { id: true }
+  });
+  if (!source) throw new Error("Canal no encontrado.");
+
+  try {
+    const created = await prisma.clientAcquisitionDetailOption.create({
+      data: {
+        sourceId,
+        name,
+        code,
+        isActive: true
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_ACQUISITION_DETAIL_CREATED",
+        entityType: "ClientAcquisitionDetailOption",
+        entityId: created.id,
+        metadata: { sourceId, name, code }
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    return { id: created.id };
+  } catch (err: any) {
+    if (err?.code === "P2002") {
+      throw new Error("Ya existe un detalle con ese código para este canal.");
+    }
+    throw err;
+  }
+}
+
+export async function actionUpdateClientAcquisitionDetailOption(input: {
+  id: string;
+  name: string;
+  code?: string;
+}) {
+  const user = await requireAdminUser();
+  const id = normalizeRequired(input.id, "Detalle inválido.");
+  const name = normalizeRequired(input.name, "Nombre requerido.");
+  const code = normalizeOptional(input.code) ? normalizeSourceToken(input.code) : normalizeSourceToken(name);
+
+  const existing = await prisma.clientAcquisitionDetailOption.findUnique({
+    where: { id },
+    select: { id: true, sourceId: true, name: true, code: true }
+  });
+  if (!existing) throw new Error("Detalle no encontrado.");
+
+  try {
+    await prisma.clientAcquisitionDetailOption.update({
+      where: { id },
+      data: { name, code }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_ACQUISITION_DETAIL_UPDATED",
+        entityType: "ClientAcquisitionDetailOption",
+        entityId: id,
+        before: existing as Prisma.InputJsonValue,
+        after: { name, code } as Prisma.InputJsonValue
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    return { ok: true };
+  } catch (err: any) {
+    if (err?.code === "P2002") {
+      throw new Error("Ya existe un detalle con ese código para este canal.");
+    }
+    throw err;
+  }
+}
+
+export async function actionSetClientAcquisitionDetailOptionActive(input: { id: string; isActive: boolean }) {
+  const user = await requireAdminUser();
+  const id = normalizeRequired(input.id, "Detalle inválido.");
+  const isActive = Boolean(input.isActive);
+
+  const existing = await prisma.clientAcquisitionDetailOption.findUnique({
+    where: { id },
+    select: { id: true, isActive: true }
+  });
+  if (!existing) throw new Error("Detalle no encontrado.");
+
+  await prisma.clientAcquisitionDetailOption.update({
+    where: { id },
+    data: { isActive }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_ACQUISITION_DETAIL_STATUS_CHANGED",
+      entityType: "ClientAcquisitionDetailOption",
+      entityId: id,
+      metadata: { before: existing.isActive, after: isActive }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  return { ok: true };
 }
 
 export async function actionSetGeoNodeActive(input: {
