@@ -1,7 +1,9 @@
 import { NotificationSeverity, NotificationType, Prisma } from "@prisma/client";
 import type { HrAlert } from "@/types/hr";
+import type { SessionUser } from "@/lib/auth";
+import { canViewEmployeeAccessDetails, filterDocumentsForActor, getHrAccessLevel, allowedDocumentVisibilities } from "@/lib/hr/access";
 
-export const employeeInclude = {
+const baseEmployeeInclude = {
   primaryLegalEntity: true,
   engagements: { include: { legalEntity: true }, orderBy: { startDate: "desc" } },
   branchAssignments: { include: { branch: true } },
@@ -24,7 +26,23 @@ export const employeeInclude = {
   }
 } satisfies Prisma.HrEmployeeInclude;
 
-export type EmployeeWithRelations = Prisma.HrEmployeeGetPayload<{ include: typeof employeeInclude }>;
+// Compat for handlers still importing `employeeInclude` directly.
+export const employeeInclude = baseEmployeeInclude;
+
+export function employeeIncludeFor(user: SessionUser | null) {
+  const level = getHrAccessLevel(user);
+  const visibility = allowedDocumentVisibilities(level, user);
+  const documents =
+    visibility === null
+      ? baseEmployeeInclude.documents
+      : {
+          ...baseEmployeeInclude.documents,
+          where: { isArchived: false, visibility: { in: visibility } }
+        };
+  return { ...baseEmployeeInclude, documents } satisfies Prisma.HrEmployeeInclude;
+}
+
+export type EmployeeWithRelations = Prisma.HrEmployeeGetPayload<{ include: typeof baseEmployeeInclude }>;
 
 function expirySeverity(date: Date) {
   const now = new Date();
@@ -97,12 +115,15 @@ function serializeAlerts(employee: EmployeeWithRelations, documents: any[]) {
   };
 }
 
-export function serializeEmployee(employee: EmployeeWithRelations) {
+export function serializeEmployee(employee: EmployeeWithRelations, actor: SessionUser | null = null) {
+  const level = getHrAccessLevel(actor);
+  const canViewAccess = canViewEmployeeAccessDetails(level);
+  const isSelf = Boolean(actor && employee.userId && actor.id === employee.userId);
   const primaryEngagement = pickPrimary(employee.engagements || []);
   const primaryBranch = pickPrimary(employee.branchAssignments || []);
   const primaryPosition = pickPrimary(employee.positionAssignments || []);
 
-  const documents = (employee.documents || []).map((doc) => {
+  const rawDocuments = (employee.documents || []).map((doc) => {
     const currentVersion = doc.currentVersion || doc.versions[0] || null;
     return {
       id: doc.id,
@@ -141,6 +162,7 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
     };
   });
 
+  const documents = filterDocumentsForActor({ documents: rawDocuments, level, isSelf, user: actor });
   const alerts = serializeAlerts(employee, documents);
 
   return {
@@ -157,6 +179,7 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
     phoneHome: employee.phoneHome,
     birthDate: employee.birthDate,
     addressHome: employee.addressHome,
+    biometricId: employee.biometricId,
     workLocation: primaryBranch?.branch?.address || null,
     notes: employee.notes,
     isExternal: employee.isExternal,
@@ -170,6 +193,8 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
     isActive: employee.isActive,
     onboardingStatus: employee.onboardingStatus,
     onboardingStep: employee.onboardingStep,
+    archivedAt: employee.archivedAt,
+    terminatedAt: employee.terminatedAt,
     completedAt: employee.completedAt,
     primaryLegalEntity: primaryEngagement
       ? {
@@ -293,12 +318,16 @@ export function serializeEmployee(employee: EmployeeWithRelations) {
           userId: employee.user.id,
           email: employee.user.email,
           name: employee.user.name,
-          roles: employee.user.roles?.map((r) => ({ id: r.role.id, name: r.role.name })) || [],
-          permissions: employee.user.userPermissions?.map((p) => ({
-            id: p.permission.id,
-            key: p.permission.key,
-            description: p.permission.description
-          }))
+          ...(canViewAccess
+            ? {
+                roles: employee.user.roles?.map((r) => ({ id: r.role.id, name: r.role.name })) || [],
+                permissions: employee.user.userPermissions?.map((p) => ({
+                  id: p.permission.id,
+                  key: p.permission.key,
+                  description: p.permission.description
+                }))
+              }
+            : {})
         }
       : null,
     alerts
