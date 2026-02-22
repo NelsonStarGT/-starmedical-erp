@@ -1,0 +1,4 @@
+-- Legacy migration placeholder adopted from remote Supabase history.
+-- Migration: 20260322120000_warning_attachments
+-- Purpose: align Prisma metadata; schema is captured by later migrations and drift-fix.
+-- no-op

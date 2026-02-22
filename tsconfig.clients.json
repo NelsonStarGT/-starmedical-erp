@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "app/admin/clientes/**/*.ts",
+    "app/admin/clientes/**/*.tsx",
+    "components/clients/**/*.ts",
+    "components/clients/**/*.tsx",
+    "lib/clients/**/*.ts",
+    "lib/clients/**/*.tsx",
+    "types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next"
+  ]
+}

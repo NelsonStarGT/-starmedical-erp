@@ -1,0 +1,4 @@
+-- Legacy migration placeholder adopted from remote Supabase history.
+-- Migration: 20260313130000_payroll_module
+-- Purpose: align Prisma metadata; schema is captured by later migrations and drift-fix.
+-- no-op

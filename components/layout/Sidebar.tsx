@@ -56,7 +56,11 @@ export default function Sidebar({
             />
           ) : (
             <div className="h-11 w-11 rounded-2xl bg-white/10 border border-white/10 text-white flex items-center justify-center font-semibold shadow">
-              {initialsFromIdentity(identity.name)}
+              {initialsFromIdentity({
+                orgName: identity.name,
+                appName: identity.name,
+                tenantId: identity.tenantId
+              })}
             </div>
           )}
           {!collapsed && (

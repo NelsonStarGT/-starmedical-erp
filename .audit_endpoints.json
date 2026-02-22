@@ -1,0 +1,3905 @@
+[
+  {
+    "rel": "app/api/admin/clientes/[id]/preview/route.ts",
+    "routePath": "/api/admin/clientes/[id]/preview",
+    "module": "admin",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/admin/clientes/export/csv/route.ts",
+    "routePath": "/api/admin/clientes/export/csv",
+    "module": "admin",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/admin/clientes/import/csv/route.ts",
+    "routePath": "/api/admin/clientes/import/csv",
+    "module": "admin",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "parse("
+    ]
+  },
+  {
+    "rel": "app/api/admin/clientes/import/template/route.ts",
+    "routePath": "/api/admin/clientes/import/template",
+    "module": "admin",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/admin/companies/route.ts",
+    "routePath": "/api/admin/companies",
+    "module": "admin",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod"
+    ]
+  },
+  {
+    "rel": "app/api/admin/companies/[id]/route.ts",
+    "routePath": "/api/admin/companies/[id]",
+    "module": "admin",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod"
+    ]
+  },
+  {
+    "rel": "app/api/admin/config/email/global/route.ts",
+    "routePath": "/api/admin/config/email/global",
+    "module": "admin",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/admin/config/email/test/route.ts",
+    "routePath": "/api/admin/config/email/test",
+    "module": "admin",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/admin/health/db/route.ts",
+    "routePath": "/api/admin/health/db",
+    "module": "admin",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/admin/job-roles/route.ts",
+    "routePath": "/api/admin/job-roles",
+    "module": "admin",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth",
+      "requirePermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/admin/locations/departments/route.ts",
+    "routePath": "/api/admin/locations/departments",
+    "module": "admin",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth",
+      "requirePermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/admin/locations/municipalities/route.ts",
+    "routePath": "/api/admin/locations/municipalities",
+    "module": "admin",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth",
+      "requirePermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/admin/permissions/sync/route.ts",
+    "routePath": "/api/admin/permissions/sync",
+    "module": "admin",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/admin/rbac/roles/route.ts",
+    "routePath": "/api/admin/rbac/roles",
+    "module": "admin",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth",
+      "requirePermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/agenda/route.ts",
+    "routePath": "/api/agenda",
+    "module": "agenda",
+    "methods": [
+      "DELETE",
+      "GET",
+      "PATCH",
+      "POST",
+      "PUT"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/agenda/updates/route.ts",
+    "routePath": "/api/agenda/updates",
+    "module": "agenda",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/ai/parse-attendance/route.ts",
+    "routePath": "/api/ai/parse-attendance",
+    "module": "ai",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/attendance/config/route.ts",
+    "routePath": "/api/attendance/config",
+    "module": "attendance",
+    "methods": [],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/attendance/import/raw/route.ts",
+    "routePath": "/api/attendance/import/raw",
+    "module": "attendance",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/attendance/process/route.ts",
+    "routePath": "/api/attendance/process",
+    "module": "attendance",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/attendance/punch-config/[token]/route.ts",
+    "routePath": "/api/attendance/punch-config/[token]",
+    "module": "attendance",
+    "methods": [],
+    "authMarkers": [],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/attendance/punch-tokens/route.ts",
+    "routePath": "/api/attendance/punch-tokens",
+    "module": "attendance",
+    "methods": [],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/attendance/punch-tokens/[id]/route.ts",
+    "routePath": "/api/attendance/punch-tokens/[id]",
+    "module": "attendance",
+    "methods": [],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/attendance/raw/process/route.ts",
+    "routePath": "/api/attendance/raw/process",
+    "module": "attendance",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/auth/whoami/route.ts",
+    "routePath": "/api/auth/whoami",
+    "module": "auth",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/automations/route.ts",
+    "routePath": "/api/automations",
+    "module": "automations",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/clientes/importar/route.ts",
+    "routePath": "/api/clientes/importar",
+    "module": "clientes",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/clientes/plantilla-excel/route.ts",
+    "routePath": "/api/clientes/plantilla-excel",
+    "module": "clientes",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/apis/route.ts",
+    "routePath": "/api/config/apis",
+    "module": "config",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/apis/[key]/route.ts",
+    "routePath": "/api/config/apis/[key]",
+    "module": "config",
+    "methods": [
+      "PATCH"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/apis/[key]/test/route.ts",
+    "routePath": "/api/config/apis/[key]/test",
+    "module": "config",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/app/route.ts",
+    "routePath": "/api/config/app",
+    "module": "config",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/home-dashboard/route.ts",
+    "routePath": "/api/config/home-dashboard",
+    "module": "config",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/identity/route.ts",
+    "routePath": "/api/config/identity",
+    "module": "config",
+    "methods": [
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireAuth",
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/integrations/attendance/route.ts",
+    "routePath": "/api/config/integrations/attendance",
+    "module": "config",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/integrations/attendance/test/route.ts",
+    "routePath": "/api/config/integrations/attendance/test",
+    "module": "config",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/integrations/lab/route.ts",
+    "routePath": "/api/config/integrations/lab",
+    "module": "config",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/integrations/lab/test/route.ts",
+    "routePath": "/api/config/integrations/lab/test",
+    "module": "config",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/invoice/route.ts",
+    "routePath": "/api/config/invoice",
+    "module": "config",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/invoice/test/route.ts",
+    "routePath": "/api/config/invoice/test",
+    "module": "config",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/mail/global/route.ts",
+    "routePath": "/api/config/mail/global",
+    "module": "config",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/mail/modules/route.ts",
+    "routePath": "/api/config/mail/modules",
+    "module": "config",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/mail/modules/[moduleKey]/route.ts",
+    "routePath": "/api/config/mail/modules/[moduleKey]",
+    "module": "config",
+    "methods": [
+      "PATCH"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/mail/modules/[moduleKey]/test/route.ts",
+    "routePath": "/api/config/mail/modules/[moduleKey]/test",
+    "module": "config",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/config/rbac/route.ts",
+    "routePath": "/api/config/rbac",
+    "module": "config",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/accounts/route.ts",
+    "routePath": "/api/crm/accounts",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/activities/route.ts",
+    "routePath": "/api/crm/activities",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/audit/route.ts",
+    "routePath": "/api/crm/audit",
+    "module": "crm",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/calendar/route.ts",
+    "routePath": "/api/crm/calendar",
+    "module": "crm",
+    "methods": [
+      "DELETE",
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/contacts/route.ts",
+    "routePath": "/api/crm/contacts",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/dashboard-metrics/route.ts",
+    "routePath": "/api/crm/dashboard-metrics",
+    "module": "crm",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/deals/route.ts",
+    "routePath": "/api/crm/deals",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/deals/[id]/route.ts",
+    "routePath": "/api/crm/deals/[id]",
+    "module": "crm",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/deals/[id]/pipeline/route.ts",
+    "routePath": "/api/crm/deals/[id]/pipeline",
+    "module": "crm",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/deals/inbox/route.ts",
+    "routePath": "/api/crm/deals/inbox",
+    "module": "crm",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/jobs/run/route.ts",
+    "routePath": "/api/crm/jobs/run",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/leads/route.ts",
+    "routePath": "/api/crm/leads",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/leads/[id]/convert/route.ts",
+    "routePath": "/api/crm/leads/[id]/convert",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/pipelines/route.ts",
+    "routePath": "/api/crm/pipelines",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/pipelines/rules/route.ts",
+    "routePath": "/api/crm/pipelines/rules",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/pipelines/stages/route.ts",
+    "routePath": "/api/crm/pipelines/stages",
+    "module": "crm",
+    "methods": [
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes/route.ts",
+    "routePath": "/api/crm/quotes",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/route.ts",
+    "routePath": "/api/crm/quotes-v2",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/[id]/route.ts",
+    "routePath": "/api/crm/quotes-v2/[id]",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/[id]/approve/route.ts",
+    "routePath": "/api/crm/quotes-v2/[id]/approve",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/[id]/deliveries/route.ts",
+    "routePath": "/api/crm/quotes-v2/[id]/deliveries",
+    "module": "crm",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/[id]/generate-pdf/route.ts",
+    "routePath": "/api/crm/quotes-v2/[id]/generate-pdf",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/[id]/reject/route.ts",
+    "routePath": "/api/crm/quotes-v2/[id]/reject",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/[id]/request-approval/route.ts",
+    "routePath": "/api/crm/quotes-v2/[id]/request-approval",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/[id]/send/route.ts",
+    "routePath": "/api/crm/quotes-v2/[id]/send",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/items/route.ts",
+    "routePath": "/api/crm/quotes-v2/items",
+    "module": "crm",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes-v2/upload/route.ts",
+    "routePath": "/api/crm/quotes-v2/upload",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/quotes/[id]/generate-pdf/route.ts",
+    "routePath": "/api/crm/quotes/[id]/generate-pdf",
+    "module": "crm",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/requests/route.ts",
+    "routePath": "/api/crm/requests",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/search-client/route.ts",
+    "routePath": "/api/crm/search-client",
+    "module": "crm",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/crm/tasks/route.ts",
+    "routePath": "/api/crm/tasks",
+    "module": "crm",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/diagnostics/catalog/route.ts",
+    "routePath": "/api/diagnostics/catalog",
+    "module": "diagnostics",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/diagnostics/imaging/reports/route.ts",
+    "routePath": "/api/diagnostics/imaging/reports",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/diagnostics/imaging/reports/[id]/release/route.ts",
+    "routePath": "/api/diagnostics/imaging/reports/[id]/release",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/diagnostics/imaging/reports/[id]/sign/route.ts",
+    "routePath": "/api/diagnostics/imaging/reports/[id]/sign",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/diagnostics/imaging/studies/route.ts",
+    "routePath": "/api/diagnostics/imaging/studies",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/diagnostics/intake/create-order/route.ts",
+    "routePath": "/api/diagnostics/intake/create-order",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "z.enum"
+    ]
+  },
+  {
+    "rel": "app/api/diagnostics/intake/create-patient/route.ts",
+    "routePath": "/api/diagnostics/intake/create-patient",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object"
+    ]
+  },
+  {
+    "rel": "app/api/diagnostics/intake/search-patient/route.ts",
+    "routePath": "/api/diagnostics/intake/search-patient",
+    "module": "diagnostics",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/diagnostics/lab/results/route.ts",
+    "routePath": "/api/diagnostics/lab/results",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/diagnostics/lab/results/[id]/release/route.ts",
+    "routePath": "/api/diagnostics/lab/results/[id]/release",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/diagnostics/lab/results/[id]/validate/route.ts",
+    "routePath": "/api/diagnostics/lab/results/[id]/validate",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/diagnostics/lab/specimens/route.ts",
+    "routePath": "/api/diagnostics/lab/specimens",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/diagnostics/orders/route.ts",
+    "routePath": "/api/diagnostics/orders",
+    "module": "diagnostics",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/diagnostics/orders/[id]/admin-status/route.ts",
+    "routePath": "/api/diagnostics/orders/[id]/admin-status",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/diagnostics/orders/[id]/pay/route.ts",
+    "routePath": "/api/diagnostics/orders/[id]/pay",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object"
+    ]
+  },
+  {
+    "rel": "app/api/diagnostics/orders/[id]/send-to-execution/route.ts",
+    "routePath": "/api/diagnostics/orders/[id]/send-to-execution",
+    "module": "diagnostics",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/diagnostics/patients/route.ts",
+    "routePath": "/api/diagnostics/patients",
+    "module": "diagnostics",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/facturacion/expedientes/[id]/quick-action/route.ts",
+    "routePath": "/api/facturacion/expedientes/[id]/quick-action",
+    "module": "facturacion",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "parse(",
+      "zod",
+      "z.object",
+      "z.enum"
+    ]
+  },
+  {
+    "rel": "app/api/files/[id]/route.ts",
+    "routePath": "/api/files/[id]",
+    "module": "files",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/accounts/route.ts",
+    "routePath": "/api/finanzas/accounts",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/attachments/route.ts",
+    "routePath": "/api/finanzas/attachments",
+    "module": "finanzas",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/categories/route.ts",
+    "routePath": "/api/finanzas/categories",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/financial-accounts/route.ts",
+    "routePath": "/api/finanzas/financial-accounts",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/journal-entries/route.ts",
+    "routePath": "/api/finanzas/journal-entries",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/journal-entries/[id]/route.ts",
+    "routePath": "/api/finanzas/journal-entries/[id]",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/journal-entries/[id]/post/route.ts",
+    "routePath": "/api/finanzas/journal-entries/[id]/post",
+    "module": "finanzas",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinancePoster"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/journal-entries/[id]/reverse/route.ts",
+    "routePath": "/api/finanzas/journal-entries/[id]/reverse",
+    "module": "finanzas",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinancePoster"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/legal-entities/route.ts",
+    "routePath": "/api/finanzas/legal-entities",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/parties/route.ts",
+    "routePath": "/api/finanzas/parties",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/payables/route.ts",
+    "routePath": "/api/finanzas/payables",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/payments/route.ts",
+    "routePath": "/api/finanzas/payments",
+    "module": "finanzas",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/receivables/route.ts",
+    "routePath": "/api/finanzas/receivables",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/subcategories/route.ts",
+    "routePath": "/api/finanzas/subcategories",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/summary/route.ts",
+    "routePath": "/api/finanzas/summary",
+    "module": "finanzas",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/finanzas/transactions/route.ts",
+    "routePath": "/api/finanzas/transactions",
+    "module": "finanzas",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "ensureFinanceAccess"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/health/route.ts",
+    "routePath": "/api/health",
+    "module": "health",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/hr/attendance/route.ts",
+    "routePath": "/api/hr/attendance",
+    "module": "hr",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/assignments/route.ts",
+    "routePath": "/api/hr/attendance/assignments",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/assignments/[id]/route.ts",
+    "routePath": "/api/hr/attendance/assignments/[id]",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/day/route.ts",
+    "routePath": "/api/hr/attendance/day",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/employee/[id]/route.ts",
+    "routePath": "/api/hr/attendance/employee/[id]",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/employee/[id]/daily/route.ts",
+    "routePath": "/api/hr/attendance/employee/[id]/daily",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/event/route.ts",
+    "routePath": "/api/hr/attendance/event",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/event/[id]/route.ts",
+    "routePath": "/api/hr/attendance/event/[id]",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/incidents/route.ts",
+    "routePath": "/api/hr/attendance/incidents",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/logs/route.ts",
+    "routePath": "/api/hr/attendance/logs",
+    "module": "hr",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/manual/route.ts",
+    "routePath": "/api/hr/attendance/manual",
+    "module": "hr",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/mark-in/route.ts",
+    "routePath": "/api/hr/attendance/mark-in",
+    "module": "hr",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/mark-out/route.ts",
+    "routePath": "/api/hr/attendance/mark-out",
+    "module": "hr",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/process-day/route.ts",
+    "routePath": "/api/hr/attendance/process-day",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/processed/route.ts",
+    "routePath": "/api/hr/attendance/processed",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/raw/route.ts",
+    "routePath": "/api/hr/attendance/raw",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/shifts/route.ts",
+    "routePath": "/api/hr/attendance/shifts",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/shifts/[id]/route.ts",
+    "routePath": "/api/hr/attendance/shifts/[id]",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/shifts/[id]/set-default/route.ts",
+    "routePath": "/api/hr/attendance/shifts/[id]/set-default",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/sites/route.ts",
+    "routePath": "/api/hr/attendance/sites",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/attendance/today/route.ts",
+    "routePath": "/api/hr/attendance/today",
+    "module": "hr",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/branches/route.ts",
+    "routePath": "/api/hr/branches",
+    "module": "hr",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/branches/[id]/route.ts",
+    "routePath": "/api/hr/branches/[id]",
+    "module": "hr",
+    "methods": [
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/dashboard/route.ts",
+    "routePath": "/api/hr/dashboard",
+    "module": "hr",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/hr/departments/route.ts",
+    "routePath": "/api/hr/departments",
+    "module": "hr",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "parse("
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/route.ts",
+    "routePath": "/api/hr/employees",
+    "module": "hr",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "parse(",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/route.ts",
+    "routePath": "/api/hr/employees/[id]",
+    "module": "hr",
+    "methods": [
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "parse("
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/activate/route.ts",
+    "routePath": "/api/hr/employees/[id]/activate",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/archive/route.ts",
+    "routePath": "/api/hr/employees/[id]/archive",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/compensation/route.ts",
+    "routePath": "/api/hr/employees/[id]/compensation",
+    "module": "hr",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/compensation/history/route.ts",
+    "routePath": "/api/hr/employees/[id]/compensation/history",
+    "module": "hr",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/compensation/update/route.ts",
+    "routePath": "/api/hr/employees/[id]/compensation/update",
+    "module": "hr",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/complete/route.ts",
+    "routePath": "/api/hr/employees/[id]/complete",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/disciplinary-actions/route.ts",
+    "routePath": "/api/hr/employees/[id]/disciplinary-actions",
+    "module": "hr",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/documents/route.ts",
+    "routePath": "/api/hr/employees/[id]/documents",
+    "module": "hr",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "parse("
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/documents/[docId]/route.ts",
+    "routePath": "/api/hr/employees/[id]/documents/[docId]",
+    "module": "hr",
+    "methods": [
+      "DELETE"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/draft/route.ts",
+    "routePath": "/api/hr/employees/[id]/draft",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/step-1/route.ts",
+    "routePath": "/api/hr/employees/[id]/step-1",
+    "module": "hr",
+    "methods": [
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/step-2/route.ts",
+    "routePath": "/api/hr/employees/[id]/step-2",
+    "module": "hr",
+    "methods": [
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/step-3/route.ts",
+    "routePath": "/api/hr/employees/[id]/step-3",
+    "module": "hr",
+    "methods": [
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/suspend/route.ts",
+    "routePath": "/api/hr/employees/[id]/suspend",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/terminate/route.ts",
+    "routePath": "/api/hr/employees/[id]/terminate",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/transfer/route.ts",
+    "routePath": "/api/hr/employees/[id]/transfer",
+    "module": "hr",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/[id]/warnings/route.ts",
+    "routePath": "/api/hr/employees/[id]/warnings",
+    "module": "hr",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/archived/route.ts",
+    "routePath": "/api/hr/employees/archived",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/options/route.ts",
+    "routePath": "/api/hr/employees/options",
+    "module": "hr",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/hr/employees/pending/route.ts",
+    "routePath": "/api/hr/employees/pending",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/employees/quick-create/route.ts",
+    "routePath": "/api/hr/employees/quick-create",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "z.enum",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/route.ts",
+    "routePath": "/api/hr/payroll",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/route.ts",
+    "routePath": "/api/hr/payroll/[id]",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/approve/route.ts",
+    "routePath": "/api/hr/payroll/[id]/approve",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/employees/[employeeId]/email/route.ts",
+    "routePath": "/api/hr/payroll/[id]/employees/[employeeId]/email",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/employees/[employeeId]/export.csv/route.ts",
+    "routePath": "/api/hr/payroll/[id]/employees/[employeeId]/export.csv",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/employees/[employeeId]/payslip.pdf/route.ts",
+    "routePath": "/api/hr/payroll/[id]/employees/[employeeId]/payslip.pdf",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/export/route.ts",
+    "routePath": "/api/hr/payroll/[id]/export",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/export.csv/route.ts",
+    "routePath": "/api/hr/payroll/[id]/export.csv",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/line/[lineId]/route.ts",
+    "routePath": "/api/hr/payroll/[id]/line/[lineId]",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/publish/route.ts",
+    "routePath": "/api/hr/payroll/[id]/publish",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/payroll/[id]/recalculate/route.ts",
+    "routePath": "/api/hr/payroll/[id]/recalculate",
+    "module": "hr",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/hr/payroll/preview/route.ts",
+    "routePath": "/api/hr/payroll/preview",
+    "module": "hr",
+    "methods": [],
+    "authMarkers": [
+      "requireHrPermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/hr/positions/route.ts",
+    "routePath": "/api/hr/positions",
+    "module": "hr",
+    "methods": [
+      "GET",
+      "PATCH",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "parse("
+    ]
+  },
+  {
+    "rel": "app/api/hr/settings/route.ts",
+    "routePath": "/api/hr/settings",
+    "module": "hr",
+    "methods": [
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/integrations/hl7/oru/route.ts",
+    "routePath": "/api/integrations/hl7/oru",
+    "module": "integrations",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireDiagnosticsPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/integrations/openai/test/route.ts",
+    "routePath": "/api/integrations/openai/test",
+    "module": "integrations",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/auditoria/export/xlsx/route.ts",
+    "routePath": "/api/inventario/auditoria/export/xlsx",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/categorias/productos/route.ts",
+    "routePath": "/api/inventario/categorias/productos",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/categorias/productos/[id]/route.ts",
+    "routePath": "/api/inventario/categorias/productos/[id]",
+    "module": "inventario",
+    "methods": [
+      "DELETE",
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/categorias/servicios/route.ts",
+    "routePath": "/api/inventario/categorias/servicios",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/categorias/servicios/[id]/route.ts",
+    "routePath": "/api/inventario/categorias/servicios/[id]",
+    "module": "inventario",
+    "methods": [
+      "DELETE",
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/combos/route.ts",
+    "routePath": "/api/inventario/combos",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/combos/[id]/route.ts",
+    "routePath": "/api/inventario/combos/[id]",
+    "module": "inventario",
+    "methods": [
+      "DELETE",
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/combos/bulk/route.ts",
+    "routePath": "/api/inventario/combos/bulk",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/email-schedules/route.ts",
+    "routePath": "/api/inventario/email-schedules",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/email-schedules/[id]/route.ts",
+    "routePath": "/api/inventario/email-schedules/[id]",
+    "module": "inventario",
+    "methods": [
+      "DELETE",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/email-schedules/[id]/run/route.ts",
+    "routePath": "/api/inventario/email-schedules/[id]/run",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/importar/[kind]/route.ts",
+    "routePath": "/api/inventario/importar/[kind]",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/integrity/route.ts",
+    "routePath": "/api/inventario/integrity",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/margin-policy/route.ts",
+    "routePath": "/api/inventario/margin-policy",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/movimientos/route.ts",
+    "routePath": "/api/inventario/movimientos",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/movimientos/export/route.ts",
+    "routePath": "/api/inventario/movimientos/export",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/movimientos/export/pdf/route.ts",
+    "routePath": "/api/inventario/movimientos/export/pdf",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/movimientos/send/route.ts",
+    "routePath": "/api/inventario/movimientos/send",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/ordenes/route.ts",
+    "routePath": "/api/inventario/ordenes",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/ordenes/[id]/route.ts",
+    "routePath": "/api/inventario/ordenes/[id]",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/plantillas/[kind]/route.ts",
+    "routePath": "/api/inventario/plantillas/[kind]",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/prices/matrix/route.ts",
+    "routePath": "/api/inventario/prices/matrix",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/prices/matrix/export/xlsx/route.ts",
+    "routePath": "/api/inventario/prices/matrix/export/xlsx",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/prices/matrix/import/xlsx/route.ts",
+    "routePath": "/api/inventario/prices/matrix/import/xlsx",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/productos/route.ts",
+    "routePath": "/api/inventario/productos",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/productos/bulk/route.ts",
+    "routePath": "/api/inventario/productos/bulk",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/qa/export/xlsx/route.ts",
+    "routePath": "/api/inventario/qa/export/xlsx",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/qa/run/route.ts",
+    "routePath": "/api/inventario/qa/run",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/reports/cierre-sat/route.ts",
+    "routePath": "/api/inventario/reports/cierre-sat",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/reports/cierre-sat/export/pdf/route.ts",
+    "routePath": "/api/inventario/reports/cierre-sat/export/pdf",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/reports/cierre-sat/export/xlsx/route.ts",
+    "routePath": "/api/inventario/reports/cierre-sat/export/xlsx",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/reports/run/route.ts",
+    "routePath": "/api/inventario/reports/run",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/reports/settings/route.ts",
+    "routePath": "/api/inventario/reports/settings",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": [
+      "parse("
+    ]
+  },
+  {
+    "rel": "app/api/inventario/reports/test/route.ts",
+    "routePath": "/api/inventario/reports/test",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/reset/route.ts",
+    "routePath": "/api/inventario/reset",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/servicios/route.ts",
+    "routePath": "/api/inventario/servicios",
+    "module": "inventario",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/servicios/bulk/route.ts",
+    "routePath": "/api/inventario/servicios/bulk",
+    "module": "inventario",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/solicitudes/route.ts",
+    "routePath": "/api/inventario/solicitudes",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/solicitudes/[id]/route.ts",
+    "routePath": "/api/inventario/solicitudes/[id]",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireRole"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/subcategorias/productos/route.ts",
+    "routePath": "/api/inventario/subcategorias/productos",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/subcategorias/productos/[id]/route.ts",
+    "routePath": "/api/inventario/subcategorias/productos/[id]",
+    "module": "inventario",
+    "methods": [
+      "DELETE",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/subcategorias/servicios/route.ts",
+    "routePath": "/api/inventario/subcategorias/servicios",
+    "module": "inventario",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/inventario/subcategorias/servicios/[id]/route.ts",
+    "routePath": "/api/inventario/subcategorias/servicios/[id]",
+    "module": "inventario",
+    "methods": [
+      "DELETE",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/access/route.ts",
+    "routePath": "/api/labtest/access",
+    "module": "labtest",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/auth/send-otp/route.ts",
+    "routePath": "/api/labtest/auth/send-otp",
+    "module": "labtest",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/auth/verify-otp/route.ts",
+    "routePath": "/api/labtest/auth/verify-otp",
+    "module": "labtest",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/catalog/categories/route.ts",
+    "routePath": "/api/labtest/catalog/categories",
+    "module": "labtest",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/catalog/subcategories/route.ts",
+    "routePath": "/api/labtest/catalog/subcategories",
+    "module": "labtest",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/catalog/tests/route.ts",
+    "routePath": "/api/labtest/catalog/tests",
+    "module": "labtest",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/contact/route.ts",
+    "routePath": "/api/labtest/contact",
+    "module": "labtest",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/instruments/route.ts",
+    "routePath": "/api/labtest/instruments",
+    "module": "labtest",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/items/status/route.ts",
+    "routePath": "/api/labtest/items/status",
+    "module": "labtest",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/logs/results/route.ts",
+    "routePath": "/api/labtest/logs/results",
+    "module": "labtest",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/logs/specimens/route.ts",
+    "routePath": "/api/labtest/logs/specimens",
+    "module": "labtest",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/orders/route.ts",
+    "routePath": "/api/labtest/orders",
+    "module": "labtest",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/orders/[id]/document-preview/route.ts",
+    "routePath": "/api/labtest/orders/[id]/document-preview",
+    "module": "labtest",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/release/route.ts",
+    "routePath": "/api/labtest/release",
+    "module": "labtest",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/reports/summary/route.ts",
+    "routePath": "/api/labtest/reports/summary",
+    "module": "labtest",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/requirements/route.ts",
+    "routePath": "/api/labtest/requirements",
+    "module": "labtest",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/labtest/results/route.ts",
+    "routePath": "/api/labtest/results",
+    "module": "labtest",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/samples/route.ts",
+    "routePath": "/api/labtest/samples",
+    "module": "labtest",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/send/route.ts",
+    "routePath": "/api/labtest/send",
+    "module": "labtest",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/settings/route.ts",
+    "routePath": "/api/labtest/settings",
+    "module": "labtest",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/templates/route.ts",
+    "routePath": "/api/labtest/templates",
+    "module": "labtest",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/templates/v2/route.ts",
+    "routePath": "/api/labtest/templates/v2",
+    "module": "labtest",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/validate/route.ts",
+    "routePath": "/api/labtest/validate",
+    "module": "labtest",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/labtest/workbench/[area]/route.ts",
+    "routePath": "/api/labtest/workbench/[area]",
+    "module": "labtest",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireLabTestPermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/login/route.ts",
+    "routePath": "/api/login",
+    "module": "login",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/logout/route.ts",
+    "routePath": "/api/logout",
+    "module": "logout",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/marcaje/raw/route.ts",
+    "routePath": "/api/marcaje/raw",
+    "module": "marcaje",
+    "methods": [],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/marcaje/status/route.ts",
+    "routePath": "/api/marcaje/status",
+    "module": "marcaje",
+    "methods": [],
+    "authMarkers": [
+      "getSessionUser"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/me/route.ts",
+    "routePath": "/api/me",
+    "module": "me",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/cie10/route.ts",
+    "routePath": "/api/medical/cie10",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/medical/cie10/[id]/route.ts",
+    "routePath": "/api/medical/cie10/[id]",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/medical/cie10/[id]/toggle-active/route.ts",
+    "routePath": "/api/medical/cie10/[id]/toggle-active",
+    "module": "medical",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/document-branding/route.ts",
+    "routePath": "/api/medical/document-branding",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/medical/document-branding/[id]/route.ts",
+    "routePath": "/api/medical/document-branding/[id]",
+    "module": "medical",
+    "methods": [
+      "DELETE",
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/document-settings/route.ts",
+    "routePath": "/api/medical/document-settings",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]",
+    "module": "medical",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/close/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/close",
+    "module": "medical",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/draft/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/draft",
+    "module": "medical",
+    "methods": [
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/orders/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/orders",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/orders/[orderId]/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/orders/[orderId]",
+    "module": "medical",
+    "methods": [
+      "DELETE",
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/pdf/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/pdf",
+    "module": "medical",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/pdf-binary/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/pdf-binary",
+    "module": "medical",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/reconsultations/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/reconsultations",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/results/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/results",
+    "module": "medical",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/snapshot/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/snapshot",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/supplies/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/supplies",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/encounters/[encounterId]/supplies/[supplyId]/route.ts",
+    "routePath": "/api/medical/encounters/[encounterId]/supplies/[supplyId]",
+    "module": "medical",
+    "methods": [
+      "DELETE"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/inventory/search/route.ts",
+    "routePath": "/api/medical/inventory/search",
+    "module": "medical",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/orders/[orderId]/result/route.ts",
+    "routePath": "/api/medical/orders/[orderId]/result",
+    "module": "medical",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/orders/[orderId]/status/route.ts",
+    "routePath": "/api/medical/orders/[orderId]/status",
+    "module": "medical",
+    "methods": [
+      "PATCH"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/services/search/route.ts",
+    "routePath": "/api/medical/services/search",
+    "module": "medical",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/templates/route.ts",
+    "routePath": "/api/medical/templates",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/medical/templates/[id]/route.ts",
+    "routePath": "/api/medical/templates/[id]",
+    "module": "medical",
+    "methods": [
+      "DELETE",
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/vitals-templates/route.ts",
+    "routePath": "/api/medical/vitals-templates",
+    "module": "medical",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse"
+    ]
+  },
+  {
+    "rel": "app/api/medical/vitals-templates/[id]/route.ts",
+    "routePath": "/api/medical/vitals-templates/[id]",
+    "module": "medical",
+    "methods": [
+      "DELETE",
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/medical/worklist/route.ts",
+    "routePath": "/api/medical/worklist",
+    "module": "medical",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/memberships/clients/route.ts",
+    "routePath": "/api/memberships/clients",
+    "module": "memberships",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/memberships/config/route.ts",
+    "routePath": "/api/memberships/config",
+    "module": "memberships",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/memberships/contracts/route.ts",
+    "routePath": "/api/memberships/contracts",
+    "module": "memberships",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/memberships/contracts/[id]/route.ts",
+    "routePath": "/api/memberships/contracts/[id]",
+    "module": "memberships",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/memberships/contracts/[id]/payment/route.ts",
+    "routePath": "/api/memberships/contracts/[id]/payment",
+    "module": "memberships",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/memberships/contracts/[id]/status/route.ts",
+    "routePath": "/api/memberships/contracts/[id]/status",
+    "module": "memberships",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/memberships/dashboard/route.ts",
+    "routePath": "/api/memberships/dashboard",
+    "module": "memberships",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/memberships/plans/route.ts",
+    "routePath": "/api/memberships/plans",
+    "module": "memberships",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/memberships/plans/[id]/status/route.ts",
+    "routePath": "/api/memberships/plans/[id]/status",
+    "module": "memberships",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/membresias/clientes/route.ts",
+    "routePath": "/api/membresias/clientes",
+    "module": "membresias",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/membresias/config/route.ts",
+    "routePath": "/api/membresias/config",
+    "module": "membresias",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/membresias/contratos/route.ts",
+    "routePath": "/api/membresias/contratos",
+    "module": "membresias",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/membresias/contratos/[id]/route.ts",
+    "routePath": "/api/membresias/contratos/[id]",
+    "module": "membresias",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/membresias/contratos/[id]/estado/route.ts",
+    "routePath": "/api/membresias/contratos/[id]/estado",
+    "module": "membresias",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/membresias/contratos/[id]/pago/route.ts",
+    "routePath": "/api/membresias/contratos/[id]/pago",
+    "module": "membresias",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/membresias/dashboard/route.ts",
+    "routePath": "/api/membresias/dashboard",
+    "module": "membresias",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/membresias/planes/route.ts",
+    "routePath": "/api/membresias/planes",
+    "module": "membresias",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/membresias/planes/[id]/estado/route.ts",
+    "routePath": "/api/membresias/planes/[id]/estado",
+    "module": "membresias",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/public/turnos/route.ts",
+    "routePath": "/api/public/turnos",
+    "module": "public",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/reception/service-requests/route.ts",
+    "routePath": "/api/reception/service-requests",
+    "module": "reception",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/reception/service-requests/[id]/route.ts",
+    "routePath": "/api/reception/service-requests/[id]",
+    "module": "reception",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/terminology/icd10/search/route.ts",
+    "routePath": "/api/terminology/icd10/search",
+    "module": "terminology",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/text-docs/route.ts",
+    "routePath": "/api/text-docs",
+    "module": "text-docs",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "z.enum"
+    ]
+  },
+  {
+    "rel": "app/api/text-docs/[id]/route.ts",
+    "routePath": "/api/text-docs/[id]",
+    "module": "text-docs",
+    "methods": [
+      "GET",
+      "PUT"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object"
+    ]
+  },
+  {
+    "rel": "app/api/text-docs/export/route.ts",
+    "routePath": "/api/text-docs/export",
+    "module": "text-docs",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object"
+    ]
+  },
+  {
+    "rel": "app/api/text-docs/upload/route.ts",
+    "routePath": "/api/text-docs/upload",
+    "module": "text-docs",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [
+      "requireAuth"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/upload/image/route.ts",
+    "routePath": "/api/upload/image",
+    "module": "upload",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/upload/logo/route.ts",
+    "routePath": "/api/upload/logo",
+    "module": "upload",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/users/route.ts",
+    "routePath": "/api/users",
+    "module": "users",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth",
+      "requirePermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/users/[id]/hr-link/route.ts",
+    "routePath": "/api/users/[id]/hr-link",
+    "module": "users",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [
+      "requireAuth",
+      "requirePermission"
+    ],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/users/[id]/link-hr/route.ts",
+    "routePath": "/api/users/[id]/link-hr",
+    "module": "users",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth",
+      "requirePermission"
+    ],
+    "validationMarkers": [
+      "safeParse",
+      "zod",
+      "z.object",
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/users/[id]/unlink-hr/route.ts",
+    "routePath": "/api/users/[id]/unlink-hr",
+    "module": "users",
+    "methods": [],
+    "authMarkers": [
+      "requireAuth",
+      "requirePermission"
+    ],
+    "validationMarkers": [
+      "withApiErrorHandling"
+    ]
+  },
+  {
+    "rel": "app/api/whatsapp/send/route.ts",
+    "routePath": "/api/whatsapp/send",
+    "module": "whatsapp",
+    "methods": [
+      "POST"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  },
+  {
+    "rel": "app/api/whatsapp/threads/route.ts",
+    "routePath": "/api/whatsapp/threads",
+    "module": "whatsapp",
+    "methods": [
+      "GET"
+    ],
+    "authMarkers": [],
+    "validationMarkers": []
+  }
+]

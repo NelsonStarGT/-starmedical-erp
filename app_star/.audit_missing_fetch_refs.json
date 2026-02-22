@@ -1,0 +1,34 @@
+[
+  {
+    "rel": "app/admin/configuracion/marcaje/page.tsx",
+    "url": "/api/attendance/punch-tokens${params}"
+  },
+  {
+    "rel": "app/admin/inventario/movimientos/page.tsx",
+    "url": "/api/inventario/reports/cierre-sat/export/${format}?${params.toString()}"
+  },
+  {
+    "rel": "app/hr/employees/page.tsx",
+    "url": "/api/hr/disciplinary-actions/${actionId}/submit"
+  },
+  {
+    "rel": "app/hr/employees/page.tsx",
+    "url": "/api/hr/disciplinary-actions/${actionId}/approve"
+  },
+  {
+    "rel": "app/hr/employees/page.tsx",
+    "url": "/api/hr/disciplinary-actions/${actionId}/reject"
+  },
+  {
+    "rel": "app/hr/payroll/page.tsx",
+    "url": "/api/hr/payroll${qs ? "
+  },
+  {
+    "rel": "app/marcaje/page.tsx",
+    "url": "/api/marcaje/status${qs}"
+  },
+  {
+    "rel": "app/marcaje/tokens/page.tsx",
+    "url": "/api/attendance/punch-tokens${qs}"
+  }
+]

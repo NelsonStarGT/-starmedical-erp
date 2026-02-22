@@ -1,0 +1,4 @@
+-- Legacy migration placeholder adopted from remote Supabase history.
+-- Migration: 00000000000000_baseline_init
+-- Purpose: align Prisma metadata; schema is captured by later migrations and drift-fix.
+-- no-op

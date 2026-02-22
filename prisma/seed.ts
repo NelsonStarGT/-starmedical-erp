@@ -23,6 +23,7 @@ const {
   CrmTaskPriority,
   CrmServiceType,
   QuoteType,
+  MembershipPlanSegment,
   HrEmploymentType,
   HrEmployeeStatus,
   HrEmployeeDocumentType,
@@ -1212,6 +1213,42 @@ async function main() {
       showBankBlock: true
     }
   });
+
+  const membershipCategories = [
+    { name: "Individual", segment: MembershipPlanSegment.B2C, sortOrder: 10 },
+    { name: "Escolar", segment: MembershipPlanSegment.B2C, sortOrder: 20 },
+    { name: "Familiar", segment: MembershipPlanSegment.B2C, sortOrder: 30 },
+    { name: "Familiar Plus", segment: MembershipPlanSegment.B2C, sortOrder: 40 },
+    { name: "Oro", segment: MembershipPlanSegment.B2B, sortOrder: 10 },
+    { name: "Plata", segment: MembershipPlanSegment.B2B, sortOrder: 20 },
+    { name: "Platino", segment: MembershipPlanSegment.B2B, sortOrder: 30 },
+    { name: "Salud Ocupacional", segment: MembershipPlanSegment.B2B, sortOrder: 40 }
+  ];
+
+  for (const category of membershipCategories) {
+    await prisma.membershipPlanCategory
+      .upsert({
+        where: {
+          name_segment: {
+            name: category.name,
+            segment: category.segment
+          }
+        },
+        update: {
+          isActive: true,
+          sortOrder: category.sortOrder
+        },
+        create: {
+          name: category.name,
+          segment: category.segment,
+          isActive: true,
+          sortOrder: category.sortOrder
+        }
+      })
+      .catch((err) => {
+        console.error("Seed membership category failed", category, err);
+      });
+  }
 
   const currentYear = new Date().getFullYear();
   await prisma.sequenceCounter

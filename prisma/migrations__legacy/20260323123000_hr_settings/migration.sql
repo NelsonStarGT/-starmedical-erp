@@ -1,0 +1,4 @@
+-- Legacy migration placeholder adopted from remote Supabase history.
+-- Migration: 20260323123000_hr_settings
+-- Purpose: align Prisma metadata; schema is captured by later migrations and drift-fix.
+-- no-op

@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bars3Icon, PowerIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { navItems } from "./Sidebar";
+import { navSections } from "./nav";
+
+const navItems = navSections.flatMap((section) => section.items ?? []);
 
 export default function Header() {
   const router = useRouter();
@@ -88,13 +90,13 @@ export default function Header() {
             <nav className="flex-1 overflow-y-auto p-3 space-y-1">
               {navItems.map((item) => (
                 <Link
-                  key={item.name}
+                  key={item.href}
                   href={item.href}
                   className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 border border-slate-200"
                   onClick={() => setMobileOpen(false)}
                 >
-                  <item.icon className="h-5 w-5" />
-                  {item.name}
+                  {item.icon ? <item.icon className="h-5 w-5" /> : null}
+                  {item.label}
                 </Link>
               ))}
             </nav>

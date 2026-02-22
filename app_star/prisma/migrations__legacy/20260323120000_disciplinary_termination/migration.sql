@@ -1,0 +1,4 @@
+-- Legacy migration placeholder adopted from remote Supabase history.
+-- Migration: 20260323120000_disciplinary_termination
+-- Purpose: align Prisma metadata; schema is captured by later migrations and drift-fix.
+-- no-op
