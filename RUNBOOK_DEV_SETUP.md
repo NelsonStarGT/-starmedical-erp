@@ -1,43 +1,48 @@
-# Runbook de setup (dev/staging)
+# Runbook de setup local (Docker + Prisma)
 
-## Variables requeridas
-- `DATABASE_URL`: cadena completa a Postgres (Supabase: usar puerto writer, no pooler para migraciones).
-- `DIRECT_URL` (opcional): URL directa sin pooler para migraciones/seed si usas pooler para `DATABASE_URL`.
-- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` si el proyecto las necesita ya configuradas.
+## Ruta de trabajo correcta
+- Trabaja siempre desde: `~/Documents/STARMEDICAL/app_star`
 
-## Setup rápido (dev local)
-1. Instalar dependencias: `npm install`
-2. Preparar DB y datos mínimos:  
-   `npm run dev:setup`
-   - Ejecuta `prisma generate`
-   - Aplica migraciones con `prisma migrate deploy` (no resetea)
-   - Corre seeds idempotentes (RRHH, RBAC, catálogos básicos)
-3. Levantar la app: `npm run dev`
+## One-command up (DB vacía + migraciones completas)
+1. `npm install`
+2. `npm run db:reset`
+3. `npm run dev`
 
-## Seeds
-- Ejecutar manualmente: `npm run db:seed`
-- Idempotentes: se pueden correr varias veces sin duplicar (usa `upsert`/`createMany` con `skipDuplicates` donde aplica).
-- No usa reset; conserva datos existentes.
+`npm run db:reset` ejecuta:
+- `docker compose down -v --remove-orphans`
+- `docker compose up -d --remove-orphans`
+- `npm run db:wait`
+- `npx prisma migrate deploy`
+- `npx prisma db seed` (si hay seed configurado)
 
-## Reset explícito (solo dev local)
-- `npm run dev:reset`  
-  Internamente corre `prisma migrate reset --force` y luego `npm run db:seed`. Bloqueado si `NODE_ENV=production`.
+## Estrategia de migraciones activa
+- Cadena activa en `prisma/migrations`: desde `20260126230520_baseline` en adelante.
+- Histórico incremental previo movido a `prisma/migrations__legacy_prebaseline_20260222` (no leído por Prisma en deploy).
+- Objetivo: evitar duplicados/drift entre snapshot baseline y migraciones históricas antiguas.
 
-## Staging / entornos compartidos
-- **No usar reset.**  
-  Ejecutar solo:
-  ```
-  npm run db:generate
-  npm run db:migrate:deploy
-  npm run db:seed
-  ```
-  Asegura apuntar al writer (no pooler) para migraciones.
+## Comandos de limpieza Docker (manuales)
+- `docker compose down --remove-orphans`
+- `docker compose down -v --remove-orphans`
 
-## Verificación rápida
-- `npm run qa` (lint + typecheck + tests)
-- UI: `/hr`, `/hr/employees`, `/hr/employees/pending`
-- Quick-create → aparece en pendientes → wizard → aparece en activos.
+## Verificación de puerto 5432
+- Comando:
+  - `lsof -nP -iTCP:5432 -sTCP:LISTEN`
+- Si hay conflicto:
+  - Solución A: cambiar `docker-compose.yml` a `5433:5432`
+  - Actualizar `DATABASE_URL` a puerto `5433`
+  - Ejemplo: `postgresql://postgres:postgres@localhost:5433/starmedical?schema=public`
 
-## Troubleshooting
-- Pooler/DB offline: revisa `DATABASE_URL`; para Supabase usa el writer en migraciones y `DIRECT_URL` si necesitas saltar el pooler.
-- Migraciones con drift: `npm run db:check` (validate + migrate status); no usar `prisma migrate dev` en prod/pooler.
+## Troubleshooting rápido
+- Error `P1001` (DB no reachable):
+  - No corras migraciones manuales antes del readiness.
+  - Usa `npm run db:wait` y luego `npm run db:migrate:deploy`.
+- Contenedores huérfanos/orphans:
+  - `docker compose down --remove-orphans`
+  - Si persiste: `docker compose down -v --remove-orphans` y luego `npm run db:reset`
+- Diagnóstico de DB:
+  - `docker compose ps`
+  - `docker logs --tail 120 starmedical-db`
+
+## Qué NO hacer
+- No ejecutar `prisma migrate deploy` antes de que Postgres esté listo.
+- No pegar líneas con `#` en terminal como si fueran comando (en `zsh` puede romper el pegado/ejecución).
