@@ -54,3 +54,25 @@
 - Suite legacy actual: `tests/memberships.db.test.ts` (depende de runtime/schema legacy).
 - Ticket de seguimiento: `TEST-LEGACY-001`.
 - En CI se ejecuta baseline (`lint`, `typecheck`, `test:baseline`), no `test:legacy`.
+
+## Estabilidad: 5 comandos (release checklist)
+1. `npm install`
+2. `npm run db:reset`
+3. `npm run lint`
+4. `npm run typecheck`
+5. `npm run build && npm test`
+
+Esperado: todos en `PASS`, con `test:legacy` fuera del gate principal.
+
+## Legacy: estado actual y reactivación
+- Baseline que sí bloquea releases: `npm test` / `npm run test:baseline`.
+- Legacy aislado: `npm run test:legacy` (skip esperado por defecto).
+- Legacy real bajo demanda: `npm run test:legacy:run` (activa `RUN_LEGACY_TESTS=1`).
+- Causa conocida del fallo legacy real hoy: dependencia en `createPlanCategory` y desalineación de schema/runtime respecto al estado actual.
+
+### Plan corto para reactivar `memberships.db.test.ts` (3 pasos)
+1. Alinear helpers legacy con el schema actual (eliminar dependencia obsoleta en `createPlanCategory`).
+2. Crear harness estable de integración (fixtures deterministas + setup/teardown aislado por suite).
+3. Retirar `@ts-nocheck` de `tests/memberships.db.test.ts` y cerrar deuda de tipos.
+
+Ticket técnico abierto: `TECHDEBT-TS-001` (quitar `@ts-nocheck` en `tests/memberships.db.test.ts`).
