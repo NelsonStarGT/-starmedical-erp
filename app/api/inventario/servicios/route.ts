@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { roleFromRequest } from "@/lib/api/auth";
-import { serviciosMock } from "@/lib/mock/servicios";
+import { inventoryServiceUnavailable, mapFallbackServicesForApi, runtimeFallbackEnabled } from "@/lib/inventory/runtime-fallback";
 
 export async function GET(req: NextRequest) {
   try {
@@ -45,11 +45,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ data });
   } catch (err) {
     console.error(err);
-    const data = serviciosMock.map((s) => ({
-      ...s,
-      categoriaNombre: undefined,
-      subcategoriaNombre: undefined
-    }));
-    return NextResponse.json({ data, warning: "Usando datos mock; verifica migraciones/DB" }, { status: 200 });
+    if (!runtimeFallbackEnabled()) {
+      return NextResponse.json(
+        inventoryServiceUnavailable("inventario.servicios", "No se pudo consultar servicios en este entorno."),
+        { status: 503 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, data: mapFallbackServicesForApi(), source: "runtime_fallback" }, { status: 200 });
   }
 }

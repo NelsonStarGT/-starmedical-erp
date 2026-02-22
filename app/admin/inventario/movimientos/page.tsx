@@ -5,7 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Movimiento } from "@/lib/types/inventario";
 import { MovimientoCard } from "@/components/inventario/MovimientoCard";
 import { ProductSelector } from "@/components/inventario/ProductSelector";
-import { sucursalesInvMock } from "@/lib/mock/inventario-catalogos";
+import ServiceUnavailableNotice from "@/components/inventario/ServiceUnavailableNotice";
+import { inventoryReferenceData } from "@/lib/inventory/runtime-fallback";
+import { parseServiceUnavailablePayload, type ServiceUnavailablePayload } from "@/lib/inventory/runtime-contract";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type MovementApi = {
@@ -57,6 +59,7 @@ export default function MovimientosPage() {
   });
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Array<{ value: string; label: string }>>([]);
+  const [loadIssue, setLoadIssue] = useState<ServiceUnavailablePayload | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cierreFilters, setCierreFilters] = useState({
@@ -87,14 +90,23 @@ export default function MovimientosPage() {
     try {
       const res = await fetch("/api/inventario/productos", { headers });
       const data = await res.json();
-      if (res.ok) {
-        setProducts(
-          (data.data || []).map((p: any) => ({
-            value: p.id,
-            label: `${p.codigo} - ${p.nombre}`
-          }))
-        );
+      if (!res.ok) {
+        const unavailable = parseServiceUnavailablePayload(res.status, data);
+        if (unavailable) {
+          setLoadIssue(unavailable);
+          setProducts([]);
+          return;
+        }
+        throw new Error(data?.error || "No se pudieron cargar productos");
       }
+
+      setLoadIssue(null);
+      setProducts(
+        (data.data || []).map((p: any) => ({
+          value: p.id,
+          label: `${p.codigo} - ${p.nombre}`
+        }))
+      );
     } catch (err) {
       console.error(err);
     }
@@ -298,6 +310,7 @@ export default function MovimientosPage() {
           Cierre SAT
         </button>
       </div>
+      <ServiceUnavailableNotice issue={loadIssue} />
 
       {tab === "report" && (
         <div className="space-y-4">
@@ -329,7 +342,7 @@ export default function MovimientosPage() {
                   label="Sucursal"
                   value={filters.branchId}
                   onChange={(v) => setFilters({ ...filters, branchId: (v as string) || "" })}
-                  options={[{ value: "", label: "Todas" }, ...sucursalesInvMock.map((s) => ({ value: s.id, label: s.nombre }))]}
+                  options={[{ value: "", label: "Todas" }, ...inventoryReferenceData.branches.map((s) => ({ value: s.id, label: s.nombre }))]}
                   includeAllOption={false}
                 />
                 <SearchableSelect
@@ -480,12 +493,12 @@ export default function MovimientosPage() {
                 placeholder="Cantidad"
                 value={draft.cantidad || 0}
                 onChange={(e) => setDraft({ ...draft, cantidad: Number(e.target.value) })}
-                className="rounded-xl border border-[#E5E5E7] px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
               />
               <select
                 value={draft.tipo}
                 onChange={(e) => setDraft({ ...draft, tipo: e.target.value as Movimiento["tipo"] })}
-                className="rounded-xl border border-[#E5E5E7] px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
               >
                 <option value="Entrada">Entrada</option>
                 <option value="Salida">Salida</option>
@@ -494,10 +507,10 @@ export default function MovimientosPage() {
               <select
                 value={draft.sucursalId || ""}
                 onChange={(e) => setDraft({ ...draft, sucursalId: e.target.value })}
-                className="rounded-xl border border-[#E5E5E7] px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
               >
                 <option value="">Sucursal</option>
-                {sucursalesInvMock.map((s) => (
+                {inventoryReferenceData.branches.map((s) => (
                   <option key={s.id} value={s.id}>{s.nombre}</option>
                 ))}
               </select>
@@ -505,13 +518,13 @@ export default function MovimientosPage() {
                 type="date"
                 value={draft.fecha || ""}
                 onChange={(e) => setDraft({ ...draft, fecha: e.target.value })}
-                className="rounded-xl border border-[#E5E5E7] px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
               />
               <input
                 placeholder="Comentario"
                 value={draft.comentario || ""}
                 onChange={(e) => setDraft({ ...draft, comentario: e.target.value })}
-                className="md:col-span-2 rounded-xl border border-[#E5E5E7] px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+                className="md:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
               />
               <div>
                 <button
@@ -568,7 +581,7 @@ export default function MovimientosPage() {
                   label="Sucursal"
                   value={cierreFilters.branchId}
                   onChange={(v) => setCierreFilters({ ...cierreFilters, branchId: (v as string) || "" })}
-                  options={[{ value: "", label: "Todas" }, ...sucursalesInvMock.map((s) => ({ value: s.id, label: s.nombre }))]}
+                  options={[{ value: "", label: "Todas" }, ...inventoryReferenceData.branches.map((s) => ({ value: s.id, label: s.nombre }))]}
                   includeAllOption={false}
                 />
               </div>

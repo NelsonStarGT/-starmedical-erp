@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ProductCard } from "@/components/inventario/ProductCard";
 import { ProductModalV2 } from "@/components/inventario/ProductModalV2";
+import ServiceUnavailableNotice from "@/components/inventario/ServiceUnavailableNotice";
 import { SearchFilterBar } from "@/components/inventory/SearchFilterBar";
-import { categoriasProductoMock, subcategoriasMock, inventoryAreasMock, proveedoresMock } from "@/lib/mock/inventario-catalogos";
-import { movimientosMock } from "@/lib/mock/movimientos";
 import { InventoryFilters, emptyInventoryFilters, filterProductos, pruneSubcategorias } from "@/lib/inventory/filters";
+import { inventoryReferenceData } from "@/lib/inventory/runtime-fallback";
+import { parseServiceUnavailablePayload, type ServiceUnavailablePayload } from "@/lib/inventory/runtime-contract";
 import { Producto, hasPermission } from "@/lib/types/inventario";
 import { toTitleCase } from "@/lib/utils";
 
@@ -21,19 +22,20 @@ export default function ProductosPage() {
   const [draft, setDraft] = useState<Producto | null>(null);
   const [filters, setFilters] = useState<InventoryFilters>(emptyInventoryFilters);
   const [loading, setLoading] = useState(false);
+  const [loadIssue, setLoadIssue] = useState<ServiceUnavailablePayload | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [applyToFiltered, setApplyToFiltered] = useState(false);
 
   const categoriaNames = useMemo(
-    () => categoriasProductoMock.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.nombre }), {}),
+    () => inventoryReferenceData.productCategories.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.nombre }), {}),
     []
   );
   const subcategoriaNames = useMemo(
-    () => subcategoriasMock.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.nombre }), {}),
+    () => inventoryReferenceData.productSubcategories.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.nombre }), {}),
     []
   );
   const subcategoriaToCat = useMemo(
-    () => subcategoriasMock.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.categoriaId }), {}),
+    () => inventoryReferenceData.productSubcategories.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.categoriaId }), {}),
     []
   );
 
@@ -42,8 +44,17 @@ export default function ProductosPage() {
       setLoading(true);
       try {
         const res = await fetch("/api/inventario/productos", { headers: { "x-role": currentRole } });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        const unavailable = parseServiceUnavailablePayload(res.status, data);
+        if (unavailable) {
+          setLoadIssue(unavailable);
+          setProductos([]);
+          setSelectedIds(new Set());
+          return;
+        }
+
         if (res.ok) {
+          setLoadIssue(null);
           setProductos(data.data || []);
           setSelectedIds(new Set());
         } else {
@@ -65,8 +76,8 @@ export default function ProductosPage() {
         catalogos: {
           categorias: categoriaNames,
           subcategorias: subcategoriaNames,
-          areas: inventoryAreasMock.reduce<Record<string, string>>((acc, area) => ({ ...acc, [area.id]: area.nombre }), {}),
-          proveedores: proveedoresMock.reduce<Record<string, string>>((acc, prov) => ({ ...acc, [prov.id]: prov.nombre }), {})
+          areas: inventoryReferenceData.inventoryAreas.reduce<Record<string, string>>((acc, area) => ({ ...acc, [area.id]: area.nombre }), {}),
+          proveedores: inventoryReferenceData.suppliers.reduce<Record<string, string>>((acc, prov) => ({ ...acc, [prov.id]: prov.nombre }), {})
         }
       }),
     [productos, search, filters, categoriaNames, subcategoriaNames]
@@ -74,10 +85,10 @@ export default function ProductosPage() {
 
   const options = useMemo(
     () => ({
-      categorias: categoriasProductoMock.map((c) => ({ value: c.id, label: toTitleCase(c.nombre) })),
-      subcategorias: subcategoriasMock.map((s) => ({ value: s.id, label: toTitleCase(s.nombre) })),
-      areas: inventoryAreasMock.map((a) => ({ value: a.id, label: toTitleCase(a.nombre) })),
-      proveedores: proveedoresMock.map((p) => ({ value: p.id, label: toTitleCase(p.nombre) })),
+      categorias: inventoryReferenceData.productCategories.map((c) => ({ value: c.id, label: toTitleCase(c.nombre) })),
+      subcategorias: inventoryReferenceData.productSubcategories.map((s) => ({ value: s.id, label: toTitleCase(s.nombre) })),
+      areas: inventoryReferenceData.inventoryAreas.map((a) => ({ value: a.id, label: toTitleCase(a.nombre) })),
+      proveedores: inventoryReferenceData.suppliers.map((p) => ({ value: p.id, label: toTitleCase(p.nombre) })),
       estados: [
         { value: "Activo", label: "Activo" },
         { value: "Inactivo", label: "Inactivo" }
@@ -142,8 +153,15 @@ export default function ProductosPage() {
     setLoading(true);
     try {
       const ref = await fetch("/api/inventario/productos", { headers: { "x-role": currentRole } });
-      const refData = await ref.json();
-      if (ref.ok) setProductos(refData.data || []);
+      const refData = await ref.json().catch(() => ({}));
+      const unavailable = parseServiceUnavailablePayload(ref.status, refData);
+      if (unavailable) {
+        setLoadIssue(unavailable);
+        setProductos([]);
+      } else if (ref.ok) {
+        setLoadIssue(null);
+        setProductos(refData.data || []);
+      }
     } finally {
       setLoading(false);
     }
@@ -177,6 +195,7 @@ export default function ProductosPage() {
               Nuevo producto
             </button>
           </div>
+          <ServiceUnavailableNotice issue={loadIssue} />
           <SearchFilterBar
             search={search}
             onSearchChange={setSearch}
@@ -250,7 +269,7 @@ export default function ProductosPage() {
               onDelete={
                 canEdit
                   ? () => {
-                      const hasMovs = movimientosMock.some((m) => m.productoId === p.id);
+                      const hasMovs = inventoryReferenceData.movementSeed.some((m) => m.productoId === p.id);
                       if (hasMovs) {
                         alert("El producto tiene movimientos; usa Desactivar.");
                         return;

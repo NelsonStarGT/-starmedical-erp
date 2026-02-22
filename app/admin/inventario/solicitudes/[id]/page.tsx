@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
-import { proveedoresMock } from "@/lib/mock/inventario-catalogos";
+import { inventoryReferenceData } from "@/lib/inventory/runtime-fallback";
 import { PurchaseRequest, PurchaseRequestStatus } from "@/lib/types/inventario";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +17,7 @@ export default function PurchaseRequestDetailPage() {
   const token = process.env.NEXT_PUBLIC_INVENTORY_TOKEN;
   const [request, setRequest] = useState<PurchaseRequest | null>(null);
   const [loading, setLoading] = useState(false);
-  const [supplierId, setSupplierId] = useState<string>(proveedoresMock[0]?.id || "");
+  const [supplierId, setSupplierId] = useState<string>(inventoryReferenceData.suppliers[0]?.id || "");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creatingOrder, setCreatingOrder] = useState(false);
@@ -192,7 +192,7 @@ export default function PurchaseRequestDetailPage() {
                 label="Proveedor"
                 value={supplierId}
                 onChange={(v) => setSupplierId((v as string) || "")}
-                options={proveedoresMock.map((p) => ({ value: p.id, label: p.nombre }))}
+                options={inventoryReferenceData.suppliers.map((p) => ({ value: p.id, label: p.nombre }))}
                 includeAllOption={false}
               />
               <div className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-600">

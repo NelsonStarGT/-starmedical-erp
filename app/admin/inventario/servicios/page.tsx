@@ -6,10 +6,11 @@ import { Modal } from "@/components/ui/Modal";
 import { ServiceCard } from "@/components/inventario/ServiceCard";
 import { ServiceModal } from "@/components/inventario/ServiceModal";
 import { ServiceModalV2 } from "@/components/inventario/ServiceModalV2";
+import ServiceUnavailableNotice from "@/components/inventario/ServiceUnavailableNotice";
 import { SearchFilterBar } from "@/components/inventory/SearchFilterBar";
-import { categoriasServicioMock, serviceSubcategoriasMock, proveedoresMock } from "@/lib/mock/inventario-catalogos";
-import { combosMock } from "@/lib/mock/combos";
 import { InventoryFilters, emptyInventoryFilters, filterServicios, pruneSubcategorias } from "@/lib/inventory/filters";
+import { inventoryReferenceData } from "@/lib/inventory/runtime-fallback";
+import { parseServiceUnavailablePayload, type ServiceUnavailablePayload } from "@/lib/inventory/runtime-contract";
 import { Servicio, hasPermission } from "@/lib/types/inventario";
 import { toTitleCase } from "@/lib/utils";
 
@@ -23,24 +24,25 @@ export default function ServiciosPage() {
   const [draft, setDraft] = useState<Servicio | null>(null);
   const [filters, setFilters] = useState<InventoryFilters>(emptyInventoryFilters);
   const [loading, setLoading] = useState(false);
+  const [loadIssue, setLoadIssue] = useState<ServiceUnavailablePayload | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [applyToFiltered, setApplyToFiltered] = useState(false);
   const [importModal, setImportModal] = useState<null | "servicios" | "implementos">(null);
 
   const categoriaNames = useMemo(
-    () => categoriasServicioMock.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.nombre }), {}),
+    () => inventoryReferenceData.serviceCategories.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.nombre }), {}),
     []
   );
   const subcategoriaNames = useMemo(
-    () => serviceSubcategoriasMock.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.nombre }), {}),
+    () => inventoryReferenceData.serviceSubcategories.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.nombre }), {}),
     []
   );
   const subcategoriaToCat = useMemo(
-    () => serviceSubcategoriasMock.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.categoriaId }), {}),
+    () => inventoryReferenceData.serviceSubcategories.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.categoriaId }), {}),
     []
   );
   const categoriaAreaMap = useMemo(
-    () => categoriasServicioMock.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.area }), {}),
+    () => inventoryReferenceData.serviceCategories.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.area }), {}),
     []
   );
 
@@ -49,8 +51,16 @@ export default function ServiciosPage() {
       setLoading(true);
       try {
         const res = await fetch("/api/inventario/servicios", { headers: { "x-role": currentRole } });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        const unavailable = parseServiceUnavailablePayload(res.status, data);
+        if (unavailable) {
+          setLoadIssue(unavailable);
+          setServicios([]);
+          setSelectedIds(new Set());
+          return;
+        }
         if (res.ok) {
+          setLoadIssue(null);
           setServicios(data.data || []);
           setSelectedIds(new Set());
         }
@@ -71,7 +81,7 @@ export default function ServiciosPage() {
           categorias: categoriaNames,
           subcategorias: subcategoriaNames,
           areas: Object.values(categoriaAreaMap).reduce<Record<string, string>>((acc, area) => ({ ...acc, [area]: area }), {}),
-          proveedores: proveedoresMock.reduce<Record<string, string>>((acc, prov) => ({ ...acc, [prov.id]: prov.nombre }), {})
+          proveedores: inventoryReferenceData.suppliers.reduce<Record<string, string>>((acc, prov) => ({ ...acc, [prov.id]: prov.nombre }), {})
         },
         categoriaAreas: categoriaAreaMap
       }),
@@ -84,10 +94,10 @@ export default function ServiciosPage() {
 
   const options = useMemo(
     () => ({
-      categorias: categoriasServicioMock.map((c) => ({ value: c.id, label: toTitleCase(c.nombre) })),
-      subcategorias: serviceSubcategoriasMock.map((s) => ({ value: s.id, label: toTitleCase(s.nombre) })),
-      areas: Array.from(new Set(categoriasServicioMock.map((c) => c.area))).map((area) => ({ value: area, label: formatArea(area) })),
-      proveedores: proveedoresMock.map((p) => ({ value: p.id, label: toTitleCase(p.nombre) })),
+      categorias: inventoryReferenceData.serviceCategories.map((c) => ({ value: c.id, label: toTitleCase(c.nombre) })),
+      subcategorias: inventoryReferenceData.serviceSubcategories.map((s) => ({ value: s.id, label: toTitleCase(s.nombre) })),
+      areas: Array.from(new Set(inventoryReferenceData.serviceCategories.map((c) => c.area))).map((area) => ({ value: area, label: formatArea(area) })),
+      proveedores: inventoryReferenceData.suppliers.map((p) => ({ value: p.id, label: toTitleCase(p.nombre) })),
       estados: [
         { value: "Activo", label: "Activo" },
         { value: "Inactivo", label: "Inactivo" }
@@ -157,8 +167,15 @@ export default function ServiciosPage() {
     setLoading(true);
     try {
       const ref = await fetch("/api/inventario/servicios", { headers: { "x-role": currentRole } });
-      const refData = await ref.json();
-      if (ref.ok) setServicios(refData.data || []);
+      const refData = await ref.json().catch(() => ({}));
+      const unavailable = parseServiceUnavailablePayload(ref.status, refData);
+      if (unavailable) {
+        setLoadIssue(unavailable);
+        setServicios([]);
+      } else if (ref.ok) {
+        setLoadIssue(null);
+        setServicios(refData.data || []);
+      }
     } finally {
       setLoading(false);
     }
@@ -194,6 +211,7 @@ export default function ServiciosPage() {
               </button>
             </div>
           </div>
+          <ServiceUnavailableNotice issue={loadIssue} />
           <SearchFilterBar
             search={search}
             onSearchChange={setSearch}
@@ -266,7 +284,7 @@ export default function ServiciosPage() {
               onDelete={
                 canEdit
                   ? () => {
-                      const usedInCombo = combosMock.some((c) => (c.serviciosAsociados || []).includes(s.id));
+                      const usedInCombo = inventoryReferenceData.comboSeed.some((c) => (c.serviciosAsociados || []).includes(s.id));
                       if (usedInCombo) {
                         alert("El servicio está en un combo; usa Desactivar.");
                         return;

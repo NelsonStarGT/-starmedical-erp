@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { PurchaseRequestModal } from "@/components/inventario/PurchaseRequestModal";
-import { sucursalesInvMock } from "@/lib/mock/inventario-catalogos";
+import { inventoryReferenceData } from "@/lib/inventory/runtime-fallback";
 import { PurchaseRequest, PurchaseRequestStatus } from "@/lib/types/inventario";
 import { cn } from "@/lib/utils";
 
@@ -101,7 +101,7 @@ export default function PurchaseRequestsPage() {
             label="Sucursal"
             value={filters.branchId}
             onChange={(v) => setFilters((f) => ({ ...f, branchId: (v as string) || null }))}
-            options={sucursalesInvMock.map((s) => ({ value: s.id, label: s.nombre }))}
+            options={inventoryReferenceData.branches.map((s) => ({ value: s.id, label: s.nombre }))}
             includeAllOption
           />
           <div>

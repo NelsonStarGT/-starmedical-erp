@@ -3,13 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ComboCard } from "@/components/inventario/ComboCard";
+import ServiceUnavailableNotice from "@/components/inventario/ServiceUnavailableNotice";
 import { Modal } from "@/components/ui/Modal";
 import { Combo, Producto, RolInventario, Servicio, hasPermission } from "@/lib/types/inventario";
 import { ProductListWithQuantity } from "@/components/inventario/ProductListWithQuantity";
 import { ServiceSelector } from "@/components/inventario/ServiceSelector";
-import { categoriasProductoMock, subcategoriasMock, categoriasServicioMock, serviceSubcategoriasMock } from "@/lib/mock/inventario-catalogos";
-import { productosMock } from "@/lib/mock/productos";
-import { serviciosMock } from "@/lib/mock/servicios";
+import { inventoryReferenceData } from "@/lib/inventory/runtime-fallback";
+import { parseServiceUnavailablePayload, type ServiceUnavailablePayload } from "@/lib/inventory/runtime-contract";
 
 export default function CombosPage() {
   const role: RolInventario = "Administrador";
@@ -25,24 +25,25 @@ export default function CombosPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [applyToFiltered, setApplyToFiltered] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadIssue, setLoadIssue] = useState<ServiceUnavailablePayload | null>(null);
 
   const servicioIndex = useMemo(() => services.reduce<Record<string, Servicio>>((acc, srv) => ({ ...acc, [srv.id]: srv }), {}), [services]);
   const productoIndex = useMemo(() => products.reduce<Record<string, Producto>>((acc, prod) => ({ ...acc, [prod.id]: prod }), {}), [products]);
 
   const categoriaServicioNames = useMemo(
-    () => categoriasServicioMock.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.nombre }), {}),
+    () => inventoryReferenceData.serviceCategories.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.nombre }), {}),
     []
   );
   const subcategoriaServicioNames = useMemo(
-    () => serviceSubcategoriasMock.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.nombre }), {}),
+    () => inventoryReferenceData.serviceSubcategories.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.nombre }), {}),
     []
   );
   const categoriaProductoNames = useMemo(
-    () => categoriasProductoMock.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.nombre }), {}),
+    () => inventoryReferenceData.productCategories.reduce<Record<string, string>>((acc, cat) => ({ ...acc, [cat.id]: cat.nombre }), {}),
     []
   );
   const subcategoriaProductoNames = useMemo(
-    () => subcategoriasMock.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.nombre }), {}),
+    () => inventoryReferenceData.productSubcategories.reduce<Record<string, string>>((acc, sub) => ({ ...acc, [sub.id]: sub.nombre }), {}),
     []
   );
 
@@ -99,12 +100,17 @@ export default function CombosPage() {
           fetch("/api/inventario/servicios"),
           fetch("/api/inventario/productos", { headers: { "x-role": role } })
         ]);
-        const cJson = await cRes.json();
-        const sJson = await sRes.json();
-        const pJson = await pRes.json();
+        const cJson = await cRes.json().catch(() => ({}));
+        const sJson = await sRes.json().catch(() => ({}));
+        const pJson = await pRes.json().catch(() => ({}));
+        const serviceUnavailable = parseServiceUnavailablePayload(sRes.status, sJson);
+        const productUnavailable = parseServiceUnavailablePayload(pRes.status, pJson);
+        setLoadIssue(serviceUnavailable || productUnavailable || null);
         if (cRes.ok) setCombos(cJson.data || []);
-        if (sRes.ok) setServices(sJson.data || serviciosMock);
-        if (pRes.ok) setProducts(pJson.data || productosMock);
+        if (sRes.ok) setServices(sJson.data || []);
+        else setServices([]);
+        if (pRes.ok) setProducts(pJson.data || []);
+        else setProducts([]);
       } finally {
         setLoading(false);
       }
@@ -261,9 +267,8 @@ export default function CombosPage() {
   };
 
   const costoCalculadoDraft = useMemo(() => {
-    const source = products.length > 0 ? products : productosMock;
     return (draft.productosAsociados || []).reduce((acc, item) => {
-      const prod = source.find((p) => p.id === item.productoId);
+      const prod = products.find((p) => p.id === item.productoId);
       const cost = prod ? prod.avgCost ?? (prod as any).costoUnitario ?? 0 : 0;
       return acc + cost * (item.cantidad || 0);
     }, 0);
@@ -279,13 +284,13 @@ export default function CombosPage() {
                 placeholder="Buscar por nombre, ID, categoría o subcategoría"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-xl border border-[#E5E5E7] px-3 py-2 text-sm text-slate-700 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
               />
             </div>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full sm:w-40 rounded-xl border border-[#E5E5E7] bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+              className="w-full sm:w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
             >
               <option value="">Estado: Todos</option>
               <option value="Activo">Activos</option>
@@ -303,6 +308,9 @@ export default function CombosPage() {
             Nuevo combo
           </button>
         </CardHeader>
+        <div className="px-6">
+          <ServiceUnavailableNotice issue={loadIssue} />
+        </div>
         {(selectedIds.size > 0 || applyToFiltered) && (
           <div className="mx-6 mb-2 flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
             <span className="font-semibold">{applyToFiltered ? "Aplicar a búsqueda actual" : `${selectedIds.size} seleccionados`}</span>
@@ -393,13 +401,13 @@ export default function CombosPage() {
             placeholder="Nombre"
             value={draft.nombre || ""}
             onChange={(e) => setDraft({ ...draft, nombre: e.target.value })}
-            className="w-full rounded-xl border border-[#E5E5E7] px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
           />
           <textarea
             placeholder="Descripción"
             value={draft.descripcion || ""}
             onChange={(e) => setDraft({ ...draft, descripcion: e.target.value })}
-            className="w-full rounded-xl border border-[#E5E5E7] px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
           />
           <div className="space-y-1">
             <p className="text-sm font-semibold text-slate-800">Servicios incluidos</p>
@@ -445,7 +453,7 @@ export default function CombosPage() {
               placeholder="Precio final"
               value={draft.precioFinal || 0}
               onChange={(e) => setDraft({ ...draft, precioFinal: Number(e.target.value) })}
-              className="rounded-xl border border-[#E5E5E7] px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/15"
             />
             <div className="flex items-center">
               <span className="text-sm text-slate-700">Costo calculado: Q{costoCalculadoDraft.toFixed(2)}</span>

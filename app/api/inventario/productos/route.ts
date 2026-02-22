@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { roleFromRequest } from "@/lib/api/auth";
-import { productosMock } from "@/lib/mock/productos";
+import { inventoryServiceUnavailable, mapFallbackProductsForApi, runtimeFallbackEnabled } from "@/lib/inventory/runtime-fallback";
 
 export async function GET(req: NextRequest) {
   try {
@@ -60,14 +60,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ data });
   } catch (err) {
     console.error(err);
-    // Fallback a mock si la base no está disponible (evita romper UI en entornos sin migración)
-    const data = productosMock.map((p) => ({
-      ...p,
-      categoriaNombre: undefined,
-      subcategoriaNombre: undefined,
-      areaNombre: undefined,
-      stockPorSucursal: [{ branchId: p.sucursalId, stock: p.stockActual, minStock: p.stockMinimo }]
-    }));
-    return NextResponse.json({ data, warning: "Usando datos mock; verifica migraciones/DB" }, { status: 200 });
+    if (!runtimeFallbackEnabled()) {
+      return NextResponse.json(
+        inventoryServiceUnavailable("inventario.productos", "No se pudo consultar productos en este entorno."),
+        { status: 503 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, data: mapFallbackProductsForApi(), source: "runtime_fallback" }, { status: 200 });
   }
 }

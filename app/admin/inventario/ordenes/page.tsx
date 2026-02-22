@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
-import { proveedoresMock, sucursalesInvMock } from "@/lib/mock/inventario-catalogos";
+import { inventoryReferenceData } from "@/lib/inventory/runtime-fallback";
 import { PurchaseOrder, PurchaseOrderStatus } from "@/lib/types/inventario";
 import { cn } from "@/lib/utils";
 
@@ -101,14 +101,14 @@ export default function PurchaseOrdersPage() {
             label="Proveedor"
             value={filters.supplierId}
             onChange={(v) => setFilters((f) => ({ ...f, supplierId: (v as string) || null }))}
-            options={proveedoresMock.map((p) => ({ value: p.id, label: p.nombre }))}
+            options={inventoryReferenceData.suppliers.map((p) => ({ value: p.id, label: p.nombre }))}
             includeAllOption
           />
           <SearchableSelect
             label="Sucursal"
             value={filters.branchId}
             onChange={(v) => setFilters((f) => ({ ...f, branchId: (v as string) || null }))}
-            options={sucursalesInvMock.map((s) => ({ value: s.id, label: s.nombre }))}
+            options={inventoryReferenceData.branches.map((s) => ({ value: s.id, label: s.nombre }))}
             includeAllOption
           />
           <div>
