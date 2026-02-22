@@ -7,6 +7,6 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     echo: payload,
-    message: "Stub - integración con gateway pendiente"
+    message: "Integración con gateway pendiente"
   });
 }

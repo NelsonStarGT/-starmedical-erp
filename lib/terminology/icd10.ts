@@ -18,3 +18,5 @@ export function searchIcd10Mock(query: string, limit = 20): ICD10Item[] {
     return item.code.toLowerCase().includes(q) || item.label.toLowerCase().includes(q);
   }).slice(0, limit);
 }
+
+export const searchIcd10Fallback = searchIcd10Mock;

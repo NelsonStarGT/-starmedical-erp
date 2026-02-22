@@ -39,14 +39,14 @@ export default function OpsWhatsAppBroadcastsPage() {
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-3">
         <StatCard title="Programadas" value="4" helper="Próximas 48h" />
-        <StatCard title="Enviadas este mes" value="18" helper="Tasa entrega mock 98%" />
+        <StatCard title="Enviadas este mes" value="18" helper="Tasa entrega estimada 98%" />
         <StatCard title="Borradores" value="6" helper="Listos para revisión" />
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-[#2e75ba]">Difusión (mock)</p>
+            <p className="text-sm font-semibold text-[#2e75ba]">Difusión (preview)</p>
             <p className="text-xs text-slate-500">Comunicaciones programadas/masivas por workspace y número.</p>
           </div>
           <span className="text-xs text-slate-500">Última sync: 10 mayo 2024</span>

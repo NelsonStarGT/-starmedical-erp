@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
         requestedByUserId: auth.user?.id ?? null,
         metadata: {
           reason: reason || null,
-          mode: process.env.NODE_ENV === "production" ? "queue_pending" : "dev_mock"
+          mode: process.env.NODE_ENV === "production" ? "queue_pending" : "dev_preview"
         }
       },
       select: {

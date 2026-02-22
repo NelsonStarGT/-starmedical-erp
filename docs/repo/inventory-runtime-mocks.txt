@@ -1,0 +1,149 @@
+app/admin/agenda/citas/page.tsx:5: import { pacientesMock } from "@/lib/mock/pacientes";
+app/admin/agenda/citas/page.tsx:6: import { medicosMock } from "@/lib/mock/medicos";
+app/admin/agenda/citas/page.tsx:7: import { sucursalesMock } from "@/lib/mock/sucursales";
+app/admin/agenda/citas/page.tsx:8: import { tiposCitaMock } from "@/lib/mock/tiposCita";
+app/admin/agenda/citas/page.tsx:9: import { salasMock } from "@/lib/mock/salas";
+app/admin/agenda/citas/page.tsx:10: import { empresasMock } from "@/lib/mock/empresas";
+app/admin/agenda/citas/page.tsx:22: const [pacientes, setPacientes] = useState(pacientesMock);
+app/admin/agenda/citas/page.tsx:188: const getMedico = (id: string) => medicosMock.find((m) => m.id === id)?.nombre || "Especialista";
+app/admin/agenda/citas/page.tsx:189: const getSucursal = (id: string) => sucursalesMock.find((s) => s.id === id)?.nombre || "Sucursal";
+app/admin/agenda/citas/page.tsx:190: const getTipo = (id: string) => tiposCitaMock.find((t) => t.id === id)?.nombre || "Tipo de cita";
+app/admin/agenda/citas/page.tsx:220: {medicosMock.map((m) => (
+app/admin/agenda/citas/page.tsx:250: {sucursalesMock.map((s) => (
+app/admin/agenda/citas/page.tsx:331: medicos={medicosMock}
+app/admin/agenda/citas/page.tsx:332: sucursales={sucursalesMock}
+app/admin/agenda/citas/page.tsx:333: tipos={tiposCitaMock}
+app/admin/agenda/citas/page.tsx:334: salas={salasMock}
+app/admin/agenda/citas/page.tsx:335: empresas={empresasMock}
+app/admin/agenda/citas/page.tsx:350: medicos={medicosMock}
+app/admin/agenda/citas/page.tsx:351: sucursales={sucursalesMock}
+app/admin/agenda/citas/page.tsx:352: tipos={tiposCitaMock}
+app/admin/agenda/configuracion/page.tsx:6: import { tiposCitaMock } from "@/lib/mock/tiposCita";
+app/admin/agenda/configuracion/page.tsx:7: import { salasMock } from "@/lib/mock/salas";
+app/admin/agenda/configuracion/page.tsx:8: import { horariosMock } from "@/lib/mock/horarios";
+app/admin/agenda/configuracion/page.tsx:9: import { medicosMock } from "@/lib/mock/medicos";
+app/admin/agenda/configuracion/page.tsx:10: import { sucursalesMock } from "@/lib/mock/sucursales";
+app/admin/agenda/configuracion/page.tsx:18: const [tipos, setTipos] = useState<TipoCita[]>(tiposCitaMock);
+app/admin/agenda/configuracion/page.tsx:19: const [salas, setSalas] = useState<SalaAgenda[]>(salasMock);
+app/admin/agenda/configuracion/page.tsx:20: const [horarios, setHorarios] = useState<HorarioMedico[]>(horariosMock);
+app/admin/agenda/configuracion/page.tsx:113: const medico = medicosMock.find((m) => m.id === h.medicoId)?.nombre || "Especialista";
+app/admin/agenda/configuracion/page.tsx:114: const sucursal = sucursalesMock.find((s) => s.id === h.sucursalId)?.nombre || "Sucursal";
+app/admin/agenda/configuracion/page.tsx:311: <td className="px-3 py-2 text-sm text-slate-700">{sucursalesMock.find((x) => x.id === s.sucursalId)?.nombre}</td>
+app/admin/agenda/configuracion/page.tsx:348: {sucursalesMock.map((s) => (
+app/admin/agenda/configuracion/page.tsx:407: {medicosMock.map((m) => (
+app/admin/agenda/configuracion/page.tsx:419: {sucursalesMock.map((s) => (
+app/admin/agenda/page.tsx:6: import { pacientesMock } from "@/lib/mock/pacientes";
+app/admin/agenda/page.tsx:7: import { medicosMock } from "@/lib/mock/medicos";
+app/admin/agenda/page.tsx:8: import { sucursalesMock } from "@/lib/mock/sucursales";
+app/admin/agenda/page.tsx:9: import { tiposCitaMock } from "@/lib/mock/tiposCita";
+app/admin/agenda/page.tsx:10: import { citasMock } from "@/lib/mock/citas";
+app/admin/agenda/page.tsx:11: import { salasMock } from "@/lib/mock/salas";
+app/admin/agenda/page.tsx:12: import { empresasMock } from "@/lib/mock/empresas";
+app/admin/agenda/page.tsx:13: import { horariosMock } from "@/lib/mock/horarios";
+app/admin/agenda/page.tsx:45: const [pacientes, setPacientes] = useState(pacientesMock);
+app/admin/agenda/page.tsx:66: console.warn("No se pudieron cargar las citas, usando mock");
+app/admin/agenda/page.tsx:67: setCitas(citasMock);
+app/admin/agenda/page.tsx:71: setCitas(citasMock);
+app/admin/agenda/page.tsx:104: medicosMock.map((m, idx) => ({
+app/admin/agenda/page.tsx:117: const med = medicosMock.find((m) => m.id === c.medicoId);
+app/admin/agenda/page.tsx:164: const ingresos = delDia.reduce((acc) => acc + 350, 0); // mock promedio
+app/admin/agenda/page.tsx:218: const tipo = tiposCitaMock.find((t) => t.id === cita.tipoCitaId);
+app/admin/agenda/page.tsx:220: const medico = medicosMock.find((m) => m.id === cita.medicoId);
+app/admin/agenda/page.tsx:306: tipos={tiposCitaMock}
+app/admin/agenda/page.tsx:307: empresas={empresasMock}
+app/admin/agenda/page.tsx:421: {selectedMedico ? medicosMock.find((m) => m.id === selectedMedico)?.nombre.slice(0, 2).toUpperCase() : "AP"}
+app/admin/agenda/page.tsx:425: {selectedMedico ? medicosMock.find((m) => m.id === selectedMedico)?.nombre : "Todos los especialistas"}
+app/admin/agenda/page.tsx:497: const medico = medicosMock.find((m) => m.id === c.medicoId);
+app/admin/agenda/page.tsx:498: const tipo = tiposCitaMock.find((t) => t.id === c.tipoCitaId);
+app/admin/agenda/page.tsx:527: const medico = medicosMock.find((m) => m.id === c.medicoId);
+app/admin/agenda/page.tsx:528: const tipo = tiposCitaMock.find((t) => t.id === c.tipoCitaId);
+app/admin/agenda/page.tsx:564: medicos={medicosMock}
+app/admin/agenda/page.tsx:565: sucursales={sucursalesMock}
+app/admin/agenda/page.tsx:566: tipos={tiposCitaMock}
+app/admin/agenda/page.tsx:567: salas={salasMock}
+app/admin/agenda/page.tsx:568: empresas={empresasMock}
+app/admin/agenda/page.tsx:584: medicos={medicosMock}
+app/admin/agenda/page.tsx:585: sucursales={sucursalesMock}
+app/admin/agenda/page.tsx:586: tipos={tiposCitaMock}
+app/admin/agenda/page.tsx:667: const blocks = horariosMock
+app/api/medical/encounters/[encounterId]/close/route.ts:11: import { buildMockEncounter } from "@/components/medical/encounter/mock";
+app/api/medical/encounters/[encounterId]/close/route.ts:30: const mock = buildMockEncounter(params.encounterId, { clinicianName: params.signedByName });
+app/api/medical/encounters/[encounterId]/close/route.ts:36: patient: mock.patient,
+app/api/medical/encounters/[encounterId]/close/route.ts:37: vitals: mock.vitals,
+app/api/medical/encounters/[encounterId]/close/route.ts:38: history: mock.historyDraft,
+app/api/medical/encounters/[encounterId]/close/route.ts:41: secondaryCodes: mock.diagnosis.secondaryCodes
+app/api/medical/encounters/[encounterId]/close/route.ts:43: prescription: mock.prescription,
+app/api/medical/encounters/[encounterId]/close/route.ts:44: reconsultations: mock.reconsultations,
+app/api/medical/encounters/[encounterId]/close/route.ts:46: clinicalEvents: ["encounter.closed", "encounter.snapshot.created", ...mock.clinicalEvents]
+app/api/medical/encounters/[encounterId]/draft/route.ts:41: mode: "stub"
+app/modulo-medico/(suite)/agenda/page.tsx:7: import { buildAgendaMockData } from "@/components/medical/agenda/mock";
+app/modulo-medico/(suite)/agenda/page.tsx:9: import { buildMockEncounter } from "@/components/medical/encounter/mock";
+app/modulo-medico/(suite)/agenda/page.tsx:235: // TODO(medical-agenda): Reemplazar mock por GET /api/agenda?date=YYYY-MM-DD&specialistId=<userId> (si aplica)
+app/modulo-medico/(suite)/agenda/page.tsx:238: () => buildAgendaMockData({ date: filters.date, myDoctorId: mineDoctorId, myDoctorName: mineDoctorName }),
+app/modulo-medico/(suite)/agenda/page.tsx:268: // TODO(agenda-results-api): reemplazar mock por consulta clínica real por encounterId.
+app/modulo-medico/(suite)/agenda/page.tsx:271: // El fallback con row.id es solo temporal para mock local.
+app/modulo-medico/(suite)/agenda/page.tsx:273: const encounter = buildMockEncounter(encounterId);
+app/modulo-medico/(suite)/comisiones/page.tsx:4: import { medicosMock } from "@/lib/mock/medicos";
+app/modulo-medico/(suite)/comisiones/page.tsx:44: function buildCommissionsMock(params: { month: string }) {
+app/modulo-medico/(suite)/comisiones/page.tsx:45: const doctors = medicosMock.map((m) => ({ id: m.id, name: m.nombre }));
+app/modulo-medico/(suite)/comisiones/page.tsx:133: const snapshot = buildCommissionsMock({ month });
+app/modulo-medico/(suite)/comisiones/page.tsx:184: Mock · conectar a liquidación de comisiones en la siguiente iteración.
+app/modulo-medico/(suite)/dashboard/page.tsx:14: function buildAdminDashboardMock(): {
+app/modulo-medico/(suite)/dashboard/page.tsx:61: const snapshot = buildAdminDashboardMock();
+app/modulo-medico/(suite)/dashboard/page.tsx:135: subtitle="Curva acumulada (mock)"
+app/modulo-medico/(suite)/diagnostico/page.tsx:6: import { buildAdminDiagnosticsMockData } from "@/components/medical/diagnostico-admin/mock";
+app/modulo-medico/(suite)/diagnostico/page.tsx:8: import { buildMockEncounter } from "@/components/medical/encounter/mock";
+app/modulo-medico/(suite)/diagnostico/page.tsx:134: // TODO(medical-admin-diagnostico): reemplazar mock por proyección sanitizada:
+app/modulo-medico/(suite)/diagnostico/page.tsx:139: () => buildAdminDiagnosticsMockData({ date: dateKey, myDoctorId: mineDoctorId, myDoctorName: mineDoctorName }),
+app/modulo-medico/(suite)/diagnostico/page.tsx:192: // TODO(diagnostico-results-api): reemplazar mock por consulta clínica real por encounterId.
+app/modulo-medico/(suite)/diagnostico/page.tsx:195: // El fallback con enc-${orderId} es solo temporal para mock local.
+app/modulo-medico/(suite)/diagnostico/page.tsx:197: const encounter = buildMockEncounter(encounterId);
+app/modulo-medico/(suite)/diagnostico/page.tsx:224: showToast("Encounter creado (mock).", "success");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:42: import { buildMockEncounter } from "@/components/medical/encounter/mock";
+app/modulo-medico/consultaM/[encounterId]/page.tsx:176: type DataSource = "mock" | "real";
+app/modulo-medico/consultaM/[encounterId]/page.tsx:527: const [state, setState] = useState<EncounterState>(() => buildMockEncounter(encounterId));
+app/modulo-medico/consultaM/[encounterId]/page.tsx:558: const [baseDataSource, setBaseDataSource] = useState<DataSource>("mock");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:559: const [resultsDataSource, setResultsDataSource] = useState<DataSource>("mock");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:705: console.warn(`[consultaM] No se pudieron cargar resultados reales para ${nextEncounterId}. Se usa fallback mock.`, error);
+app/modulo-medico/consultaM/[encounterId]/page.tsx:722: console.warn(`[consultaM] No se pudieron cargar insumos reales para ${nextEncounterId}. Se usa fallback mock.`, error);
+app/modulo-medico/consultaM/[encounterId]/page.tsx:741: console.warn(`[consultaM] No se pudieron cargar órdenes reales para ${nextEncounterId}. Se usa fallback mock.`, error);
+app/modulo-medico/consultaM/[encounterId]/page.tsx:850: const mockState = buildMockEncounter(encounterId);
+app/modulo-medico/consultaM/[encounterId]/page.tsx:851: setState(mockState);
+app/modulo-medico/consultaM/[encounterId]/page.tsx:852: setBaseDataSource("mock");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:853: setResultsDataSource("mock");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:876: autosaveBaselineRef.current = serializeDraftComparable(buildEncounterDraftPayload(mockState));
+app/modulo-medico/consultaM/[encounterId]/page.tsx:894: // TODO(real-encounter): cuando APIs reales estén completas, retirar fallback a mock.
+app/modulo-medico/consultaM/[encounterId]/page.tsx:896: let nextState = mockState;
+app/modulo-medico/consultaM/[encounterId]/page.tsx:897: const realBaseState = await loadEncounterFromRealApi(encounterId, mockState);
+app/modulo-medico/consultaM/[encounterId]/page.tsx:915: setResultsDataSource("mock");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1452: const appendInMockState = (overrideEntry?: EncounterReconsulta) => {
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1482: appendInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1519: appendInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1520: setBaseDataSource("mock");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1521: showToast("Usando modo mock para guardar reconsulta.", "info");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1542: const appendInMockState = (overrideEntry?: EncounterSupplyItem) => {
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1568: appendInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1582: appendInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1583: showToast("Insumo guardado en modo mock.", "info");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1604: const removeFromMockState = () => {
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1612: removeFromMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1626: removeFromMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1627: showToast("Insumo eliminado en modo mock.", "info");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1648: const appendInMockState = (overrideEntry?: EncounterOrderRequestItem) => {
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1679: appendInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1692: appendInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1693: showToast("Orden guardada en modo mock.", "info");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1710: const updateInMockState = () => {
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1732: updateInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1745: updateInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1746: showToast("Orden actualizada en modo mock.", "info");
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1763: const removeInMockState = () => {
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1771: removeInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1784: removeInMockState();
+app/modulo-medico/consultaM/[encounterId]/page.tsx:1785: showToast("Orden eliminada en modo mock.", "info");
+app/ops/whatsapp/automations/[id]/page.tsx:6: import { useAutomationsMock } from "../../_hooks/useAutomationsMock";
+app/ops/whatsapp/automations/[id]/page.tsx:13: const { getAutomationById, ready, toggleStatus, duplicate, updateAutomation } = useAutomationsMock();
+app/ops/whatsapp/contacts/page.tsx:27: console.warn("contactsGateway mock error", error);
+app/ops/whatsapp/integrations/page.tsx:8: description="Conecta el WhatsApp Center con ERP, CRM y sistemas clínicos. Esta vista es mock sin dependencias externas."
+app/ops/whatsapp/settings/page.tsx:8: description="Administra workspaces, números y credenciales. Aquí se conectará el gateway oficial (stub actual)."
+app/ops/whatsapp/webhooks/page.tsx:8: description="Administra callbacks de entrega, eventos de lectura y derivación a colas internas. Mock listo para conectar."
