@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { ToastContainer } from "@/components/ui/Toast";
+import { CrmDealDrawer } from "@/components/crm/CrmDealDrawer";
 import { useToast } from "@/hooks/useToast";
 import { cn } from "@/lib/utils";
 import { CRM_PIPELINE_TYPES, CRM_STAGE_LABELS, CrmStage, nextActionLabel, parseNextAction } from "@/lib/crmConfig";
@@ -28,7 +29,7 @@ type Deal = {
   quoteStatus?: string;
   latestQuoteId?: string | null;
   account?: { id: string; name: string | null } | null;
-  contact?: { id: string; firstName: string | null; lastName?: string | null } | null;
+  contact?: { id: string; firstName: string | null; lastName?: string | null; phone?: string | null; email?: string | null } | null;
 };
 
 function getClientName(deal: Deal) {
@@ -214,18 +215,71 @@ function CrmListPageContent() {
     }
   };
 
+  const handleApproveLatestQuote = async () => {
+    if (!actionDeal?.latestQuoteId) {
+      setActionError("No hay cotizacion para aprobar");
+      return;
+    }
+    if (!isAdmin) {
+      const message = "Acción solo para administrador.";
+      setActionError(message);
+      showToast(message, "error");
+      return;
+    }
+    try {
+      setActionError(null);
+      await fetchJson(`/api/crm/quotes-v2/${actionDeal.latestQuoteId}/approve`, { method: "POST" });
+      await loadDeals();
+      setActionDeal(null);
+      showToast("Cotización aprobada", "success");
+    } catch (err: any) {
+      const message = normalizeError(err, "No se pudo aprobar");
+      setActionError(message);
+    }
+  };
+
+  const handleRejectLatestQuote = async () => {
+    if (!actionDeal?.latestQuoteId) {
+      setActionError("No hay cotizacion para rechazar");
+      return;
+    }
+    if (!rejectReason.trim()) {
+      setActionError("Motivo obligatorio para rechazar");
+      return;
+    }
+    if (!isAdmin) {
+      const message = "Acción solo para administrador.";
+      setActionError(message);
+      showToast(message, "error");
+      return;
+    }
+    try {
+      setActionError(null);
+      await fetchJson(`/api/crm/quotes-v2/${actionDeal.latestQuoteId}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ rejectionReason: rejectReason })
+      });
+      await loadDeals();
+      setActionDeal(null);
+      showToast("Cotización rechazada", "success");
+    } catch (err: any) {
+      const message = normalizeError(err, "No se pudo rechazar");
+      setActionError(message);
+    }
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-[#F8FAFC] p-3 shadow-sm">
         <div>
-          <p className="text-xs uppercase tracking-[0.3rem] text-slate-400">CRM - Worklist</p>
-          <h1 className="text-2xl font-semibold text-slate-900">{pipelineTypeLabel}</h1>
-          <p className="text-sm text-slate-500">Vista limpia con proxima accion y SLA visible.</p>
+          <p className="text-[11px] uppercase tracking-[0.2rem] text-[#2e75ba]">CRM - Worklist</p>
+          <h1 className="text-xl font-semibold text-slate-900">{pipelineTypeLabel}</h1>
+          <p className="text-xs text-slate-500">Vista de lista avanzada y compacta para supervisión.</p>
           <p className="text-xs text-slate-500">Este monto se calcula automáticamente desde cotizaciones aprobadas.</p>
         </div>
         <Link
           href={`/admin/crm/new?type=${normalizedType}`}
-          className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-soft hover:bg-slate-800"
+          className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-4 text-sm font-semibold text-white transition hover:bg-[#4aadf5]"
         >
           Nueva negociacion
         </Link>
@@ -234,9 +288,9 @@ function CrmListPageContent() {
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {infoNote && <p className="text-sm text-amber-700">{infoNote}</p>}
 
-      <Card>
-        <CardHeader className="flex flex-wrap items-center gap-2">
-          <CardTitle>Semaforo</CardTitle>
+      <Card className="rounded-xl">
+        <CardHeader className="flex flex-wrap items-center gap-2 py-3">
+          <CardTitle className="text-sm text-[#2e75ba]">Semaforo</CardTitle>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <SlaChip status="GREEN" label="En tiempo" />
             <SlaChip status="YELLOW" label="Sin respuesta / cerca SLA" />
@@ -245,35 +299,35 @@ function CrmListPageContent() {
         </CardHeader>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Deals activos</CardTitle>
+      <Card className="rounded-xl">
+        <CardHeader className="py-3">
+          <CardTitle className="text-sm text-[#2e75ba]">Deals activos</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.08em] text-slate-500">
+              <thead className="bg-[#F8FAFC] text-left text-xs uppercase tracking-[0.08em] text-[#2e75ba]">
                 <tr>
-                  <th className="px-4 py-3">Cliente</th>
-                  <th className="px-4 py-3">Etapa</th>
-                  <th className="px-4 py-3">Q estimado</th>
-                  <th className="px-4 py-3">Proxima accion</th>
-                  <th className="px-4 py-3">SLA</th>
-                  <th className="px-4 py-3">Responsable</th>
-                  <th className="px-4 py-3">Acciones</th>
+                  <th className="px-3 py-2">Cliente</th>
+                  <th className="px-3 py-2">Etapa</th>
+                  <th className="px-3 py-2">Q estimado</th>
+                  <th className="px-3 py-2">Proxima accion</th>
+                  <th className="px-3 py-2">SLA</th>
+                  <th className="px-3 py-2">Responsable</th>
+                  <th className="px-3 py-2">Acciones</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
+              <tbody className="divide-y divide-slate-100 bg-white [&>tr:nth-child(even)]:bg-slate-50/30">
                 {loading && (
                   <tr>
-                    <td className="px-4 py-4 text-slate-500" colSpan={7}>
+                    <td className="px-3 py-3 text-slate-500" colSpan={7}>
                       Cargando deals...
                     </td>
                   </tr>
                 )}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td className="px-4 py-4 text-slate-500" colSpan={7}>
+                    <td className="px-3 py-3 text-slate-500" colSpan={7}>
                       Sin deals activos.
                     </td>
                   </tr>
@@ -288,17 +342,17 @@ function CrmListPageContent() {
                         ? "YELLOW"
                         : deal.slaStatus;
                   return (
-                    <tr key={deal.id}>
-                      <td className="px-4 py-3 font-semibold text-slate-900">{getClientName(deal)}</td>
-                      <td className="px-4 py-3 text-slate-600">{CRM_STAGE_LABELS[deal.stage as keyof typeof CRM_STAGE_LABELS]}</td>
-                      <td className="px-4 py-3 text-slate-700">{formatCurrency(deal.amount ?? deal.amountEstimated ?? 0)}</td>
-                      <td className="px-4 py-3 text-slate-600">
+                    <tr key={deal.id} className="h-[var(--crm-row-h)] cursor-pointer" onClick={() => openActions(deal)}>
+                      <td className="px-3 py-2 font-semibold text-slate-900">{getClientName(deal)}</td>
+                      <td className="px-3 py-2 text-slate-600">{CRM_STAGE_LABELS[deal.stage as keyof typeof CRM_STAGE_LABELS]}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatCurrency(deal.amount ?? deal.amountEstimated ?? 0)}</td>
+                      <td className="px-3 py-2 text-slate-600">
                         <div className="text-xs font-semibold text-slate-800">{nextLabel}</div>
                         <div className="text-xs text-slate-500">
                           {deal.nextActionAt ? formatDateTime(deal.nextActionAt) : "Sin accion"}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <SlaChip
                             status={semaforo}
@@ -309,12 +363,15 @@ function CrmListPageContent() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{deal.ownerId || "Ventas"}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2 text-slate-600">{deal.ownerId || "Ventas"}</td>
+                      <td className="px-3 py-2">
                         <div className="flex flex-col gap-2">
                           <button
-                            className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                            onClick={() => openActions(deal)}
+                            className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openActions(deal);
+                            }}
                           >
                             Acciones
                           </button>
@@ -328,56 +385,74 @@ function CrmListPageContent() {
           </div>
         </CardContent>
       </Card>
-      <Modal
+      <CrmDealDrawer
         open={!!actionDeal}
         onClose={() => setActionDeal(null)}
-        title="Acciones del deal"
-        subtitle={actionDeal ? getClientName(actionDeal) : undefined}
-        className="max-w-2xl"
-        footer={
-          <div className="flex items-center justify-between">
-            {actionError && <p className="text-sm text-rose-600">{actionError}</p>}
-            <button
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
-              onClick={() => setActionDeal(null)}
-            >
-              Cerrar
-            </button>
-          </div>
-        }
-      >
-        {actionDeal && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href={`/admin/crm/deal/${actionDeal.id}?type=${normalizedType}`}
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Ver historial completo
-              </Link>
-              <Link
-                href={`/admin/crm/deal/${actionDeal.id}?type=${normalizedType}#cotizaciones`}
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Ver cotizaciones
-              </Link>
-              <Link
-                href={`/admin/crm/deal/${actionDeal.id}?type=${normalizedType}#cotizaciones`}
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Crear nueva cotizacion
-              </Link>
+        deal={actionDeal}
+        normalizedType={normalizedType}
+        actionError={actionError}
+        activityContent={
+          actionDeal ? (
+            <div className="space-y-1 text-xs text-slate-600">
+              <p>
+                Etapa actual:{" "}
+                <span className="font-semibold text-slate-800">
+                  {CRM_STAGE_LABELS[actionDeal.stage as keyof typeof CRM_STAGE_LABELS] || actionDeal.stage}
+                </span>
+              </p>
+              <p>
+                Próxima acción:{" "}
+                {actionDeal.nextActionAt ? `${actionDeal.nextAction || "Acción"} · ${formatDateTime(actionDeal.nextActionAt)}` : "Sin acción programada"}
+              </p>
             </div>
+          ) : undefined
+        }
+        tasksContent={<p className="text-xs text-slate-600">Usa “Crear tarea” para registrar próximos pasos sin salir de la lista.</p>}
+        quotesContent={
+          actionDeal ? (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-600">
+                Estado: {actionDeal.quoteStatus || "SIN_COTIZAR"} · Total estimado: {formatCurrency(actionDeal.amount ?? actionDeal.amountEstimated ?? 0)}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-3 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
+                  onClick={handleApproveLatestQuote}
+                  disabled={!actionDeal.latestQuoteId || !isAdmin}
+                  title={!isAdmin ? "Acción solo para administrador." : undefined}
+                >
+                  Marcar aprobada
+                </button>
+                <input
+                  className="h-[var(--crm-control-h)] flex-1 min-w-[140px] rounded-lg border border-slate-200 px-3 text-xs"
+                  placeholder="Motivo rechazo"
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                />
+                <button
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:opacity-60"
+                  onClick={handleRejectLatestQuote}
+                  disabled={!actionDeal.latestQuoteId || !isAdmin}
+                  title={!isAdmin ? "Acción solo para administrador." : undefined}
+                >
+                  Marcar rechazada
+                </button>
+              </div>
+            </div>
+          ) : undefined
+        }
+        closingContent={
+          actionDeal ? (
             <div className="flex flex-wrap gap-2">
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:opacity-60"
                 onClick={() => openStageModal(actionDeal, "NEGOCIACION")}
                 disabled={!actionDeal.quoteCount || actionDeal.quoteStatus !== "APPROVED"}
               >
                 Pasar a negociacion
               </button>
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-3 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
                 onClick={() => openStageModal(actionDeal, "GANADO")}
                 disabled={!isAdmin || actionDeal.quoteStatus !== "APPROVED"}
                 title={
@@ -391,96 +466,15 @@ function CrmListPageContent() {
                 Cerrar como ganado
               </button>
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
                 onClick={() => openStageModal(actionDeal, "PERDIDO")}
               >
                 Cerrar como perdido
               </button>
             </div>
-            <div className="space-y-2 rounded-2xl border border-slate-200 p-3">
-              <p className="text-sm font-semibold text-slate-800">Cotizacion activa</p>
-              <p className="text-xs text-slate-500">
-                Estado: {actionDeal.quoteStatus || "SIN_COTIZAR"} · Total estimado: {formatCurrency(actionDeal.amount ?? actionDeal.amountEstimated ?? 0)}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                  onClick={async () => {
-                    if (!actionDeal.latestQuoteId) {
-                      setActionError("No hay cotizacion para aprobar");
-                      return;
-                    }
-                    if (!isAdmin) {
-                      const message = "Acción solo para administrador.";
-                      setActionError(message);
-                      showToast(message, "error");
-                      return;
-                    }
-                    try {
-                      setActionError(null);
-                      await fetchJson(`/api/crm/quotes-v2/${actionDeal.latestQuoteId}/approve`, { method: "POST" });
-                      await loadDeals();
-                      setActionDeal(null);
-                      showToast("Cotización aprobada", "success");
-                    } catch (err: any) {
-                      const message = normalizeError(err, "No se pudo aprobar");
-                      setActionError(message);
-                    }
-                  }}
-                  disabled={!actionDeal.latestQuoteId || !isAdmin}
-                  title={!isAdmin ? "Acción solo para administrador." : undefined}
-                >
-                  Marcar aprobada
-                </button>
-                <div className="flex flex-1 flex-wrap items-center gap-2">
-                  <input
-                    className="flex-1 min-w-[160px] rounded-xl border border-slate-200 px-3 py-2 text-xs"
-                    placeholder="Motivo rechazo"
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                  />
-                  <button
-                    className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                    onClick={async () => {
-                      if (!actionDeal.latestQuoteId) {
-                        setActionError("No hay cotizacion para rechazar");
-                        return;
-                      }
-                      if (!rejectReason.trim()) {
-                        setActionError("Motivo obligatorio para rechazar");
-                        return;
-                      }
-                      if (!isAdmin) {
-                        const message = "Acción solo para administrador.";
-                        setActionError(message);
-                        showToast(message, "error");
-                        return;
-                      }
-                      try {
-                        setActionError(null);
-                        await fetchJson(`/api/crm/quotes-v2/${actionDeal.latestQuoteId}/reject`, {
-                          method: "POST",
-                          body: JSON.stringify({ rejectionReason: rejectReason })
-                        });
-                        await loadDeals();
-                        setActionDeal(null);
-                        showToast("Cotización rechazada", "success");
-                      } catch (err: any) {
-                        const message = normalizeError(err, "No se pudo rechazar");
-                        setActionError(message);
-                      }
-                    }}
-                    disabled={!actionDeal.latestQuoteId || !isAdmin}
-                    title={!isAdmin ? "Acción solo para administrador." : undefined}
-                  >
-                    Marcar rechazada
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
+          ) : undefined
+        }
+      />
 
       <Modal
         open={!!stageModal}
@@ -493,13 +487,13 @@ function CrmListPageContent() {
             {stageError && <p className="text-sm text-rose-600">{stageError}</p>}
             <div className="flex gap-2">
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-white"
                 onClick={() => setStageModal(null)}
               >
                 Cancelar
               </button>
               <button
-                className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-soft hover:bg-slate-800"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-5 text-sm font-semibold text-white shadow-sm hover:bg-[#4aadf5]"
                 onClick={handleStageSave}
               >
                 Guardar
@@ -512,7 +506,7 @@ function CrmListPageContent() {
           <label className="text-sm font-medium text-slate-700">
             Etapa
             <select
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.stage}
               onChange={(event) => setStageForm((prev) => ({ ...prev, stage: event.target.value }))}
             >
@@ -526,7 +520,7 @@ function CrmListPageContent() {
           <label className="text-sm font-medium text-slate-700">
             Tipo de accion
             <select
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.nextActionType}
               onChange={(event) => setStageForm((prev) => ({ ...prev, nextActionType: event.target.value }))}
               disabled={["GANADO", "PERDIDO"].includes(stageForm.stage)}
@@ -542,7 +536,7 @@ function CrmListPageContent() {
             Fecha y hora
             <input
               type="datetime-local"
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.nextActionAt}
               onChange={(event) => setStageForm((prev) => ({ ...prev, nextActionAt: event.target.value }))}
               disabled={["GANADO", "PERDIDO"].includes(stageForm.stage)}
@@ -552,7 +546,7 @@ function CrmListPageContent() {
             Notas
             <input
               type="text"
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.nextActionNotes}
               onChange={(event) => setStageForm((prev) => ({ ...prev, nextActionNotes: event.target.value }))}
               disabled={["GANADO", "PERDIDO"].includes(stageForm.stage)}
@@ -565,7 +559,7 @@ function CrmListPageContent() {
             <label className="text-sm font-medium text-slate-700">
               Motivo de perdida
               <select
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
                 value={stageForm.lostReason}
                 onChange={(event) => setStageForm((prev) => ({ ...prev, lostReason: event.target.value }))}
               >
@@ -582,7 +576,7 @@ function CrmListPageContent() {
               Nota (opcional)
               <input
                 type="text"
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
                 value={stageForm.lostNotes}
                 onChange={(event) => setStageForm((prev) => ({ ...prev, lostNotes: event.target.value }))}
               />

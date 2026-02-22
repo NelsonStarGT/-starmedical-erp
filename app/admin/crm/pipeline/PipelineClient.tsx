@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { ToastContainer } from "@/components/ui/Toast";
+import { CrmDealDrawer } from "@/components/crm/CrmDealDrawer";
 import { useToast } from "@/hooks/useToast";
 import { cn } from "@/lib/utils";
 import {
@@ -135,7 +136,9 @@ function CrmPipelinePageContent() {
   const [requestForm, setRequestForm] = useState({ services: [] as string[], description: "" });
   const [requestLinks, setRequestLinks] = useState<Record<string, string>>({});
   const [noResponseDate, setNoResponseDate] = useState<string>("");
-  const [detailDeal, setDetailDeal] = useState<Deal | null>(null);
+  const [viewMode, setViewMode] = useState<"table" | "kanban">("table");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [stageFilter, setStageFilter] = useState("ALL");
 
   const loadDeals = useCallback(async () => {
     setLoading(true);
@@ -196,6 +199,28 @@ function CrmPipelinePageContent() {
       return bd - ad;
     });
   }, [deals]);
+
+  const filteredRows = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    return tableRows.filter((deal) => {
+      const stageOk = stageFilter === "ALL" || deal.stage === stageFilter;
+      if (!stageOk) return false;
+      if (!normalizedSearch) return true;
+      const services = deal.services?.map((service) => service.serviceType).join(" ").toLowerCase() || "";
+      const owner = (deal.ownerId || "").toLowerCase();
+      return `${getClientName(deal).toLowerCase()} ${services} ${owner}`.includes(normalizedSearch);
+    });
+  }, [tableRows, searchTerm, stageFilter]);
+
+  const kanbanColumns = useMemo(
+    () =>
+      CRM_STAGE_ORDER.map((stage) => ({
+        stage,
+        label: CRM_STAGE_LABELS[stage],
+        deals: filteredRows.filter((deal) => deal.stage === stage)
+      })),
+    [filteredRows]
+  );
 
   const openStageModal = (deal: Deal, stage: string) => {
     const parsed = parseNextAction(deal.nextAction);
@@ -443,17 +468,17 @@ function CrmPipelinePageContent() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-[#F8FAFC] p-3 shadow-sm">
         <div>
-          <p className="text-xs uppercase tracking-[0.3rem] text-slate-400">CRM - Pipeline</p>
-          <h1 className="text-2xl font-semibold text-slate-900">{pipelineTypeLabel}</h1>
-          <p className="text-sm text-slate-500">Vista cronologica con acciones operativas y semaforo claro.</p>
+          <p className="text-[11px] uppercase tracking-[0.2rem] text-[#2e75ba]">CRM - Pipeline</p>
+          <h1 className="text-xl font-semibold text-slate-900">{pipelineTypeLabel}</h1>
+          <p className="text-xs text-slate-500">Vista operativa con toggle Tabla/Kanban y acciones unificadas.</p>
           <p className="text-xs text-slate-500">Este monto se calcula automáticamente desde cotizaciones aprobadas.</p>
         </div>
         <Link
           href={`/admin/crm/new?type=${normalizedType}`}
-          className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-soft hover:bg-slate-800"
+          className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-4 text-sm font-semibold text-white transition hover:bg-[#4aadf5]"
         >
           Nueva negociacion
         </Link>
@@ -462,90 +487,162 @@ function CrmPipelinePageContent() {
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {infoNote && <p className="text-sm text-amber-700">{infoNote}</p>}
 
-      <Card>
-        <CardHeader className="flex flex-col gap-2">
-          <CardTitle>Timeline de deals</CardTitle>
+      <Card className="rounded-xl">
+        <CardHeader className="flex flex-col gap-2 py-3">
+          <CardTitle className="text-sm text-[#2e75ba]">Timeline de deals</CardTitle>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <span className="font-semibold">Semaforo:</span>
             <SlaChip status="GREEN" label="En tiempo" />
             <SlaChip status="YELLOW" label="Sin respuesta / cerca SLA" />
             <SlaChip status="RED" label="Vencido o sin accion" />
           </div>
+          <div className="sticky top-2 z-10 grid gap-2 rounded-lg border border-slate-200 bg-white/95 p-2 backdrop-blur md:grid-cols-[1fr_auto_auto_auto]">
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Buscar cliente, servicio o responsable"
+              className="h-[var(--crm-control-h)] rounded-lg border border-slate-200 px-3 text-sm"
+            />
+            <select
+              value={stageFilter}
+              onChange={(event) => setStageFilter(event.target.value)}
+              className="h-[var(--crm-control-h)] rounded-lg border border-slate-200 px-3 text-sm"
+            >
+              <option value="ALL">Todas las etapas</option>
+              {CRM_STAGE_ORDER.map((stage) => (
+                <option key={stage} value={stage}>
+                  {CRM_STAGE_LABELS[stage]}
+                </option>
+              ))}
+            </select>
+            <button
+              className={cn(
+                "inline-flex h-[var(--crm-control-h)] items-center rounded-lg px-3 text-sm font-semibold",
+                viewMode === "table"
+                  ? "bg-[#2e75ba] text-white"
+                  : "border border-slate-200 text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              )}
+              onClick={() => setViewMode("table")}
+            >
+              Tabla
+            </button>
+            <button
+              className={cn(
+                "inline-flex h-[var(--crm-control-h)] items-center rounded-lg px-3 text-sm font-semibold",
+                viewMode === "kanban"
+                  ? "bg-[#2e75ba] text-white"
+                  : "border border-slate-200 text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              )}
+              onClick={() => setViewMode("kanban")}
+            >
+              Kanban
+            </button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.08em] text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Cliente</th>
-                  <th className="px-4 py-3">Tipo</th>
-                  <th className="px-4 py-3">Servicios</th>
-                  <th className="px-4 py-3">Ingreso</th>
-                  <th className="px-4 py-3">Etapa</th>
-                  <th className="px-4 py-3"># Cotizaciones</th>
-                  <th className="px-4 py-3">Estado cotizacion</th>
-                  <th className="px-4 py-3">Semaforo</th>
-                  <th className="px-4 py-3 text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {loading && (
+          {viewMode === "table" ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-[#F8FAFC] text-left text-xs uppercase tracking-[0.08em] text-[#2e75ba]">
                   <tr>
-                    <td className="px-4 py-4 text-slate-500" colSpan={9}>
-                      Cargando deals...
-                    </td>
+                    <th className="px-3 py-2">Cliente</th>
+                    <th className="px-3 py-2">Tipo</th>
+                    <th className="px-3 py-2">Servicios</th>
+                    <th className="px-3 py-2">Ingreso</th>
+                    <th className="px-3 py-2">Etapa</th>
+                    <th className="px-3 py-2"># Cotizaciones</th>
+                    <th className="px-3 py-2">Estado cotización</th>
+                    <th className="px-3 py-2">Semáforo</th>
+                    <th className="px-3 py-2 text-right">Acciones</th>
                   </tr>
-                )}
-                {!loading && tableRows.length === 0 && (
-                  <tr>
-                    <td className="px-4 py-4 text-slate-500" colSpan={9}>
-                      Sin deals activos.
-                    </td>
-                  </tr>
-                )}
-                {tableRows.map((deal) => {
-                  const parsed = parseNextAction(deal.nextAction);
-                  const nextLabel = parsed.type ? nextActionLabel(parsed.type) : parsed.notes || "Sin accion";
-                  const semaforo =
-                    !deal.nextAction || !deal.nextActionAt ? "RED" : deal.slaStatus === "YELLOW" ? "YELLOW" : deal.slaStatus;
-                  const services = deal.services?.map((s) => s.serviceType).join(", ") || "-";
-                  return (
-                    <tr key={deal.id}>
-                      <td className="px-4 py-3 font-semibold text-slate-900">{getClientName(deal)}</td>
-                      <td className="px-4 py-3 text-slate-600">{deal.pipelineType === "B2B" ? "Empresa" : "Paciente"}</td>
-                      <td className="px-4 py-3 text-slate-600">{services}</td>
-                      <td className="px-4 py-3 text-slate-600">{deal.capturedAt ? formatDateTime(deal.capturedAt) : "-"}</td>
-                      <td className="px-4 py-3 text-slate-600">{CRM_STAGE_LABELS[deal.stage as keyof typeof CRM_STAGE_LABELS]}</td>
-                      <td className="px-4 py-3 text-slate-600">{deal.quoteCount ?? 0}</td>
-                      <td className="px-4 py-3 text-slate-600">{deal.quoteStatus || "SIN_COTIZAR"}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col gap-1">
-                          <SlaChip status={semaforo} label={semaforo === "RED" && (!deal.nextAction || !deal.nextActionAt) ? "Sin accion" : semaforo} />
-                          <span className="text-[11px] text-slate-500">{nextLabel}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <button
-                            className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                            onClick={() => setDetailDeal(deal)}
-                          >
-                            Detalles del cliente
-                          </button>
-                          <button
-                            className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                            onClick={() => openActions(deal)}
-                          >
-                            Acciones
-                          </button>
-                        </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white [&>tr:nth-child(even)]:bg-slate-50/30">
+                  {loading && (
+                    <tr>
+                      <td className="px-3 py-3 text-slate-500" colSpan={9}>
+                        Cargando deals...
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  )}
+                  {!loading && filteredRows.length === 0 && (
+                    <tr>
+                      <td className="px-3 py-3 text-slate-500" colSpan={9}>
+                        Sin deals activos.
+                      </td>
+                    </tr>
+                  )}
+                  {filteredRows.map((deal) => {
+                    const parsed = parseNextAction(deal.nextAction);
+                    const nextLabel = parsed.type ? nextActionLabel(parsed.type) : parsed.notes || "Sin accion";
+                    const semaforo =
+                      !deal.nextAction || !deal.nextActionAt ? "RED" : deal.slaStatus === "YELLOW" ? "YELLOW" : deal.slaStatus;
+                    const services = deal.services?.map((service) => service.serviceType).join(", ") || "-";
+                    return (
+                      <tr key={deal.id} className="h-[var(--crm-row-h)] cursor-pointer" onClick={() => openActions(deal)}>
+                        <td className="px-3 py-2 font-semibold text-slate-900">{getClientName(deal)}</td>
+                        <td className="px-3 py-2 text-slate-600">{deal.pipelineType === "B2B" ? "Empresa" : "Paciente"}</td>
+                        <td className="px-3 py-2 text-slate-600">{services}</td>
+                        <td className="px-3 py-2 text-slate-600">{deal.capturedAt ? formatDateTime(deal.capturedAt) : "-"}</td>
+                        <td className="px-3 py-2 text-slate-600">{CRM_STAGE_LABELS[deal.stage as keyof typeof CRM_STAGE_LABELS]}</td>
+                        <td className="px-3 py-2 text-slate-600">{deal.quoteCount ?? 0}</td>
+                        <td className="px-3 py-2 text-slate-600">{deal.quoteStatus || "SIN_COTIZAR"}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-col gap-1">
+                            <SlaChip status={semaforo} label={semaforo === "RED" && (!deal.nextAction || !deal.nextActionAt) ? "Sin accion" : semaforo} />
+                            <span className="text-[11px] text-slate-500">{nextLabel}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openActions(deal);
+                            }}
+                          >
+                            Abrir
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="overflow-x-auto p-3">
+              <div className="grid min-w-[980px] grid-cols-8 gap-3">
+                {kanbanColumns.map((column) => (
+                  <div key={column.stage} className="space-y-2 rounded-xl border border-slate-200 bg-[#F8FAFC] p-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-[#2e75ba]">{column.label}</p>
+                      <span className="text-[11px] text-slate-500">{column.deals.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {column.deals.map((deal) => {
+                        const semaforo =
+                          !deal.nextAction || !deal.nextActionAt ? "RED" : deal.slaStatus === "YELLOW" ? "YELLOW" : deal.slaStatus;
+                        return (
+                          <button
+                            key={deal.id}
+                            onClick={() => openActions(deal)}
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2 text-left shadow-sm hover:border-[#4aadf5]"
+                          >
+                            <p className="text-xs font-semibold text-slate-900">{getClientName(deal)}</p>
+                            <p className="text-[11px] text-slate-500">{formatCurrency(deal.amount ?? deal.amountEstimated ?? 0)}</p>
+                            <div className="mt-2">
+                              <SlaChip status={semaforo} label={semaforo === "RED" ? "Sin accion" : semaforo} />
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {column.deals.length === 0 && <p className="text-[11px] text-slate-400">Sin deals</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -560,13 +657,13 @@ function CrmPipelinePageContent() {
             {stageError && <p className="text-sm text-rose-600">{stageError}</p>}
             <div className="flex gap-2">
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-white"
                 onClick={() => setStageModal(null)}
               >
                 Cancelar
               </button>
               <button
-                className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-soft hover:bg-slate-800"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-5 text-sm font-semibold text-white shadow-sm hover:bg-[#4aadf5]"
                 onClick={handleStageSave}
               >
                 Guardar
@@ -579,7 +676,7 @@ function CrmPipelinePageContent() {
           <label className="text-sm font-medium text-slate-700">
             Etapa
             <select
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.stage}
               onChange={(event) => setStageForm((prev) => ({ ...prev, stage: event.target.value }))}
             >
@@ -593,7 +690,7 @@ function CrmPipelinePageContent() {
           <label className="text-sm font-medium text-slate-700">
             Tipo de accion
             <select
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.nextActionType}
               onChange={(event) => setStageForm((prev) => ({ ...prev, nextActionType: event.target.value }))}
               disabled={["GANADO", "PERDIDO"].includes(stageForm.stage)}
@@ -609,7 +706,7 @@ function CrmPipelinePageContent() {
             Fecha y hora
             <input
               type="datetime-local"
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.nextActionAt}
               onChange={(event) => setStageForm((prev) => ({ ...prev, nextActionAt: event.target.value }))}
               disabled={["GANADO", "PERDIDO"].includes(stageForm.stage)}
@@ -619,7 +716,7 @@ function CrmPipelinePageContent() {
             Notas
             <input
               type="text"
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.nextActionNotes}
               onChange={(event) => setStageForm((prev) => ({ ...prev, nextActionNotes: event.target.value }))}
               disabled={["GANADO", "PERDIDO"].includes(stageForm.stage)}
@@ -632,7 +729,7 @@ function CrmPipelinePageContent() {
             <label className="text-sm font-medium text-slate-700">
               Motivo de perdida
               <select
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
                 value={stageForm.lostReason}
                 onChange={(event) => setStageForm((prev) => ({ ...prev, lostReason: event.target.value }))}
               >
@@ -649,7 +746,7 @@ function CrmPipelinePageContent() {
               Nota (opcional)
               <input
                 type="text"
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
                 value={stageForm.lostNotes}
                 onChange={(event) => setStageForm((prev) => ({ ...prev, lostNotes: event.target.value }))}
               />
@@ -658,303 +755,241 @@ function CrmPipelinePageContent() {
         )}
       </Modal>
 
-      <Modal
+      <CrmDealDrawer
         open={!!actionDeal}
         onClose={() => setActionDeal(null)}
-        title="Acciones del deal"
-        subtitle={actionDeal ? getClientName(actionDeal) : undefined}
-        className="max-w-2xl"
-        footer={
-          <div className="flex items-center justify-between">
-            {actionError && <p className="text-sm text-rose-600">{actionError}</p>}
-            <button
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
-              onClick={() => setActionDeal(null)}
-            >
-              Cerrar
-            </button>
-          </div>
+        deal={actionDeal}
+        normalizedType={normalizedType}
+        actionError={actionError}
+        activityContent={
+          actionDeal ? (
+            <div className="space-y-1 text-xs text-slate-600">
+              <p>
+                Etapa actual:{" "}
+                <span className="font-semibold text-slate-800">
+                  {CRM_STAGE_LABELS[actionDeal.stage as keyof typeof CRM_STAGE_LABELS] || actionDeal.stage}
+                </span>
+              </p>
+              <p>
+                Próxima acción:{" "}
+                {actionDeal.nextActionAt ? `${actionDeal.nextAction || "Acción"} · ${formatDateTime(actionDeal.nextActionAt)}` : "Sin acción programada"}
+              </p>
+            </div>
+          ) : undefined
         }
-      >
-        {actionDeal && (
-          <div className="space-y-5">
-            <div className="rounded-2xl border border-slate-200 p-4">
+        tasksContent={
+          actionDeal ? (
+            <div className="space-y-2">
+              <p className="text-[11px] text-slate-500">Requiere fecha de último contacto. Programa cierre en 7 días y semáforo rojo.</p>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="datetime-local"
+                  className="h-[var(--crm-control-h)] flex-1 min-w-[180px] rounded-lg border border-slate-200 px-3 text-xs"
+                  value={noResponseDate}
+                  onChange={(event) => setNoResponseDate(event.target.value)}
+                />
+                <button
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                  onClick={handleNoResponse}
+                >
+                  Marcar no responde
+                </button>
+              </div>
+            </div>
+          ) : undefined
+        }
+        quotesContent={
+          actionDeal ? (
+            <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">Cotizaciones</p>
-                  <p className="text-xs text-slate-500">Sin PDFs manuales. Usa el flujo interno y deja el monto bloqueado.</p>
-                </div>
+                <p className="text-xs text-slate-600">Sin PDFs manuales. Usa flujo interno y monto bloqueado.</p>
                 <Link
                   href={`/admin/crm/deal/${actionDeal.id}?type=${normalizedType}#cotizaciones`}
-                  className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-soft hover:bg-slate-800"
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-3 text-xs font-semibold text-white hover:bg-[#4aadf5]"
                 >
-                  Crear cotizacion
+                  Crear cotización
                 </Link>
               </div>
-              <div className="mt-3 space-y-2">
-                {quotesLoading && <p className="text-xs text-slate-500">Cargando cotizaciones...</p>}
-                {!quotesLoading && quotes.length === 0 && (
-                  <p className="text-xs text-slate-500">Sin cotizaciones registradas.</p>
-                )}
-                {!quotesLoading &&
-                  quotes.map((quote) => {
-                    const linkedServices =
-                      quote.requests?.flatMap((qr: any) => qr.services || []) ||
-                      actionDeal.services?.map((s) => s.serviceType) ||
-                      [];
-                    const labelServices =
-                      linkedServices.length > 0 ? Array.from(new Set(linkedServices)).join(", ") : "Sin servicios vinculados";
-                    return (
-                      <div key={quote.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 p-3">
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold text-slate-800">
-                            #{quote.number} · {quote.status}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            Estado: {quote.status} · Total: {formatCurrency(quote.total)} · Servicios: {labelServices}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            className="rounded-full border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                            onClick={() => handleApproveQuote(quote.id)}
-                            disabled={quote.status === "APPROVED" || !isAdmin}
-                            title={!isAdmin ? "Acción solo para administrador." : quote.status === "APPROVED" ? "Ya aprobada" : undefined}
-                          >
-                            Aprobar (ADMIN)
-                          </button>
-                          <button
-                            className="rounded-full border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                            onClick={() => handleRejectQuote(quote.id)}
-                            disabled={!isAdmin}
-                            title={!isAdmin ? "Acción solo para administrador." : undefined}
-                          >
-                            Rechazar
-                          </button>
-                          <button
-                            className="rounded-full border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                            onClick={() => handleCloneQuote(quote.id)}
-                          >
-                            Clonar
-                          </button>
-                        </div>
+              {quotesLoading && <p className="text-xs text-slate-500">Cargando cotizaciones...</p>}
+              {!quotesLoading && quotes.length === 0 && <p className="text-xs text-slate-500">Sin cotizaciones registradas.</p>}
+              {!quotesLoading &&
+                quotes.map((quote) => {
+                  const linkedServices =
+                    quote.requests?.flatMap((quoteRequest: any) => quoteRequest.services || []) ||
+                    actionDeal.services?.map((service) => service.serviceType) ||
+                    [];
+                  const labelServices =
+                    linkedServices.length > 0 ? Array.from(new Set(linkedServices)).join(", ") : "Sin servicios vinculados";
+                  return (
+                    <div key={quote.id} className="rounded-lg border border-slate-200 p-2">
+                      <p className="text-xs font-semibold text-slate-800">
+                        #{quote.number} · {quote.status}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Estado: {quote.status} · Total: {formatCurrency(quote.total)} · Servicios: {labelServices}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-3 text-[11px] font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-50"
+                          onClick={() => handleApproveQuote(quote.id)}
+                          disabled={quote.status === "APPROVED" || !isAdmin}
+                          title={!isAdmin ? "Acción solo para administrador." : quote.status === "APPROVED" ? "Ya aprobada" : undefined}
+                        >
+                          Aprobar
+                        </button>
+                        <button
+                          className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-[11px] font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                          onClick={() => handleRejectQuote(quote.id)}
+                          disabled={!isAdmin}
+                          title={!isAdmin ? "Acción solo para administrador." : undefined}
+                        >
+                          Rechazar
+                        </button>
+                        <button
+                          className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-[11px] font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                          onClick={() => handleCloneQuote(quote.id)}
+                        >
+                          Clonar
+                        </button>
                       </div>
-                    );
-                  })}
-              </div>
+                    </div>
+                  );
+                })}
             </div>
-
-            <div className="rounded-2xl border border-slate-200 p-4">
+          ) : undefined
+        }
+        closingContent={
+          actionDeal ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:opacity-60"
+                  onClick={() => openStageModal(actionDeal, "NEGOCIACION")}
+                  disabled={!actionDeal.quoteCount || actionDeal.quoteStatus !== "APPROVED"}
+                >
+                  Pasar a negociacion
+                </button>
+                <button
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-3 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
+                  onClick={() => openStageModal(actionDeal, "GANADO")}
+                  disabled={!isAdmin || actionDeal.quoteStatus !== "APPROVED"}
+                  title={
+                    !isAdmin
+                      ? "Acción solo para administrador."
+                      : actionDeal.quoteStatus !== "APPROVED"
+                        ? "Requiere cotización aprobada y activa"
+                        : undefined
+                  }
+                >
+                  Cerrar como ganado
+                </button>
+                <button
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                  onClick={() => openStageModal(actionDeal, "PERDIDO")}
+                >
+                  Cerrar como perdido
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500">GANADO requiere cotización aprobada por ADMIN. PERDIDO requiere motivo obligatorio.</p>
+            </div>
+          ) : undefined
+        }
+        extraContent={
+          actionDeal ? (
+            <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">Solicitudes del cliente</p>
-                  <p className="text-xs text-slate-500">Describe necesidades y vincula cotizaciones.</p>
+                  <p className="text-xs font-semibold text-[#2e75ba]">Solicitudes del cliente</p>
+                  <p className="text-[11px] text-slate-500">Describe necesidades y vincula cotizaciones.</p>
                 </div>
-                <div className="text-xs text-slate-500">Estado: pendiente / cotizada</div>
+                <p className="text-[11px] text-slate-500">Estado: pendiente / cotizada</p>
               </div>
-              <div className="mt-3 space-y-3">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold text-slate-700">Servicios solicitados</p>
-                    <div className="flex flex-wrap gap-2">
-                      {serviceOptions.map((service) => {
-                        const active = requestForm.services.includes(service.value);
-                        return (
-                          <button
-                            key={service.value}
-                            className={cn(
-                              "rounded-full border px-3 py-2 text-[11px] font-semibold",
-                              active ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-700"
-                            )}
-                            onClick={() =>
-                              setRequestForm((prev) => ({
-                                ...prev,
-                                services: active
-                                  ? prev.services.filter((val) => val !== service.value)
-                                  : [...prev.services, service.value]
-                              }))
-                            }
-                          >
-                            {service.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <label className="text-xs font-semibold text-slate-700">
-                    Descripcion
-                    <textarea
-                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                      rows={3}
-                      value={requestForm.description}
-                      onChange={(e) => setRequestForm((prev) => ({ ...prev, description: e.target.value }))}
-                    />
-                  </label>
-                </div>
-                {requestError && <p className="text-xs text-rose-600">{requestError}</p>}
-                <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-soft hover:bg-slate-800"
-                    onClick={handleCreateRequest}
-                  >
-                    Registrar solicitud
-                  </button>
-                </div>
+              <div className="grid gap-2 md:grid-cols-2">
                 <div className="space-y-2">
-                  {requestsLoading && <p className="text-xs text-slate-500">Cargando solicitudes...</p>}
-                  {!requestsLoading && requests.length === 0 && <p className="text-xs text-slate-500">Sin solicitudes registradas.</p>}
-                  {!requestsLoading &&
-                    requests.map((req: any) => (
-                      <div key={req.id} className="rounded-xl border border-slate-200 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-800">{req.description}</p>
-                            <p className="text-xs text-slate-500">
-                              Servicios: {(req.services || []).join(", ")} · Estado: {req.status}
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <select
-                              className="rounded-full border border-slate-200 px-3 py-2 text-[11px]"
-                              value={requestLinks[req.id] || ""}
-                              onChange={(e) => setRequestLinks((prev) => ({ ...prev, [req.id]: e.target.value }))}
-                            >
-                              <option value="">Vincular a cotizacion</option>
-                              {quotes.map((q) => (
-                                <option key={q.id} value={q.id}>
-                                  #{q.number} · {q.status}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              className="rounded-full border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                              onClick={() => handleLinkRequest(req.id)}
-                            >
-                              Vincular
-                            </button>
-                          </div>
+                  <p className="text-xs font-semibold text-slate-700">Servicios solicitados</p>
+                  <div className="flex flex-wrap gap-2">
+                    {serviceOptions.map((service) => {
+                      const active = requestForm.services.includes(service.value);
+                      return (
+                        <button
+                          key={service.value}
+                          className={cn(
+                            "inline-flex h-[var(--crm-control-h)] items-center rounded-lg border px-3 text-[11px] font-semibold",
+                            active ? "border-[#2e75ba] bg-[#2e75ba] text-white" : "border-slate-200 text-slate-700"
+                          )}
+                          onClick={() =>
+                            setRequestForm((prev) => ({
+                              ...prev,
+                              services: active ? prev.services.filter((value) => value !== service.value) : [...prev.services, service.value]
+                            }))
+                          }
+                        >
+                          {service.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <label className="text-xs font-semibold text-slate-700">
+                  Descripción
+                  <textarea
+                    className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    rows={3}
+                    value={requestForm.description}
+                    onChange={(event) => setRequestForm((prev) => ({ ...prev, description: event.target.value }))}
+                  />
+                </label>
+              </div>
+              {requestError && <p className="text-xs text-rose-600">{requestError}</p>}
+              <div className="flex justify-end">
+                <button
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-3 text-xs font-semibold text-white hover:bg-[#4aadf5]"
+                  onClick={handleCreateRequest}
+                >
+                  Registrar solicitud
+                </button>
+              </div>
+              <div className="space-y-2">
+                {requestsLoading && <p className="text-xs text-slate-500">Cargando solicitudes...</p>}
+                {!requestsLoading && requests.length === 0 && <p className="text-xs text-slate-500">Sin solicitudes registradas.</p>}
+                {!requestsLoading &&
+                  requests.map((request: any) => (
+                    <div key={request.id} className="rounded-lg border border-slate-200 p-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-800">{request.description}</p>
+                          <p className="text-[11px] text-slate-500">
+                            Servicios: {(request.services || []).join(", ")} · Estado: {request.status}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            className="h-[var(--crm-control-h)] rounded-lg border border-slate-200 px-3 text-[11px]"
+                            value={requestLinks[request.id] || ""}
+                            onChange={(event) => setRequestLinks((prev) => ({ ...prev, [request.id]: event.target.value }))}
+                          >
+                            <option value="">Vincular a cotización</option>
+                            {quotes.map((quote) => (
+                              <option key={quote.id} value={quote.id}>
+                                #{quote.number} · {quote.status}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-[11px] font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                            onClick={() => handleLinkRequest(request.id)}
+                          >
+                            Vincular
+                          </button>
                         </div>
                       </div>
-                    ))}
-                </div>
+                    </div>
+                  ))}
               </div>
             </div>
-
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <p className="text-sm font-semibold text-slate-800">Seguimiento y cierres</p>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <div className="space-y-2 rounded-xl border border-slate-100 p-3">
-                  <p className="text-xs font-semibold text-slate-700">No responde el cliente</p>
-                  <p className="text-[11px] text-slate-500">Requiere fecha del ultimo contacto. Se programa cierre en 7 dias y semaforo en rojo.</p>
-                  <input
-                    type="datetime-local"
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                    value={noResponseDate}
-                    onChange={(e) => setNoResponseDate(e.target.value)}
-                  />
-                  <button
-                    className="w-full rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    onClick={handleNoResponse}
-                  >
-                    Marcar no responde
-                  </button>
-                </div>
-                <div className="space-y-2 rounded-xl border border-slate-100 p-3">
-                  <p className="text-xs font-semibold text-slate-700">Cierres</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      className="rounded-full border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                      onClick={() => openStageModal(actionDeal, "NEGOCIACION")}
-                      disabled={!actionDeal.quoteCount || actionDeal.quoteStatus !== "APPROVED"}
-                    >
-                      Pasar a negociacion
-                    </button>
-                    <button
-                      className="rounded-full border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                      onClick={() => openStageModal(actionDeal, "GANADO")}
-                      disabled={!isAdmin || actionDeal.quoteStatus !== "APPROVED"}
-                      title={
-                        !isAdmin
-                          ? "Acción solo para administrador."
-                          : actionDeal.quoteStatus !== "APPROVED"
-                            ? "Requiere cotización aprobada y activa"
-                            : undefined
-                      }
-                    >
-                      Cerrar como ganado (ADMIN)
-                    </button>
-                    <button
-                      className="rounded-full border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                      onClick={() => openStageModal(actionDeal, "PERDIDO")}
-                    >
-                      Cerrar como perdido
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-slate-500">
-                    GANADO solo con cotizacion aprobada por ADMIN. PERDIDO requiere motivo obligatorio.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      <Modal
-        open={!!detailDeal}
-        onClose={() => setDetailDeal(null)}
-        title="Detalles del cliente"
-        subtitle={detailDeal ? getClientName(detailDeal) : undefined}
-        className="max-w-md"
-        footer={
-          <div className="flex justify-end">
-            <button
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
-              onClick={() => setDetailDeal(null)}
-            >
-              Cerrar
-            </button>
-          </div>
+          ) : undefined
         }
-      >
-        {detailDeal && (
-          <div className="space-y-3 text-sm text-slate-700">
-            <p className="font-semibold">Contacto rapido</p>
-            <div className="space-y-1">
-              <p>Telefono: {detailDeal.contact?.phone || "Sin telefono"}</p>
-              <p>Email: {detailDeal.contact?.email || "Sin email"}</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {detailDeal.contact?.phone && (
-                <>
-                  <a
-                    className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    href={`tel:${detailDeal.contact.phone}`}
-                  >
-                    Llamar
-                  </a>
-                  <a
-                    className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    href={`https://wa.me/${detailDeal.contact.phone}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    WhatsApp
-                  </a>
-                </>
-              )}
-              {detailDeal.contact?.email && (
-                <a
-                  className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                  href={`mailto:${detailDeal.contact.email}`}
-                >
-                  Email
-                </a>
-              )}
-            </div>
-          </div>
-        )}
-      </Modal>
+      />
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   );

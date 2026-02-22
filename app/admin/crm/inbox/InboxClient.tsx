@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { ToastContainer } from "@/components/ui/Toast";
+import { CrmDealDrawer } from "@/components/crm/CrmDealDrawer";
 import { useToast } from "@/hooks/useToast";
 import { cn } from "@/lib/utils";
 import {
@@ -35,7 +36,7 @@ type Deal = {
   latestQuoteId?: string | null;
   missingAction?: boolean;
   account?: { id: string; name: string | null } | null;
-  contact?: { id: string; firstName: string | null; lastName?: string | null } | null;
+  contact?: { id: string; firstName: string | null; lastName?: string | null; phone?: string | null; email?: string | null } | null;
 };
 
 type Quote = {
@@ -314,6 +315,59 @@ function CrmInboxPageContent() {
     }
   };
 
+  const handleApproveLatestQuote = async () => {
+    if (!actionDeal?.latestQuoteId) {
+      setActionError("No hay cotizacion para aprobar");
+      return;
+    }
+    if (!isAdmin) {
+      const message = "Acción solo para administrador.";
+      setActionError(message);
+      showToast(message, "error");
+      return;
+    }
+    try {
+      setActionError(null);
+      await fetchJson(`/api/crm/quotes-v2/${actionDeal.latestQuoteId}/approve`, { method: "POST" });
+      await loadData();
+      setActionDeal(null);
+      showToast("Cotización aprobada", "success");
+    } catch (err: any) {
+      const message = normalizeError(err, "No se pudo aprobar");
+      setActionError(message);
+    }
+  };
+
+  const handleRejectLatestQuote = async () => {
+    if (!actionDeal?.latestQuoteId) {
+      setActionError("No hay cotizacion para rechazar");
+      return;
+    }
+    if (!rejectReason.trim()) {
+      setActionError("Motivo obligatorio para rechazar");
+      return;
+    }
+    if (!isAdmin) {
+      const message = "Acción solo para administrador.";
+      setActionError(message);
+      showToast(message, "error");
+      return;
+    }
+    try {
+      setActionError(null);
+      await fetchJson(`/api/crm/quotes-v2/${actionDeal.latestQuoteId}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ rejectionReason: rejectReason })
+      });
+      await loadData();
+      setActionDeal(null);
+      showToast("Cotización rechazada", "success");
+    } catch (err: any) {
+      const message = normalizeError(err, "No se pudo rechazar");
+      setActionError(message);
+    }
+  };
+
   const cards = useMemo(() => {
     if (!summary) return [];
     return [
@@ -325,17 +379,17 @@ function CrmInboxPageContent() {
   }, [summary]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-[#F8FAFC] p-3 shadow-sm">
         <div>
-          <p className="text-xs uppercase tracking-[0.3rem] text-slate-400">CRM - Bandeja</p>
-          <h1 className="text-2xl font-semibold text-slate-900">{pipelineTypeLabel}</h1>
-          <p className="text-sm text-slate-500">Prioriza riesgo, ejecuta la proxima accion y cierra deals.</p>
+          <p className="text-[11px] uppercase tracking-[0.2rem] text-[#2e75ba]">CRM - Bandeja</p>
+          <h1 className="text-xl font-semibold text-slate-900">{pipelineTypeLabel}</h1>
+          <p className="text-xs text-slate-500">Prioriza riesgo, ejecuta próximas acciones y cierra deals rápido.</p>
           <p className="text-xs text-slate-500">Este monto se calcula automáticamente desde cotizaciones aprobadas.</p>
         </div>
         <Link
           href={`/admin/crm/new?type=${normalizedType}`}
-          className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-soft hover:bg-slate-800"
+          className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-4 text-sm font-semibold text-white transition hover:bg-[#4aadf5]"
         >
           Nueva negociacion
         </Link>
@@ -344,21 +398,21 @@ function CrmInboxPageContent() {
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {infoNote && <p className="text-sm text-amber-700">{infoNote}</p>}
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
-          <Card key={card.label}>
-            <CardContent className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.18rem] text-slate-400">{card.label}</p>
-              <p className="text-2xl font-semibold text-slate-900">{card.value}</p>
+          <Card key={card.label} className="rounded-xl">
+            <CardContent className="space-y-1 py-3">
+              <p className="text-[11px] uppercase tracking-[0.12rem] text-[#2e75ba]">{card.label}</p>
+              <p className="text-xl font-semibold text-slate-900">{card.value}</p>
               <p className="text-xs text-slate-500">{card.meta}</p>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-wrap items-center gap-2">
-          <CardTitle>Semaforo</CardTitle>
+      <Card className="rounded-xl">
+        <CardHeader className="flex flex-wrap items-center gap-2 py-3">
+          <CardTitle className="text-sm text-[#2e75ba]">Semaforo</CardTitle>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <SlaChip status="GREEN" label="En tiempo" />
             <SlaChip status="YELLOW" label="Sin respuesta / cerca SLA" />
@@ -367,16 +421,16 @@ function CrmInboxPageContent() {
         </CardHeader>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>En riesgo</CardTitle>
+      <div className="grid gap-3 lg:grid-cols-3">
+        <Card className="rounded-xl lg:col-span-2">
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm text-[#2e75ba]">En riesgo</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2">
             {loading && <p className="text-sm text-slate-500">Cargando deals en riesgo...</p>}
             {!loading && data?.riskDeals?.length === 0 && <p className="text-sm text-slate-500">Sin deals en riesgo.</p>}
             {data?.riskDeals?.map((deal) => (
-              <div key={deal.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <div key={deal.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">{getClientName(deal)}</p>
                   <p className="text-xs text-slate-500">
@@ -392,7 +446,7 @@ function CrmInboxPageContent() {
                     {deal.nextActionAt ? formatDateTime(deal.nextActionAt) : "Sin accion"}
                   </div>
                   <button
-                    className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
                     onClick={() => openActions(deal)}
                   >
                     Acciones
@@ -403,11 +457,11 @@ function CrmInboxPageContent() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Proximas acciones (hoy)</CardTitle>
+        <Card className="rounded-xl">
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm text-[#2e75ba]">Proximas acciones (hoy)</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2">
             {loading && <p className="text-sm text-slate-500">Cargando acciones...</p>}
             {!loading && data?.nextActions?.length === 0 && <p className="text-sm text-slate-500">Sin acciones hoy.</p>}
             {data?.nextActions?.map((deal) => {
@@ -416,7 +470,7 @@ function CrmInboxPageContent() {
               const timeLabel = deal.nextActionAt ? new Date(deal.nextActionAt).toLocaleTimeString("es-GT", { hour: "2-digit", minute: "2-digit" }) : "-";
               const missing = deal.missingAction || !deal.nextAction || !deal.nextActionAt;
               return (
-                <div key={deal.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+                <div key={deal.id} className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">{getClientName(deal)}</p>
@@ -426,21 +480,21 @@ function CrmInboxPageContent() {
                     </div>
                     <SlaChip status={missing ? "RED" : deal.slaStatus} label={missing ? "Sin accion" : deal.slaStatus} />
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <button
-                      className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
+                      className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
                       onClick={() => openNextActionModal(deal, "done")}
                     >
                       Marcar hecho
                     </button>
                     <button
-                      className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
+                      className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
                       onClick={() => openNextActionModal(deal, "reprogram")}
                     >
                       Reprogramar
                     </button>
                     <button
-                      className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
+                      className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
                       onClick={() => openActions(deal)}
                     >
                       Acciones
@@ -453,15 +507,15 @@ function CrmInboxPageContent() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Cotizaciones sin respuesta</CardTitle>
+      <Card className="rounded-xl">
+        <CardHeader className="py-3">
+          <CardTitle className="text-sm text-[#2e75ba]">Cotizaciones sin respuesta</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-2">
           {loading && <p className="text-sm text-slate-500">Cargando cotizaciones...</p>}
           {!loading && data?.quoteFollowups?.length === 0 && <p className="text-sm text-slate-500">Sin cotizaciones pendientes.</p>}
           {data?.quoteFollowups?.map((quote) => (
-            <div key={quote.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3">
+            <div key={quote.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2">
               <div>
                 <p className="text-sm font-semibold text-slate-900">
                   Cotizacion #{quote.quoteNumber} - {quote.deal ? getClientName(quote.deal as Deal) : "Sin cliente"}
@@ -472,7 +526,7 @@ function CrmInboxPageContent() {
               </div>
               {quote.deal ? (
                 <button
-                  className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
                     onClick={() =>
                       openActions({
                         ...(quote.deal as Deal),
@@ -504,13 +558,13 @@ function CrmInboxPageContent() {
             {stageError && <p className="text-sm text-rose-600">{stageError}</p>}
             <div className="flex gap-2">
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-white"
                 onClick={() => setStageModal(null)}
               >
                 Cancelar
               </button>
               <button
-                className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-soft hover:bg-slate-800"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-5 text-sm font-semibold text-white shadow-sm hover:bg-[#4aadf5]"
                 onClick={handleStageSave}
               >
                 Guardar
@@ -523,7 +577,7 @@ function CrmInboxPageContent() {
           <label className="text-sm font-medium text-slate-700">
             Etapa
             <select
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.stage}
               onChange={(event) => setStageForm((prev) => ({ ...prev, stage: event.target.value }))}
             >
@@ -537,7 +591,7 @@ function CrmInboxPageContent() {
           <label className="text-sm font-medium text-slate-700">
             Tipo de accion
             <select
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.nextActionType}
               onChange={(event) => setStageForm((prev) => ({ ...prev, nextActionType: event.target.value }))}
               disabled={["GANADO", "PERDIDO"].includes(stageForm.stage)}
@@ -553,7 +607,7 @@ function CrmInboxPageContent() {
             Fecha y hora
             <input
               type="datetime-local"
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.nextActionAt}
               onChange={(event) => setStageForm((prev) => ({ ...prev, nextActionAt: event.target.value }))}
               disabled={["GANADO", "PERDIDO"].includes(stageForm.stage)}
@@ -563,7 +617,7 @@ function CrmInboxPageContent() {
             Notas
             <input
               type="text"
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={stageForm.nextActionNotes}
               onChange={(event) => setStageForm((prev) => ({ ...prev, nextActionNotes: event.target.value }))}
               disabled={["GANADO", "PERDIDO"].includes(stageForm.stage)}
@@ -576,7 +630,7 @@ function CrmInboxPageContent() {
             <label className="text-sm font-medium text-slate-700">
               Motivo de perdida
               <select
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
                 value={stageForm.lostReason}
                 onChange={(event) => setStageForm((prev) => ({ ...prev, lostReason: event.target.value }))}
               >
@@ -593,7 +647,7 @@ function CrmInboxPageContent() {
               Nota (opcional)
               <input
                 type="text"
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
                 value={stageForm.lostNotes}
                 onChange={(event) => setStageForm((prev) => ({ ...prev, lostNotes: event.target.value }))}
               />
@@ -602,56 +656,91 @@ function CrmInboxPageContent() {
         )}
       </Modal>
 
-      <Modal
+      <CrmDealDrawer
         open={!!actionDeal}
         onClose={() => setActionDeal(null)}
-        title="Acciones del deal"
-        subtitle={actionDeal ? getClientName(actionDeal) : undefined}
-        className="max-w-2xl"
-        footer={
-          <div className="flex items-center justify-between">
-            {actionError && <p className="text-sm text-rose-600">{actionError}</p>}
-            <button
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
-              onClick={() => setActionDeal(null)}
-            >
-              Cerrar
-            </button>
-          </div>
-        }
-      >
-        {actionDeal && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href={`/admin/crm/deal/${actionDeal.id}?type=${normalizedType}`}
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Ver historial completo
-              </Link>
-              <Link
-                href={`/admin/crm/deal/${actionDeal.id}?type=${normalizedType}#cotizaciones`}
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Ver cotizaciones
-              </Link>
-              <Link
-                href={`/admin/crm/deal/${actionDeal.id}?type=${normalizedType}#cotizaciones`}
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Crear nueva cotizacion
-              </Link>
+        deal={actionDeal}
+        normalizedType={normalizedType}
+        actionError={actionError}
+        activityContent={
+          actionDeal ? (
+            <div className="space-y-1 text-xs text-slate-600">
+              <p>
+                Etapa actual:{" "}
+                <span className="font-semibold text-slate-800">
+                  {CRM_STAGE_LABELS[actionDeal.stage as keyof typeof CRM_STAGE_LABELS] || actionDeal.stage}
+                </span>
+              </p>
+              <p>
+                Próxima acción:{" "}
+                {actionDeal.nextActionAt ? `${actionDeal.nextAction || "Acción"} · ${formatDateTime(actionDeal.nextActionAt)}` : "Sin acción programada"}
+              </p>
             </div>
+          ) : undefined
+        }
+        tasksContent={
+          actionDeal ? (
             <div className="flex flex-wrap gap-2">
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                onClick={() => openNextActionModal(actionDeal, "done")}
+              >
+                Marcar hecho
+              </button>
+              <button
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                onClick={() => openNextActionModal(actionDeal, "reprogram")}
+              >
+                Reprogramar
+              </button>
+            </div>
+          ) : undefined
+        }
+        quotesContent={
+          actionDeal ? (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-600">
+                Estado: {actionDeal.quoteStatus || "SIN_COTIZAR"} · Total estimado: {formatCurrency(actionDeal.amount ?? actionDeal.amountEstimated ?? 0)}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-3 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
+                  onClick={handleApproveLatestQuote}
+                  disabled={!actionDeal.latestQuoteId || !isAdmin}
+                  title={!isAdmin ? "Acción solo para administrador." : undefined}
+                >
+                  Marcar aprobada
+                </button>
+                <input
+                  className="h-[var(--crm-control-h)] flex-1 min-w-[140px] rounded-lg border border-slate-200 px-3 text-xs"
+                  placeholder="Motivo rechazo"
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                />
+                <button
+                  className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:opacity-60"
+                  onClick={handleRejectLatestQuote}
+                  disabled={!actionDeal.latestQuoteId || !isAdmin}
+                  title={!isAdmin ? "Acción solo para administrador." : undefined}
+                >
+                  Marcar rechazada
+                </button>
+              </div>
+            </div>
+          ) : undefined
+        }
+        closingContent={
+          actionDeal ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:opacity-60"
                 onClick={() => openStageModal(actionDeal, "NEGOCIACION")}
                 disabled={!actionDeal.quoteCount || actionDeal.quoteStatus !== "APPROVED"}
               >
                 Pasar a negociacion
               </button>
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-3 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
                 onClick={() => openStageModal(actionDeal, "GANADO")}
                 disabled={!isAdmin || actionDeal.quoteStatus !== "APPROVED"}
                 title={
@@ -665,96 +754,15 @@ function CrmInboxPageContent() {
                 Cerrar como ganado
               </button>
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
                 onClick={() => openStageModal(actionDeal, "PERDIDO")}
               >
                 Cerrar como perdido
               </button>
             </div>
-            <div className="space-y-2 rounded-2xl border border-slate-200 p-3">
-              <p className="text-sm font-semibold text-slate-800">Cotizacion activa</p>
-              <p className="text-xs text-slate-500">
-                Estado: {actionDeal.quoteStatus || "SIN_COTIZAR"} · Total estimado: {formatCurrency(actionDeal.amount ?? actionDeal.amountEstimated ?? 0)}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                  onClick={async () => {
-                    if (!actionDeal.latestQuoteId) {
-                      setActionError("No hay cotizacion para aprobar");
-                      return;
-                    }
-                    if (!isAdmin) {
-                      const message = "Acción solo para administrador.";
-                      setActionError(message);
-                      showToast(message, "error");
-                      return;
-                    }
-                    try {
-                      setActionError(null);
-                      await fetchJson(`/api/crm/quotes-v2/${actionDeal.latestQuoteId}/approve`, { method: "POST" });
-                      await loadData();
-                      setActionDeal(null);
-                      showToast("Cotización aprobada", "success");
-                    } catch (err: any) {
-                      const message = normalizeError(err, "No se pudo aprobar");
-                      setActionError(message);
-                    }
-                  }}
-                  disabled={!actionDeal.latestQuoteId || !isAdmin}
-                  title={!isAdmin ? "Acción solo para administrador." : undefined}
-                >
-                  Marcar aprobada
-                </button>
-                <div className="flex flex-1 flex-wrap items-center gap-2">
-                  <input
-                    className="flex-1 min-w-[160px] rounded-xl border border-slate-200 px-3 py-2 text-xs"
-                    placeholder="Motivo rechazo"
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                  />
-                  <button
-                    className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                    onClick={async () => {
-                      if (!actionDeal.latestQuoteId) {
-                        setActionError("No hay cotizacion para rechazar");
-                        return;
-                      }
-                      if (!rejectReason.trim()) {
-                        setActionError("Motivo obligatorio para rechazar");
-                        return;
-                      }
-                      if (!isAdmin) {
-                        const message = "Acción solo para administrador.";
-                        setActionError(message);
-                        showToast(message, "error");
-                        return;
-                      }
-                      try {
-                        setActionError(null);
-                        await fetchJson(`/api/crm/quotes-v2/${actionDeal.latestQuoteId}/reject`, {
-                          method: "POST",
-                          body: JSON.stringify({ rejectionReason: rejectReason })
-                        });
-                        await loadData();
-                        setActionDeal(null);
-                        showToast("Cotización rechazada", "success");
-                      } catch (err: any) {
-                        const message = normalizeError(err, "No se pudo rechazar");
-                        setActionError(message);
-                      }
-                    }}
-                    disabled={!actionDeal.latestQuoteId || !isAdmin}
-                    title={!isAdmin ? "Acción solo para administrador." : undefined}
-                  >
-                    Marcar rechazada
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
+          ) : undefined
+        }
+      />
 
       <Modal
         open={!!nextActionModal}
@@ -767,13 +775,13 @@ function CrmInboxPageContent() {
             {nextActionError && <p className="text-sm text-rose-600">{nextActionError}</p>}
             <div className="flex gap-2">
               <button
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-white"
                 onClick={() => setNextActionModal(null)}
               >
                 Cancelar
               </button>
               <button
-                className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-soft hover:bg-slate-800"
+                className="inline-flex h-[var(--crm-control-h)] items-center rounded-lg bg-[#4aa59c] px-5 text-sm font-semibold text-white shadow-sm hover:bg-[#4aadf5]"
                 onClick={handleSaveNextAction}
               >
                 Guardar
@@ -786,7 +794,7 @@ function CrmInboxPageContent() {
           <label className="text-sm font-medium text-slate-700">
             Tipo
             <select
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={nextActionForm.type}
               onChange={(event) => setNextActionForm((prev) => ({ ...prev, type: event.target.value }))}
             >
@@ -801,7 +809,7 @@ function CrmInboxPageContent() {
             Fecha y hora
             <input
               type="datetime-local"
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={nextActionForm.dueAt}
               onChange={(event) => setNextActionForm((prev) => ({ ...prev, dueAt: event.target.value }))}
             />
@@ -810,7 +818,7 @@ function CrmInboxPageContent() {
             Notas
             <input
               type="text"
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-2 h-[var(--crm-control-h)] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               placeholder="Agrega contexto para la proxima accion"
               value={nextActionForm.notes}
               onChange={(event) => setNextActionForm((prev) => ({ ...prev, notes: event.target.value }))}
