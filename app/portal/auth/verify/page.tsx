@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { PortalVerifyForm } from "@/components/portal/PortalVerifyForm";
 
 export const runtime = "nodejs";
@@ -12,7 +13,9 @@ export default function PortalVerifyPage() {
           Puedes entrar con enlace mágico o con código OTP. El acceso vence a los 10 minutos.
         </p>
         <div className="mt-6">
-          <PortalVerifyForm />
+          <Suspense fallback={<p className="text-sm text-slate-500">Cargando verificación...</p>}>
+            <PortalVerifyForm />
+          </Suspense>
         </div>
       </section>
     </main>

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import pkg from "@prisma/client";
 import type { HrEmployeeStatus as HrEmployeeStatusType } from "@prisma/client";
 

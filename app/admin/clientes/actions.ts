@@ -567,6 +567,7 @@ export async function actionCreatePersonClient(input: {
   secondLastName?: string;
   dpi: string;
   phone: string;
+  phoneCountryIso2?: string;
   email?: string;
   addressGeneral?: string;
   addressHome?: string;
@@ -575,6 +576,7 @@ export async function actionCreatePersonClient(input: {
   geoAdmin1Id?: string;
   geoAdmin2Id?: string;
   geoAdmin3Id?: string;
+  geoPostalCode?: string;
   affiliations?: Array<{
     entityType?: ClientProfileType;
     entityClientId: string;
@@ -750,6 +752,7 @@ export async function actionCreateCompanyClient(input: {
   department: string;
   country?: string;
   phone?: string;
+  phoneCountryIso2?: string;
   email?: string;
 }) {
   const user = await requireAdminUser();
@@ -828,6 +831,7 @@ export async function actionCreateInstitutionClient(input: {
   department: string;
   country?: string;
   phone?: string;
+  phoneCountryIso2?: string;
   email?: string;
 }) {
   const user = await requireAdminUser();
@@ -911,6 +915,7 @@ export async function actionCreateInsurerClient(input: {
   department?: string;
   country?: string;
   phone?: string;
+  phoneCountryIso2?: string;
   email?: string;
 }) {
   const user = await requireAdminUser();
@@ -2336,6 +2341,7 @@ export async function actionAddClientLocation(input: {
   geoAdmin1Id?: string;
   geoAdmin2Id?: string;
   geoAdmin3Id?: string;
+  postalCode?: string;
   label?: string;
   isPrimary?: boolean;
 }) {
@@ -2362,6 +2368,7 @@ export async function actionAddClientLocation(input: {
       geoAdmin1Id: geo.geoAdmin1Id,
       geoAdmin2Id: geo.geoAdmin2Id,
       geoAdmin3Id: geo.geoAdmin3Id,
+      postalCode: normalizeOptional(input.postalCode),
       label: normalizeOptional(input.label),
       isPrimary: Boolean(input.isPrimary)
     },
@@ -2942,6 +2949,7 @@ export async function actionUpdateClientBasics(input: {
   institutionTypeId?: string;
   nit?: string;
   phone?: string;
+  phoneCountryIso2?: string;
   email?: string;
   address?: string;
   city?: string;

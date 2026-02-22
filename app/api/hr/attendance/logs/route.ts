@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { Prisma, TimeClockLogSource } from "@prisma/client";
+import { Prisma, TimeClockLogSource, TimeClockLogType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api/hr";
 import { manualLogSchema, timeClockLogFiltersSchema } from "@/lib/hr/attendance/schemas";
@@ -106,6 +106,7 @@ export async function POST(req: NextRequest) {
 
   const branchId = employee.branchAssignments?.[0]?.branchId || null;
   const legalEntityId = employee.primaryLegalEntityId || null;
+  const logType: TimeClockLogType = parsed.data.type === "CHECK_OUT" ? "OUT" : "IN";
 
   const log = await prisma.timeClockLog.create({
     data: {
@@ -115,14 +116,21 @@ export async function POST(req: NextRequest) {
       branchId,
       legalEntityId,
       timestamp,
-      type: parsed.data.type,
+      type: logType,
       source: TimeClockLogSource.MANUAL,
       notes: parsed.data.notes?.trim() || null
     },
+    select: { id: true }
+  });
+  const enrichedLog = await prisma.timeClockLog.findUnique({
+    where: { id: log.id },
     include: { HrEmployee: true, TimeClockDevice: true, Branch: true }
   });
+  if (!enrichedLog) {
+    return NextResponse.json({ error: "No se pudo cargar el registro creado" }, { status: 500 });
+  }
 
   await processAttendanceDay({ employeeId: parsed.data.employeeId, date: startOfDay(timestamp) });
 
-  return NextResponse.json({ data: serializeLog(log) }, { status: 201 });
+  return NextResponse.json({ data: serializeLog(enrichedLog) }, { status: 201 });
 }
