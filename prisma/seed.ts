@@ -24,7 +24,6 @@ const {
   CrmTaskPriority,
   CrmServiceType,
   QuoteType,
-  MembershipPlanSegment,
   HrEmploymentType,
   HrEmployeeStatus,
   HrEmployeeDocumentType,
@@ -1215,40 +1214,49 @@ async function main() {
     }
   });
 
+  const membershipPlanCategoryDelegate = (prisma as any).membershipPlanCategory;
+  const membershipSegmentValues = {
+    B2C: "B2C",
+    B2B: "B2B"
+  };
   const membershipCategories = [
-    { name: "Individual", segment: MembershipPlanSegment.B2C, sortOrder: 10 },
-    { name: "Escolar", segment: MembershipPlanSegment.B2C, sortOrder: 20 },
-    { name: "Familiar", segment: MembershipPlanSegment.B2C, sortOrder: 30 },
-    { name: "Familiar Plus", segment: MembershipPlanSegment.B2C, sortOrder: 40 },
-    { name: "Oro", segment: MembershipPlanSegment.B2B, sortOrder: 10 },
-    { name: "Plata", segment: MembershipPlanSegment.B2B, sortOrder: 20 },
-    { name: "Platino", segment: MembershipPlanSegment.B2B, sortOrder: 30 },
-    { name: "Salud Ocupacional", segment: MembershipPlanSegment.B2B, sortOrder: 40 }
+    { name: "Individual", segment: membershipSegmentValues.B2C, sortOrder: 10 },
+    { name: "Escolar", segment: membershipSegmentValues.B2C, sortOrder: 20 },
+    { name: "Familiar", segment: membershipSegmentValues.B2C, sortOrder: 30 },
+    { name: "Familiar Plus", segment: membershipSegmentValues.B2C, sortOrder: 40 },
+    { name: "Oro", segment: membershipSegmentValues.B2B, sortOrder: 10 },
+    { name: "Plata", segment: membershipSegmentValues.B2B, sortOrder: 20 },
+    { name: "Platino", segment: membershipSegmentValues.B2B, sortOrder: 30 },
+    { name: "Salud Ocupacional", segment: membershipSegmentValues.B2B, sortOrder: 40 }
   ];
 
-  for (const category of membershipCategories) {
-    await prisma.membershipPlanCategory
-      .upsert({
-        where: {
-          name_segment: {
+  if (!membershipPlanCategoryDelegate?.upsert) {
+    console.info("[seed] membershipPlanCategory no disponible en Prisma client; se omite seed legacy de categorías.");
+  } else {
+    for (const category of membershipCategories) {
+      await membershipPlanCategoryDelegate
+        .upsert({
+          where: {
+            name_segment: {
+              name: category.name,
+              segment: category.segment
+            }
+          },
+          update: {
+            isActive: true,
+            sortOrder: category.sortOrder
+          },
+          create: {
             name: category.name,
-            segment: category.segment
+            segment: category.segment,
+            isActive: true,
+            sortOrder: category.sortOrder
           }
-        },
-        update: {
-          isActive: true,
-          sortOrder: category.sortOrder
-        },
-        create: {
-          name: category.name,
-          segment: category.segment,
-          isActive: true,
-          sortOrder: category.sortOrder
-        }
-      })
-      .catch((err) => {
-        console.error("Seed membership category failed", category, err);
-      });
+        })
+        .catch((err: unknown) => {
+          console.error("Seed membership category failed", category, err);
+        });
+    }
   }
 
   const currentYear = new Date().getFullYear();

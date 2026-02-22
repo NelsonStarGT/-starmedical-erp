@@ -16,6 +16,9 @@ export type AuditParams = {
   metadata?: Record<string, any>;
 };
 
+const knownValidActorIds = new Set<string>();
+const knownInvalidActorIds = new Set<string>();
+
 function buildMetadata(req?: NextRequest, extra?: Record<string, any>, requestId?: string | null) {
   const base: Record<string, any> = { ...(extra || {}) };
   if (requestId) {
@@ -30,23 +33,58 @@ function buildMetadata(req?: NextRequest, extra?: Record<string, any>, requestId
   return base;
 }
 
+async function actorUserExists(actorUserId: string) {
+  if (knownValidActorIds.has(actorUserId)) return true;
+  if (knownInvalidActorIds.has(actorUserId)) return false;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: actorUserId },
+      select: { id: true }
+    });
+    const exists = Boolean(user?.id);
+    if (exists) {
+      knownValidActorIds.add(actorUserId);
+    } else {
+      knownInvalidActorIds.add(actorUserId);
+    }
+    return exists;
+  } catch {
+    // Si no podemos verificar, degradamos a "sin actor" para evitar FK inválida.
+    return false;
+  }
+}
+
+export async function resolveAuditActorUserId(
+  user?: SessionUser | null,
+  existsResolver: (actorUserId: string) => Promise<boolean> = actorUserExists
+): Promise<string | null> {
+  const actorUserId = user?.id?.trim();
+  if (!actorUserId) return null;
+  return (await existsResolver(actorUserId)) ? actorUserId : null;
+}
+
 export async function auditLog(params: AuditParams) {
+  const actorUserId = await resolveAuditActorUserId(params.user);
+  const metadata = buildMetadata(
+    params.req,
+    {
+      ...(params.module ? { module: params.module } : {}),
+      ...(params.metadata || {}),
+      ...(params.user?.id && !actorUserId ? { droppedActorUserId: params.user.id } : {})
+    },
+    params.requestId
+  );
+
   try {
     await prisma.auditLog.create({
       data: {
         action: params.action,
         entityType: params.entityType,
         entityId: params.entityId,
-        actorUserId: params.user?.id || null,
+        actorUserId: actorUserId ?? null,
         actorRole: params.user?.roles?.[0] || null,
-        metadata: buildMetadata(
-          params.req,
-          {
-            ...(params.module ? { module: params.module } : {}),
-            ...(params.metadata || {})
-          },
-          params.requestId
-        ),
+        metadata,
         before: params.before ?? null,
         after: params.after ?? null
       }
