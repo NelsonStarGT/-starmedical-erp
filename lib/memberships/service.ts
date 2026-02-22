@@ -26,7 +26,7 @@ import {
   updatePlanSchema
 } from "@/lib/memberships/schemas";
 import { decimalToNumberOrZero, serializeContract, serializePayment, serializePlan } from "@/lib/memberships/serializers";
-import { registerPayment as registerPaymentLegacyCompat } from "@/src/lib/memberships/service";
+import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
 import { z } from "zod";
 
 const CURRENCY_ALLOWLIST = new Set(["GTQ", "USD", "EUR"]);
@@ -643,8 +643,9 @@ export async function registerContractPayment(contractId: string, input: Registe
 }
 
 // Compat API for legacy route: /api/membresias/contratos/[id]/pago
-export async function registerPayment(prismaLike: any, contractId: string, rawInput: unknown) {
-  return registerPaymentLegacyCompat(prismaLike, contractId, rawInput);
+export async function registerPayment(_prismaLike: any, contractId: string, rawInput: unknown) {
+  const payload = registerPaymentSchema.parse(rawInput);
+  return registerContractPayment(contractId, payload, null);
 }
 
 export async function listRenewalQueue(user: SessionUser | null) {
@@ -694,7 +695,7 @@ export async function listRenewalQueue(user: SessionUser | null) {
       owner: row.ClientProfile,
       plan: serializePlan(row.MembershipPlan),
       actions: {
-        invoiceUrl: `/admin/facturacion?source=membership&contractId=${row.id}`,
+        invoiceUrl: buildMembershipInvoiceLink({ contractId: row.id }),
         contractUrl: `/admin/membresias/contratos/${row.id}`
       }
     };
@@ -1093,8 +1094,12 @@ export async function subscribePublicMembership(input: PublicSubscribeInput) {
     contractId: contract.id,
     invoiceId: receivable?.id ?? null,
     nextStepUrl: receivable?.id
-      ? `/admin/finanzas?tab=operacion&source=membership&contractId=${contract.id}&receivableId=${receivable.id}`
-      : `/admin/facturacion?source=membership&contractId=${contract.id}`,
+      ? buildMembershipInvoiceLink({
+          contractId: contract.id,
+          basePath: "/admin/finanzas",
+          params: { tab: "operacion", receivableId: receivable.id }
+        })
+      : buildMembershipInvoiceLink({ contractId: contract.id }),
     source: "fresh-create" as const
   };
 

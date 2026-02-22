@@ -52,6 +52,10 @@ function sumWidths(indices: number[], widths: number[], gap: number) {
   return total;
 }
 
+function isValidIndex(idx: number, length: number) {
+  return Number.isInteger(idx) && idx >= 0 && idx < length;
+}
+
 function computeActiveIndex(items: ModuleTopTabItem[], pathname: string) {
   let bestIndex = -1;
   let bestScore = -1;
@@ -102,6 +106,7 @@ export default function ModuleTopTabs({
 
   const [visibleIndices, setVisibleIndices] = useState<number[]>(() => items.map((_, i) => i));
   const [menuOpen, setMenuOpen] = useState(false);
+  const safeVisibleIndices = useMemo(() => visibleIndices.filter((idx) => isValidIndex(idx, items.length)), [visibleIndices, items.length]);
 
   const recompute = useCallback(() => {
     const viewport = viewportRef.current;
@@ -197,9 +202,9 @@ export default function ModuleTopTabs({
   }, [menuOpen]);
 
   const overflowIndices = useMemo(() => {
-    const visible = new Set(visibleIndices);
+    const visible = new Set(safeVisibleIndices);
     return items.map((_, idx) => idx).filter((idx) => !visible.has(idx));
-  }, [items, visibleIndices]);
+  }, [items, safeVisibleIndices]);
 
   const showMore = overflowIndices.length > 0;
   const moreActive = showMore && activeIndex >= 0 && overflowIndices.includes(activeIndex);
@@ -224,8 +229,9 @@ export default function ModuleTopTabs({
     >
       <div ref={viewportRef} className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
-          {visibleIndices.map((idx) => {
+          {safeVisibleIndices.map((idx) => {
             const item = items[idx];
+            if (!item) return null;
             const isActive = idx === activeIndex && !moreActive;
             const isDisabled = Boolean(item.disabled || !item.href);
             const tabClassName = cn(baseTabClasses, isDisabled ? disabledClasses : isActive ? activeClasses : inactiveClasses);
@@ -275,6 +281,7 @@ export default function ModuleTopTabs({
                   <div className="max-h-80 overflow-auto p-1">
                     {overflowIndices.map((idx) => {
                       const item = items[idx];
+                      if (!item) return null;
                       const isActive = idx === activeIndex;
                       const isDisabled = Boolean(item.disabled || !item.href);
                       const rowClasses = cn(

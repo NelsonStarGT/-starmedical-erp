@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/memberships/EmptyState";
 import { FiltersBar } from "@/components/memberships/FiltersBar";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { contractStatusBadgeClass, dateLabel, money } from "@/app/admin/membresias/_lib";
+import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
 
 type OwnerType = "PERSON" | "COMPANY";
 
@@ -357,7 +358,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
                       Ver
                     </Link>
                     <Link
-                      href={`/admin/facturacion?source=membership&contractId=${contract.id}`}
+                      href={buildMembershipInvoiceLink({ contractId: contract.id })}
                       className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
                     >
                       Generar factura

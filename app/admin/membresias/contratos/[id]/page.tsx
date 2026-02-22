@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { dateLabel, money, contractStatusBadgeClass } from "@/app/admin/membresias/_lib";
+import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
 
 type ContractDetail = {
   id: string;
@@ -137,7 +138,7 @@ export default function MembershipContractDetailPage() {
       description="Detalle operativo del contrato, historial y registro de pagos (sin reactivación automática de estados suspendidos/cancelados)."
       actions={
         <Link
-          href={`/admin/facturacion?source=membership&contractId=${contractId}`}
+          href={buildMembershipInvoiceLink({ contractId })}
           className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
         >
           Generar factura

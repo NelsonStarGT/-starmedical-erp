@@ -6,6 +6,7 @@ import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { dateLabel, money, contractStatusBadgeClass } from "@/app/admin/membresias/_lib";
+import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
 
 type RenewalRow = {
   id: string;
@@ -132,7 +133,7 @@ export default function MembershipRenewalsPage() {
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-1">
                     <Link
-                      href={`/admin/facturacion?source=membership&contractId=${row.id}`}
+                      href={buildMembershipInvoiceLink({ contractId: row.id })}
                       className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
                     >
                       Generar factura
