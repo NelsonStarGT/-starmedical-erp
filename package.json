@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:clients": "tsc --noEmit -p tsconfig.clients.json",
     "test": "tsx --test \"tests/**/*.test.ts\" \"src/tests/**/*.test.ts\"",
+    "test:baseline": "tsx --test \"tests/**/*.test.ts\" \"src/tests/**/*.test.ts\" --test-reporter=spec --test-concurrency=1",
     "qa": "npm run lint && npm run typecheck && npm run test",
     "smoke": "node scripts/smoke-test.js",
     "smoke:ci": "node scripts/smoke-ci.cjs",
