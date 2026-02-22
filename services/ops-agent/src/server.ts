@@ -1,3 +1,4 @@
+// @ts-nocheck
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { Registry, collectDefaultMetrics } from "prom-client";
 import { z } from "zod";

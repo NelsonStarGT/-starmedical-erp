@@ -27,7 +27,7 @@ export type ClientBasics = {
   institutionTypeId: string | null;
   nit: string | null;
   phone: string | null;
-  phoneE164: string | null;
+  phoneE164?: string | null;
   email: string | null;
   address: string | null;
   city: string | null;

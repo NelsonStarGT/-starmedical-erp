@@ -126,7 +126,7 @@ export async function GET(req: NextRequest) {
   ]);
 
   return NextResponse.json({
-    data: employees.map(serializeEmployee),
+    data: employees.map((employee) => serializeEmployee(employee)),
     meta: {
       page,
       pageSize: PAGE_SIZE,

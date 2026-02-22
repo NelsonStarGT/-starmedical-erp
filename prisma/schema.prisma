@@ -14,7 +14,9 @@ model User {
   passwordHash                 String
   isActive                     Boolean                      @default(true)
   branchId                     String?
+  tenantId                     String?
   profile                      UserProfile?
+  tenant                       Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   createdAt                    DateTime                     @default(now())
   updatedAt                    DateTime                     @updatedAt
   auditLogs                    AuditLog[]                   @relation("AuditActor")
@@ -69,6 +71,7 @@ model User {
   clientDocumentsRejected      ClientDocument[]             @relation("ClientDocRejectedBy")
   clientAuditEvents            ClientAuditEvent[]           @relation("ClientAuditActor")
   clientNotes                  ClientNote[]                 @relation("ClientNoteActor")
+  branchAccesses               UserBranchAccess[]
   visitsCreated                Visit[]                      @relation("VisitCreatedBy")
   visitsUpdated                Visit[]                      @relation("VisitUpdatedBy")
   visitEvents                  VisitEvent[]                 @relation("VisitEventActor")
@@ -81,6 +84,8 @@ model User {
   serviceRequestsAssigned      ServiceRequest[]             @relation("ServiceRequestAssignedTo")
   operationalIncidentsReported OperationalIncident[]        @relation("OperationalIncidentReportedBy")
   operationalIncidentsResolved OperationalIncident[]        @relation("OperationalIncidentResolvedBy")
+  tenantThemeConfigsUpdated    TenantThemeConfig[]          @relation("TenantThemeUpdatedBy")
+  systemFeatureConfigsUpdated  SystemFeatureConfig[]        @relation("SystemFeatureUpdatedBy")
 }
 
 model Department {
@@ -743,6 +748,7 @@ model ApiIntegrationConfig {
 
 model LegalEntity {
   id                 String               @id @default(cuid())
+  tenantId           String?
   name               String
   comercialName      String?
   nit                String?
@@ -766,6 +772,24 @@ model LegalEntity {
   roles              Role[]
   userPermissions    UserPermission[]
   companiesAsDefault Company[]            @relation("CompanyDefaultBillingLegalEntity")
+  tenant             Tenant?              @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  satEstablishments  BranchSatEstablishment[]
+  branchBillingProfiles BranchBillingProfile[]
+  tradeUnits         TradeUnit[]
+}
+
+model Tenant {
+  id                 String               @id @default("global")
+  name               String
+  isActive           Boolean              @default(true)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  users              User[]
+  branches           Branch[]
+  legalEntities      LegalEntity[]
+  userBranchAccesses UserBranchAccess[]
+  branchBillingProfiles BranchBillingProfile[]
+  tradeUnits         TradeUnit[]
 }
 
 model Party {
@@ -1033,66 +1057,68 @@ model CrmLead {
 }
 
 model ClientProfile {
-  id                                  String                                @id @default(cuid())
-  type                                ClientProfileType
-  companyName                         String?
-  tradeName                           String?
-  firstName                           String?
-  middleName                          String?
-  lastName                            String?
-  secondLastName                      String?
-  sex                                 PatientSex?
-  birthDate                           DateTime?
-  address                             String?
-  city                                String?
-  department                          String?
-  country                             String?
-  nit                                 String?                               @unique
-  dpi                                 String?                               @unique
-  email                               String?
-  phone                               String?
-  photoAssetId                        String?
-  photoUrl                            String?
-  statusId                            String?
-  sectorId                            String?
-  institutionTypeId                   String?
-  relationTypeId                      String?
-  paymentTermId                       String?
-  partyId                             String?
-  deletedAt                           DateTime?
-  createdAt                           DateTime                              @default(now())
-  updatedAt                           DateTime                              @updatedAt
-  accounts                            CrmAccount[]
-  contacts                            CrmContact[]
-  leads                               CrmLead[]
-  clientDocuments                     ClientDocument[]
-  clientLocations                     ClientLocation[]
-  clientContacts                      ClientContact[]
-  companyRecord                       Company?                              @relation("CompanyClientProfile")
-  companyContacts                     CompanyContact[]                      @relation("CompanyContactPersonClient")
-  clientNotes                         ClientNote[]
-  auditEvents                         ClientAuditEvent[]
-  portalOtpChallenges                 PortalOtpChallenge[]
-  portalSessions                      PortalSession[]
-  portalAuditLogs                     PortalAuditLog[]
-  affiliationsAsPerson                ClientAffiliation[]                   @relation("ClientAffiliationPerson")
-  affiliationsAsEntity                ClientAffiliation[]                   @relation("ClientAffiliationEntity")
-  affiliationsAsPayer                 ClientAffiliation[]                   @relation("ClientAffiliationPayer")
-  photoAsset                          FileAsset?                            @relation("ClientProfilePhotoAsset", fields: [photoAssetId], references: [id])
-  MembershipContract                  MembershipContract[]
-  MembershipDependent                 MembershipDependent[]
-  MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
-  diagnosticOrders                    DiagnosticOrder[]
-  labTestOrders                       LabTestOrder[]                        @relation("LabTestOrderPatient")
-  visits                              Visit[]
-  status                              ClientCatalogItem?                    @relation("ClientStatus", fields: [statusId], references: [id])
-  sector                              ClientCatalogItem?                    @relation("ClientSector", fields: [sectorId], references: [id])
-  institutionType                     ClientCatalogItem?                    @relation("ClientInstitutionType", fields: [institutionTypeId], references: [id])
-  relationType                        ClientCatalogItem?                    @relation("ClientRelationType", fields: [relationTypeId], references: [id])
-  paymentTerm                         ClientCatalogItem?                    @relation("ClientPaymentTerm", fields: [paymentTermId], references: [id])
-  party                               Party?                                @relation("ClientProfileParty", fields: [partyId], references: [id], onDelete: SetNull)
+  id                   String                @id @default(cuid())
+  type                 ClientProfileType
+  companyName          String?
+  tradeName            String?
+  firstName            String?
+  middleName           String?
+  lastName             String?
+  secondLastName       String?
+  sex                  PatientSex?
+  birthDate            DateTime?
+  address              String?
+  city                 String?
+  department           String?
+  country              String?
+  nit                  String?               @unique
+  dpi                  String?               @unique
+  email                String?
+  phone                String?
+  phoneE164            String?               @db.VarChar(20)
+  photoAssetId         String?
+  photoUrl             String?
+  statusId             String?
+  sectorId             String?
+  institutionTypeId    String?
+  relationTypeId       String?
+  paymentTermId        String?
+  partyId              String?
+  deletedAt            DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  accounts             CrmAccount[]
+  contacts             CrmContact[]
+  leads                CrmLead[]
+  clientDocuments      ClientDocument[]
+  clientLocations      ClientLocation[]
+  clientContacts       ClientContact[]
+  linkedAsContact      ClientContact[]        @relation("ClientContactLinkedPerson")
+  companyRecord        Company?              @relation("CompanyClientProfile")
+  companyContacts      CompanyContact[]      @relation("CompanyContactPersonClient")
+  clientNotes          ClientNote[]
+  auditEvents          ClientAuditEvent[]
+  portalOtpChallenges  PortalOtpChallenge[]
+  portalSessions       PortalSession[]
+  portalAuditLogs      PortalAuditLog[]
+  affiliationsAsPerson ClientAffiliation[]   @relation("ClientAffiliationPerson")
+  affiliationsAsEntity ClientAffiliation[]   @relation("ClientAffiliationEntity")
+  affiliationsAsPayer  ClientAffiliation[]   @relation("ClientAffiliationPayer")
+  photoAsset           FileAsset?            @relation("ClientProfilePhotoAsset", fields: [photoAssetId], references: [id])
+  MembershipContract   MembershipContract[]
+  MembershipDependent  MembershipDependent[]
+  diagnosticOrders     DiagnosticOrder[]
+  labTestOrders        LabTestOrder[]        @relation("LabTestOrderPatient")
+  visits               Visit[]
+  status               ClientCatalogItem?    @relation("ClientStatus", fields: [statusId], references: [id])
+  sector               ClientCatalogItem?    @relation("ClientSector", fields: [sectorId], references: [id])
+  institutionType      ClientCatalogItem?    @relation("ClientInstitutionType", fields: [institutionTypeId], references: [id])
+  relationType         ClientCatalogItem?    @relation("ClientRelationType", fields: [relationTypeId], references: [id])
+  paymentTerm          ClientCatalogItem?    @relation("ClientPaymentTerm", fields: [paymentTermId], references: [id])
+  party                Party?                @relation("ClientProfileParty", fields: [partyId], references: [id], onDelete: SetNull)
 
   @@index([email, phone])
+  @@index([phoneE164])
   @@index([type, deletedAt])
   @@index([photoAssetId])
   @@index([partyId])
@@ -1270,6 +1296,7 @@ model CompanyContact {
   department             String?
   email                  String?
   phone                  String?
+  phoneE164              String?                @db.VarChar(20)
   phoneExtension         String?
   preferredChannel       CompanyContactChannel?
   isPrimary              Boolean                @default(false)
@@ -1290,6 +1317,7 @@ model CompanyContact {
   @@index([companyId, status, deletedAt])
   @@index([personClientId])
   @@index([email])
+  @@index([phoneE164])
   @@index([deletedAt])
 }
 
@@ -1387,7 +1415,10 @@ model GeoCountry {
   isActive           Boolean           @default(true)
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
+  meta               GeoCountryMeta?
+  divisions          GeoDivision[]
   admin1             GeoAdmin1[]
+  postalCodes        GeoPostalCode[]
   locationsByCountry ClientLocation[]  @relation("ClientLocationCountry")
   companyLocations   CompanyLocation[] @relation("CompanyLocationCountry")
 
@@ -1395,6 +1426,47 @@ model GeoCountry {
   @@index([isActive])
 }
 
+model GeoCountryMeta {
+  id          String     @id @default(cuid())
+  countryId   String     @unique
+  level1Label String
+  level2Label String
+  level3Label String?
+  maxLevel    Int
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  country     GeoCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
+
+  @@index([maxLevel])
+}
+
+model GeoDivision {
+  id               String        @id @default(cuid())
+  countryId        String
+  level            Int
+  code             String
+  name             String
+  parentId         String?
+  legacyGeoAdmin1Id String?
+  legacyGeoAdmin2Id String?
+  legacyGeoAdmin3Id String?
+  isActive         Boolean       @default(true)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  country          GeoCountry    @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  parent           GeoDivision?  @relation("GeoDivisionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children         GeoDivision[] @relation("GeoDivisionHierarchy")
+  postalCodes      GeoPostalCode[]
+
+  @@unique([countryId, level, code, parentId])
+  @@index([countryId, level, parentId])
+  @@index([countryId, name])
+  @@index([legacyGeoAdmin1Id])
+  @@index([legacyGeoAdmin2Id])
+  @@index([legacyGeoAdmin3Id])
+}
+
+/// @deprecated Legacy geo model. New reads should use GeoDivision as source of truth.
 model GeoAdmin1 {
   id                String            @id @default(cuid())
   countryId         String
@@ -1405,6 +1477,7 @@ model GeoAdmin1 {
   updatedAt         DateTime          @updatedAt
   country           GeoCountry        @relation(fields: [countryId], references: [id], onDelete: Cascade)
   admin2            GeoAdmin2[]
+  postalCodes       GeoPostalCode[]
   locationsByAdmin1 ClientLocation[]  @relation("ClientLocationAdmin1")
   companyLocations  CompanyLocation[] @relation("CompanyLocationAdmin1")
 
@@ -1413,6 +1486,7 @@ model GeoAdmin1 {
   @@index([countryId, isActive, name])
 }
 
+/// @deprecated Legacy geo model. New reads should use GeoDivision as source of truth.
 model GeoAdmin2 {
   id                String            @id @default(cuid())
   admin1Id          String
@@ -1423,6 +1497,7 @@ model GeoAdmin2 {
   updatedAt         DateTime          @updatedAt
   admin1            GeoAdmin1         @relation(fields: [admin1Id], references: [id], onDelete: Cascade)
   admin3            GeoAdmin3[]
+  postalCodes       GeoPostalCode[]
   locationsByAdmin2 ClientLocation[]  @relation("ClientLocationAdmin2")
   companyLocations  CompanyLocation[] @relation("CompanyLocationAdmin2")
 
@@ -1431,6 +1506,7 @@ model GeoAdmin2 {
   @@index([admin1Id, isActive, name])
 }
 
+/// @deprecated Legacy geo model. New reads should use GeoDivision as source of truth.
 model GeoAdmin3 {
   id                String            @id @default(cuid())
   admin2Id          String
@@ -1440,6 +1516,7 @@ model GeoAdmin3 {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   admin2            GeoAdmin2         @relation(fields: [admin2Id], references: [id], onDelete: Cascade)
+  postalCodes       GeoPostalCode[]
   locationsByAdmin3 ClientLocation[]  @relation("ClientLocationAdmin3")
   companyLocations  CompanyLocation[] @relation("CompanyLocationAdmin3")
 
@@ -1448,12 +1525,41 @@ model GeoAdmin3 {
   @@index([admin2Id, isActive, name])
 }
 
+model GeoPostalCode {
+  id            String     @id @default(cuid())
+  countryId     String
+  postalCode    String
+  divisionId    String?
+  admin1Id      String?
+  admin2Id      String?
+  admin3Id      String?
+  label         String?
+  dataSource    GeoPostalDataSource @default(official)
+  isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  country       GeoCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  division      GeoDivision? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  admin1        GeoAdmin1? @relation(fields: [admin1Id], references: [id], onDelete: SetNull)
+  admin2        GeoAdmin2? @relation(fields: [admin2Id], references: [id], onDelete: SetNull)
+  admin3        GeoAdmin3? @relation(fields: [admin3Id], references: [id], onDelete: SetNull)
+
+  @@index([countryId, postalCode])
+  @@unique([countryId, postalCode, divisionId])
+  @@index([postalCode])
+  @@index([divisionId])
+  @@index([admin1Id])
+  @@index([admin2Id])
+  @@index([admin3Id])
+}
+
 model ClientLocation {
   id           String             @id @default(cuid())
   clientId     String
   type         ClientLocationType
   label        String?
   address      String
+  postalCode   String?
   city         String?
   department   String?
   country      String?
@@ -1478,31 +1584,58 @@ model ClientLocation {
 }
 
 model ClientContact {
-  id        String        @id @default(cuid())
-  clientId  String
-  role      String?
-  name      String
-  email     String?
-  phone     String?
-  isPrimary Boolean       @default(false)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  client    ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  id                 String                    @id @default(cuid())
+  clientId           String
+  linkedPersonClientId String?
+  relationType       ClientContactRelationType @default(OTHER)
+  role               String?
+  name               String
+  email              String?
+  phone              String?
+  phoneE164          String?                   @db.VarChar(20)
+  isEmergencyContact Boolean                   @default(false)
+  isPrimary          Boolean                   @default(false)
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  client             ClientProfile             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  linkedPerson       ClientProfile?            @relation("ClientContactLinkedPerson", fields: [linkedPersonClientId], references: [id], onDelete: SetNull)
 
   @@index([clientId])
+  @@index([linkedPersonClientId])
+  @@index([phoneE164])
+}
+
+model PhoneCountryCode {
+  id          String   @id @default(cuid())
+  iso2        String   @unique
+  countryName String
+  dialCode    String
+  minLength   Int
+  maxLength   Int
+  example     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([dialCode])
+  @@index([isActive, countryName])
 }
 
 model ClientNote {
-  id        String        @id @default(cuid())
-  clientId  String
-  body      String        @db.Text
-  actorId   String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  client    ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  actor     User?         @relation("ClientNoteActor", fields: [actorId], references: [id])
+  id         String               @id @default(cuid())
+  clientId   String
+  title      String?
+  body       String               @db.Text
+  noteType   ClientNoteType       @default(ADMIN)
+  visibility ClientNoteVisibility @default(INTERNA)
+  actorId    String?
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  client     ClientProfile        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  actor      User?                @relation("ClientNoteActor", fields: [actorId], references: [id])
 
   @@index([clientId, createdAt])
+  @@index([clientId, noteType, createdAt])
 }
 
 model ClientRulesConfig {
@@ -2060,24 +2193,26 @@ model QuoteRequest {
 }
 
 model FileAsset {
-  id                    String            @id @default(cuid())
-  storageKey            String            @unique
+  id                    String              @id @default(cuid())
+  storageKey            String              @unique
   mimeType              String
   sizeBytes             Int
   sha256                String
-  createdAt             DateTime          @default(now())
+  createdAt             DateTime            @default(now())
   createdByUserId       String?
   originalName          String?
   dealId                String?
-  proposalPdfs          B2BProposalDoc[]  @relation("B2BProposalPdfAsset")
-  clientDocuments       ClientDocument[]  @relation("ClientDocumentFileAsset")
-  clientProfiles        ClientProfile[]   @relation("ClientProfilePhotoAsset")
-  companyDocuments      CompanyDocument[] @relation("CompanyDocumentFileAsset")
-  diagnosticResultFiles DiagnosticOrder[] @relation("DiagnosticOrderResultFileAsset")
-  labResultFiles        LabTestOrder[]    @relation("LabTestOrderResultFileAsset")
-  createdByUser         User?             @relation(fields: [createdByUserId], references: [id])
-  deal                  CrmDeal?          @relation(fields: [dealId], references: [id])
+  proposalPdfs          B2BProposalDoc[]    @relation("B2BProposalPdfAsset")
+  clientDocuments       ClientDocument[]    @relation("ClientDocumentFileAsset")
+  clientProfiles        ClientProfile[]     @relation("ClientProfilePhotoAsset")
+  companyDocuments      CompanyDocument[]   @relation("CompanyDocumentFileAsset")
+  diagnosticResultFiles DiagnosticOrder[]   @relation("DiagnosticOrderResultFileAsset")
+  labResultFiles        LabTestOrder[]      @relation("LabTestOrderResultFileAsset")
+  createdByUser         User?               @relation(fields: [createdByUserId], references: [id])
+  deal                  CrmDeal?            @relation(fields: [dealId], references: [id])
   deliveries            QuoteDelivery[]
+  tenantThemeLogos      TenantThemeConfig[] @relation("TenantThemeLogoAsset")
+  tradeUnitPdfs         TradeUnit[]         @relation("TradeUnitPdfAsset")
 }
 
 model QuoteDelivery {
@@ -2118,14 +2253,22 @@ model QuoteDelivery {
 }
 
 model Branch {
+  // TODO(SaaS): add tenantId and scope unique constraints per tenant.
   id                         String                       @id @default(cuid())
   name                       String                       @unique
   isActive                   Boolean                      @default(true)
   createdById                String?
+  tenantId                   String?
+  parentId                   String?
   createdAt                  DateTime                     @default(now())
   updatedAt                  DateTime                     @updatedAt
   address                    String?
   code                       String?                      @unique
+  phone                      String?
+  timezone                   String                       @default("America/Guatemala")
+  tenant                     Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  parent                     Branch?                      @relation("BranchHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children                   Branch[]                     @relation("BranchHierarchy")
   assignments                EmployeeBranchAssignment[]
   timeClockDevices           TimeClockDevice[]
   timeClockLogs              TimeClockLog[]
@@ -2144,6 +2287,132 @@ model Branch {
   receptionVisitVitals       ReceptionVisitVitals[]
   ticketSequences            TicketSequence[]
   payrollRuns                PayrollRun[]
+  businessHours              BranchBusinessHours[]
+  satEstablishments          BranchSatEstablishment[]
+  userAccesses               UserBranchAccess[]
+  billingProfiles            BranchBillingProfile[]
+  tradeUnits                 TradeUnit[]
+
+  @@index([parentId])
+  @@index([tenantId])
+}
+
+model BranchBusinessHours {
+  id                 String    @id @default(cuid())
+  branchId           String
+  validFrom          DateTime
+  validTo            DateTime?
+  scheduleJson       Json
+  slotMinutesDefault Int?
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  branch             Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId])
+  @@index([branchId, validFrom])
+}
+
+model BranchSatEstablishment {
+  id                   String            @id @default(cuid())
+  branchId             String
+  legalEntityId        String?
+  satEstablishmentCode String            @unique
+  legalName            String
+  tradeName            String?
+  address              String
+  isActive             Boolean           @default(true)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  branch               Branch            @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  legalEntity          LegalEntity?      @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  series               BranchFelSeries[]
+  billingProfiles      BranchBillingProfile[]
+
+  @@index([branchId])
+  @@index([legalEntityId])
+}
+
+model BranchFelSeries {
+  id              String                 @id @default(cuid())
+  establishmentId String
+  serie           String
+  documentType    BranchFelDocumentType  @default(FACTURA)
+  initialNumber   Int                    @default(1)
+  currentNumber   Int                    @default(1)
+  isActive        Boolean                @default(true)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  establishment   BranchSatEstablishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([establishmentId, serie, documentType])
+  @@index([establishmentId])
+}
+
+model UserBranchAccess {
+  id         String           @id @default(cuid())
+  userId     String
+  tenantId   String?
+  branchId   String
+  accessMode BranchAccessMode @default(LOCKED)
+  isDefault  Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant     Tenant?          @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  branch     Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, branchId])
+  @@index([userId, isDefault])
+  @@index([tenantId, branchId])
+  @@index([branchId])
+}
+
+model BranchBillingProfile {
+  id              String               @id @default(cuid())
+  tenantId        String?
+  branchId        String
+  legalEntityId   String
+  establishmentId String?
+  priority        Int                  @default(10)
+  isActive        Boolean              @default(true)
+  rulesJson       Json?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  tenant          Tenant?              @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  branch          Branch               @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  legalEntity     LegalEntity          @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  establishment   BranchSatEstablishment? @relation(fields: [establishmentId], references: [id], onDelete: SetNull)
+
+  @@unique([branchId, legalEntityId, establishmentId])
+  @@index([branchId, isActive, priority])
+  @@index([legalEntityId])
+  @@index([establishmentId])
+  @@index([tenantId])
+}
+
+model TradeUnit {
+  id                 String     @id @default(cuid())
+  tenantId           String?
+  name               String
+  registrationNumber String?
+  address            String?
+  branchId           String
+  legalEntityId      String
+  pdfAssetId         String?
+  isActive           Boolean    @default(true)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  tenant             Tenant?    @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  branch             Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  legalEntity        LegalEntity @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  pdfAsset           FileAsset? @relation("TradeUnitPdfAsset", fields: [pdfAssetId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([legalEntityId])
+  @@index([pdfAssetId])
+  @@unique([branchId, name])
 }
 
 model HrSettings {
@@ -3113,21 +3382,6 @@ model MembershipBenefit {
   @@index([planId])
 }
 
-model MembershipPlanCategory {
-  id             String                                @id @default(cuid())
-  name           String
-  segment        MembershipPlanSegment
-  isActive       Boolean                               @default(true)
-  sortOrder      Int                                   @default(0)
-  createdAt      DateTime                              @default(now())
-  updatedAt      DateTime                              @updatedAt
-  MembershipPlan MembershipPlan[]
-  publicRequests MembershipPublicSubscriptionRequest[]
-
-  @@unique([name, segment])
-  @@index([segment, isActive, sortOrder])
-}
-
 model MembershipConfig {
   id                    Int      @id @default(1)
   reminderDays          Int      @default(30)
@@ -3145,39 +3399,36 @@ model MembershipConfig {
 }
 
 model MembershipContract {
-  id                                  String                                @id @default(cuid())
-  code                                String                                @unique @default(dbgenerated("concat('MBR-', lpad((nextval('membership_contract_code_seq'::regclass))::text, 6, '0'::text))"))
-  ownerType                           MembershipOwnerType
-  ownerId                             String?
-  planId                              String
-  status                              MembershipStatus                      @default(PENDIENTE)
-  startAt                             DateTime
-  endAt                               DateTime?
-  nextRenewAt                         DateTime?
-  billingFrequency                    MembershipBillingFrequency            @default(MONTHLY)
-  priceLockedMonthly                  Decimal?                              @db.Decimal(12, 2)
-  priceLockedAnnual                   Decimal?                              @db.Decimal(12, 2)
-  balance                             Decimal                               @default(0) @db.Decimal(14, 2)
-  channel                             String?
-  assignedBranchId                    String?
-  allowDependents                     Boolean                               @default(true)
-  lastInvoiceId                       String?
-  createdAt                           DateTime                              @default(now())
-  updatedAt                           DateTime
-  Branch                              Branch?                               @relation(fields: [assignedBranchId], references: [id])
-  ClientProfile                       ClientProfile?                        @relation(fields: [ownerId], references: [id])
-  MembershipPlan                      MembershipPlan                        @relation(fields: [planId], references: [id])
-  MembershipDependent                 MembershipDependent[]
-  MembershipException                 MembershipException[]
-  MembershipPayment                   MembershipPayment[]
-  MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
-  MembershipUsage                     MembershipUsage[]
+  id                  String                     @id
+  code                String                     @unique @default(dbgenerated("concat('MBR-', lpad((nextval('membership_contract_code_seq'::regclass))::text, 6, '0'::text))"))
+  ownerType           MembershipOwnerType
+  ownerId             String?
+  planId              String
+  status              MembershipStatus           @default(PENDIENTE)
+  startAt             DateTime
+  endAt               DateTime?
+  nextRenewAt         DateTime?
+  billingFrequency    MembershipBillingFrequency @default(MONTHLY)
+  priceLockedMonthly  Decimal?                   @db.Decimal(12, 2)
+  priceLockedAnnual   Decimal?                   @db.Decimal(12, 2)
+  balance             Decimal                    @default(0) @db.Decimal(14, 2)
+  channel             String?
+  assignedBranchId    String?
+  allowDependents     Boolean                    @default(true)
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime
+  Branch              Branch?                    @relation(fields: [assignedBranchId], references: [id])
+  ClientProfile       ClientProfile?             @relation(fields: [ownerId], references: [id])
+  MembershipPlan      MembershipPlan             @relation(fields: [planId], references: [id])
+  MembershipDependent MembershipDependent[]
+  MembershipException MembershipException[]
+  MembershipPayment   MembershipPayment[]
+  MembershipUsage     MembershipUsage[]
 
   @@index([nextRenewAt])
   @@index([ownerId])
   @@index([planId])
   @@index([status])
-  @@index([lastInvoiceId])
 }
 
 model MembershipDependent {
@@ -3211,7 +3462,7 @@ model MembershipException {
 }
 
 model MembershipPayment {
-  id                 String                  @id @default(cuid())
+  id                 String                  @id
   contractId         String
   amount             Decimal                 @db.Decimal(14, 2)
   method             MembershipPaymentMethod
@@ -3230,29 +3481,22 @@ model MembershipPayment {
 }
 
 model MembershipPlan {
-  id                     String                                @id @default(cuid())
-  slug                   String                                @unique
-  name                   String
-  type                   MembershipPlanType
-  segment                MembershipPlanSegment                 @default(B2C)
-  categoryId             String?
-  imageUrl               String?
-  active                 Boolean                               @default(true)
-  description            String?
-  priceMonthly           Decimal                               @db.Decimal(12, 2)
-  priceAnnual            Decimal                               @db.Decimal(12, 2)
-  currency               String                                @default("GTQ")
-  maxDependents          Int?
-  createdAt              DateTime                              @default(now())
-  updatedAt              DateTime
-  MembershipBenefit      MembershipBenefit[]
-  MembershipPlanCategory MembershipPlanCategory?               @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  publicRequests         MembershipPublicSubscriptionRequest[]
-  MembershipContract     MembershipContract[]
+  id                 String               @id
+  slug               String               @unique
+  name               String
+  type               MembershipPlanType
+  active             Boolean              @default(true)
+  description        String?
+  priceMonthly       Decimal              @db.Decimal(12, 2)
+  priceAnnual        Decimal              @db.Decimal(12, 2)
+  currency           String               @default("GTQ")
+  maxDependents      Int?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime
+  MembershipBenefit  MembershipBenefit[]
+  MembershipContract MembershipContract[]
 
   @@index([type, active])
-  @@index([segment, active])
-  @@index([categoryId])
 }
 
 model MembershipUsage {
@@ -3276,32 +3520,6 @@ model MembershipUsage {
   @@index([contractId])
   @@index([module])
   @@index([occurredAt])
-}
-
-model MembershipPublicSubscriptionRequest {
-  id                     String                  @id @default(cuid())
-  idempotencyKey         String                  @unique
-  channel                String                  @default("WEB")
-  planId                 String
-  segment                MembershipPlanSegment
-  categoryId             String?
-  clientProfileId        String?
-  contractId             String?
-  invoiceId              String?
-  status                 String                  @default("CREATED")
-  requestPayload         Json
-  responsePayload        Json?
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
-  ClientProfile          ClientProfile?          @relation(fields: [clientProfileId], references: [id], onDelete: SetNull)
-  MembershipContract     MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
-  MembershipPlan         MembershipPlan          @relation(fields: [planId], references: [id], onDelete: Cascade)
-  MembershipPlanCategory MembershipPlanCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-
-  @@index([planId, createdAt])
-  @@index([segment, createdAt])
-  @@index([contractId])
-  @@index([clientProfileId])
 }
 
 model NotificationOutbox {
@@ -4128,6 +4346,55 @@ model PortalRateLimitBucket {
   @@index([expiresAt])
 }
 
+model PortalConfig {
+  id                 String   @id @default("global")
+  version            Int      @default(1)
+  patientPortalMenus Json
+  companyPortalMenus Json
+  support            Json
+  auth               Json
+  appointmentsRules  Json
+  branding           Json
+  updatedByUserId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@index([updatedByUserId])
+}
+
+model TenantThemeConfig {
+  // TODO(SaaS): evolve singleton to tenant-scoped theme rows.
+  id              String     @id @default("global")
+  version         Int        @default(1)
+  theme           Json
+  fontKey         String     @default("inter")
+  logoUrl         String?
+  logoAssetId     String?
+  updatedByUserId String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  updatedByUser   User?      @relation("TenantThemeUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  logoAsset       FileAsset? @relation("TenantThemeLogoAsset", fields: [logoAssetId], references: [id], onDelete: SetNull)
+
+  @@index([updatedAt])
+  @@index([updatedByUserId])
+}
+
+model SystemFeatureConfig {
+  id              String   @id @default("global")
+  version         Int      @default(1)
+  flags           Json
+  strictMode      Boolean  @default(false)
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  updatedByUser   User?    @relation("SystemFeatureUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([updatedAt])
+  @@index([updatedByUserId])
+}
+
 // Global email configuration (DreamHost SMTP) // LAB EMAIL CONFIG
 model GlobalEmailConfig {
   id              String   @id @default("global")
@@ -4140,6 +4407,67 @@ model GlobalEmailConfig {
   fromEmail       String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+model EmailSandboxConfig {
+  id              String   @id @default("global")
+  enabled         Boolean  @default(false)
+  modeDefault     String   @default("INHERIT")
+  tenantModes     Json?
+  mailpitHost     String   @default("127.0.0.1")
+  mailpitSmtpPort Int      @default(1025)
+  mailpitApiPort  Int      @default(8025)
+  aliasDomain     String   @default("sandbox.starmedical.test")
+  retentionDays   Int      @default(3)
+  blockPhi        Boolean  @default(true)
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@index([updatedByUserId])
+}
+
+model AdminApiKey {
+  id              String   @id @default(cuid())
+  name            String
+  scopes          String[]
+  keyHash         String   @unique
+  secretLast4     String
+  createdByUserId String?
+  rotatedFromId   String?
+  revokedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([revokedAt, createdAt])
+  @@index([createdByUserId])
+  @@index([rotatedFromId])
+}
+
+model AdminBackupPolicy {
+  id                  String   @id @default("global")
+  version             Int      @default(1)
+  retentionDays       Int      @default(30)
+  manualExportEnabled Boolean  @default(true)
+  updatedByUserId     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@index([updatedByUserId])
+}
+
+model AdminBackupRun {
+  id                String   @id @default(cuid())
+  triggerMode       String   @default("MANUAL")
+  status            String   @default("COMPLETED")
+  requestedByUserId String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([requestedByUserId])
 }
 
 model IntegrationInbox {
@@ -4530,6 +4858,19 @@ enum PortalPaymentStatus {
   PAID
 }
 
+enum BranchFelDocumentType {
+  FACTURA
+  RECIBO
+  CREDITO
+  DEBITO
+  OTRO
+}
+
+enum BranchAccessMode {
+  LOCKED
+  SWITCH
+}
+
 enum PaymentStatus {
   PENDIENTE
   PAGADO
@@ -4821,12 +5162,37 @@ enum ClientDocumentApprovalStatus {
   REJECTED
 }
 
+enum GeoPostalDataSource {
+  official
+  operational
+}
+
 enum ClientLocationType {
   GENERAL
+  FISCAL
   HOME
   WORK
   BUSINESS
   OTHER
+}
+
+enum ClientContactRelationType {
+  FAMILY
+  WORK
+  FRIEND
+  OTHER
+}
+
+enum ClientNoteType {
+  ADMIN
+  RECEPCION
+  CLINICA
+  OTRA
+}
+
+enum ClientNoteVisibility {
+  INTERNA
+  VISIBLE_PACIENTE
 }
 
 enum CompanyKind {
@@ -5378,11 +5744,6 @@ enum MembershipPlanType {
   EMPRESARIAL
 }
 
-enum MembershipPlanSegment {
-  B2C
-  B2B
-}
-
 enum MembershipStatus {
   ACTIVO
   PENDIENTE
@@ -5491,82 +5852,4 @@ enum LabRole {
   LAB_TECH
   LAB_SUPERVISOR
   LAB_ADMIN
-}
-
-model OpsMetricsSnapshot {
-  id           String                      @id @default(cuid())
-  createdAt    DateTime                    @default(now())
-  tenantId     String?
-  branchId     String?
-  projectName  String
-  range        String
-  status       String
-  durationMs   Int?
-  requestId    String?
-  source       String?
-  buildCommit  String?
-  buildVersion String?
-  services     OpsMetricsSnapshotService[]
-
-  @@index([tenantId, createdAt])
-  @@index([status, createdAt])
-  @@index([requestId])
-}
-
-model OpsMetricsSnapshotService {
-  id            String             @id @default(cuid())
-  snapshotId    String
-  tenantId      String?
-  serviceKey    String
-  status        String
-  cpuPercent    Float?
-  memoryBytes   BigInt?
-  memoryPercent Float?
-  netRxBps      Float?
-  netTxBps      Float?
-  bandwidthBps  Float?
-  checkedAt     DateTime           @default(now())
-  createdAt     DateTime           @default(now())
-  snapshot      OpsMetricsSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-
-  @@index([snapshotId])
-  @@index([tenantId, checkedAt])
-  @@index([serviceKey, status, checkedAt])
-}
-
-model OpsAlertEvent {
-  id            String    @id @default(cuid())
-  createdAt     DateTime  @default(now())
-  tenantId      String?
-  branchId      String?
-  level         String
-  type          String
-  fromStatus    String?
-  toStatus      String?
-  serviceKey    String?
-  summary       String
-  detailJson    Json?
-  dedupeKey     String
-  cooldownUntil DateTime?
-  requestId     String?
-  source        String?
-
-  @@index([tenantId, createdAt])
-  @@index([type, level, createdAt])
-  @@index([serviceKey, createdAt])
-  @@index([dedupeKey, createdAt])
-}
-
-model OpsSchedulerConfig {
-  id               String   @id @default(cuid())
-  tenantId         String
-  enabled          Boolean  @default(true)
-  frequencySeconds Int      @default(120)
-  channelsJson     Json?
-  recipientsJson   Json?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  @@unique([tenantId])
-  @@index([updatedAt])
 }

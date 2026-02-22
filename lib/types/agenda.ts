@@ -20,6 +20,9 @@ export interface Cita {
   tipoCitaId: string;
   estado: EstadoCita;
   empresaId?: string;
+  pacienteNombre?: string;
+  pacienteApellidos?: string;
+  pacienteDisplayName?: string;
   notas?: string;
   origen?: "Telefono" | "WhatsApp" | "Web" | "Walk-in" | "Empresa";
   estadoPago?: EstadoPagoCita;

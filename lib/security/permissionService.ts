@@ -1,5 +1,6 @@
 import { UserPermissionEffect, type Prisma } from "@prisma/client";
 import { buildEffectivePermissionSet, normalizeRoleName } from "@/lib/rbac";
+import { ALL_PERMISSION_KEYS } from "@/lib/security/permissionCatalog";
 
 type UserWithPermissions = Prisma.UserGetPayload<{
   include: {
@@ -62,4 +63,9 @@ export function computeUserPermissionProfile(user: UserWithPermissions): Permiss
     denies: Array.from(denied),
     isAdmin
   };
+}
+
+export function isKnownPermissionKey(permissionKey?: string | null) {
+  if (!permissionKey) return false;
+  return ALL_PERMISSION_KEYS.includes(permissionKey.toUpperCase());
 }

@@ -13,7 +13,9 @@ const tabs = resolveModuleTabs("facturacion", {
     documentos: "/admin/facturacion/documentos",
     caja: "/admin/facturacion/caja"
   }
-}).map(({ label, href }) => ({ label, href }));
+})
+  .filter((tab) => Boolean(tab.href))
+  .map(({ label, href }) => ({ label, href: href! }));
 
 export default function FacturacionLayout({ children }: { children: React.ReactNode }) {
   return (
