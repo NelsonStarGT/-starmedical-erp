@@ -1,4 +1,0 @@
--- Legacy migration placeholder adopted from remote Supabase history.
--- Migration: 20260319120000_compensation_bonus
--- Purpose: align Prisma metadata; schema is captured by later migrations and drift-fix.
--- no-op

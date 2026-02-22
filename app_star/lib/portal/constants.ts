@@ -1,9 +1,0 @@
-export const PORTAL_SESSION_COOKIE_NAME = "portal_session";
-export const PORTAL_REFRESH_COOKIE_NAME = "portal_refresh";
-export const PORTAL_CHALLENGE_TTL_MINUTES = 10;
-export const PORTAL_SESSION_TTL_HOURS = 24;
-export const PORTAL_ACCESS_TTL_MINUTES = 15;
-export const PORTAL_RATE_LIMIT_WINDOW_MS = 10 * 60_000;
-export const PORTAL_RATE_LIMIT_MAX = 5;
-export const PORTAL_RESEND_COOLDOWN_SECONDS = 60;
-export const PORTAL_CHALLENGE_MAX_ATTEMPTS = 5;

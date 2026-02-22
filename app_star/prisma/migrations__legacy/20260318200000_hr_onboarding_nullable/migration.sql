@@ -1,4 +1,0 @@
--- Legacy migration placeholder adopted from remote Supabase history.
--- Migration: 20260318200000_hr_onboarding_nullable
--- Purpose: align Prisma metadata; schema is captured by later migrations and drift-fix.
--- no-op

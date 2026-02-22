@@ -1,4 +1,0 @@
--- Legacy migration placeholder adopted from remote Supabase history.
--- Migration: 20260309120000_hr_rrhh_module
--- Purpose: align Prisma metadata; schema is captured by later migrations and drift-fix.
--- no-op
