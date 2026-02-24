@@ -1,0 +1,5 @@
+## npm run typecheck
+
+> star-medical-erp@0.1.0 typecheck
+> tsc --noEmit
+
