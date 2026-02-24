@@ -19,6 +19,9 @@
     "test:legacy": "tsx --test \"tests/memberships.db.test.ts\" --test-reporter=spec --test-concurrency=1",
     "test:legacy:run": "RUN_LEGACY_TESTS=1 tsx --test \"tests/memberships.db.test.ts\" --test-reporter=spec --test-concurrency=1",
     "qa": "npm run lint && npm run typecheck && npm run test",
+    "qa:repo:inventory": "node scripts/qa/repo-inventory.mjs",
+    "qa:ui:tokens": "node scripts/qa/check-ui-brand-tokens.mjs",
+    "qa:ui:tokens:baseline": "node scripts/qa/check-ui-brand-tokens.mjs --update-baseline",
     "smoke": "node scripts/smoke-test.js",
     "smoke:ci": "node scripts/smoke-ci.cjs",
     "audit:enums": "node scripts/audit-enums.mjs",
@@ -35,6 +38,12 @@
     "db:seed": "prisma db seed",
     "db:seed:core": "tsx prisma/seed.core.ts",
     "db:seed:clients": "tsx prisma/seed.clients.ts",
+    "db:seed:geo:geonames": "tsx scripts/geo/import-geonames.ts",
+    "db:seed:geo:ine-gt": "tsx scripts/geo/import-ine-gt.ts",
+    "db:seed:geo:america": "tsx scripts/geo/import-america.ts",
+    "db:seed:central-config": "tsx prisma/seed.central-config.ts",
+    "qa:config-central": "bash scripts/qa/config-central.sh",
+    "qa:config-central:readiness": "tsx scripts/qa/config-central-readiness.ts",
     "medical:cie10:import": "tsx scripts/medical/import-cie10.ts",
     "portal:link-party": "tsx scripts/portal/link-client-party.ts",
     "db:validate": "prisma validate",
@@ -42,6 +51,7 @@
     "db:reset": "bash scripts/dev/db-reset.sh",
     "dev:setup": "npm run db:generate && npm run db:migrate:deploy && npm run db:seed",
     "dev:reset": "npm run db:reset",
+    "dev:seed:auth": "node scripts/dev/seed-auth.ts",
     "dev:clean": "rm -rf .next && next dev",
     "inventory:reset": "sh -c 'if [ \"$NODE_ENV\" = \"production\" ]; then echo \"inventory:reset bloqueado en production\" && exit 1; else curl -X POST -H \"x-reset-confirm: YES\" -H \"Content-Type: application/json\" -d \"{\\\"mode\\\":\\\"wipe_movements\\\"}\" http://localhost:3000/api/inventario/reset; fi'",
     "bootstrap:superadmin": "tsx scripts/bootstrap-super-admin.ts",
@@ -74,11 +84,10 @@
     "bcryptjs": "^2.4.3",
     "date-fns": "^3.6.0",
     "dompurify": "3.3.1",
-    "exceljs": "^4.4.0",
     "html-to-docx": "^1.6.1",
     "html2pdf.js": "0.14.0",
     "jsonwebtoken": "^9.0.3",
-    "jspdf": "^4.1.0",
+    "jspdf": "^4.2.0",
     "lucide-react": "^0.469.0",
     "next": "16.1.6",
     "nodemailer": "^7.0.12",
@@ -108,5 +117,8 @@
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.21.0",
     "typescript": "^5.4.5"
+  },
+  "overrides": {
+    "markdown-it": "14.1.1"
   }
 }
