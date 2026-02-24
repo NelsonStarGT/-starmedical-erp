@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { requireRoles } from "@/lib/api/auth";
+import { exportExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,30 +28,37 @@ export async function GET(req: NextRequest) {
       priceMap[p.itemId][p.priceListId] = Number((p as any).precio ?? (p as any).price ?? 0);
     });
 
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Precios");
-    const columns = [
-      { header: "Código", key: "code", width: 18 },
-      { header: "Nombre", key: "name", width: 30 },
-      { header: "Tipo", key: "type", width: 12 },
-      ...lists.map((l) => ({ header: l.name, key: l.id, width: 12 }))
-    ];
-    ws.columns = columns as any;
-
-    items.forEach((item) => {
-      const row: any = {
-        code: item.code,
-        name: item.name,
-        type: itemType
-      };
-      lists.forEach((l) => {
-        row[l.id] = priceMap[item.id]?.[l.id] ?? "";
-      });
-      ws.addRow(row);
+    const headers = ["Código", "Nombre", "Tipo", ...lists.map((list) => list.name)];
+    const rows = items.map((item) => {
+      return [
+        item.code,
+        item.name,
+        itemType,
+        ...lists.map((list) => priceMap[item.id]?.[list.id] ?? "")
+      ];
     });
 
-    const buffer = await wb.xlsx.writeBuffer();
-    return new NextResponse(Buffer.from(buffer), {
+    const { buffer } = await exportExcelViaProcessingService({
+      context: {
+        tenantId: req.headers.get("x-tenant-id"),
+        actorId: `inventory-${auth.role || "admin"}`
+      },
+      fileName: `precios-${itemType.toLowerCase()}.xlsx`,
+      sheets: [
+        {
+          name: "Precios",
+          headers,
+          rows
+        }
+      ],
+      limits: {
+        maxFileMb: 8,
+        maxRows: 20_000,
+        maxCols: 180,
+        timeoutMs: 20_000
+      }
+    });
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

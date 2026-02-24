@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { requireRoles } from "@/lib/api/auth";
+import { exportExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,145 +24,102 @@ export async function GET(req: NextRequest) {
         prisma.priceListItem.findMany()
       ]);
 
-    const wb = new ExcelJS.Workbook();
-
-    const wsProducts = wb.addWorksheet("Productos");
-    wsProducts.columns = [
-      { header: "Código", key: "codigo", width: 16 },
-      { header: "Nombre", key: "nombre", width: 32 },
-      { header: "Categoría", key: "categoria", width: 20 },
-      { header: "Subcategoría", key: "subcategoria", width: 20 },
-      { header: "Área", key: "area", width: 16 },
-      { header: "Costo prom.", key: "avgCost", width: 12 },
-      { header: "Precio base", key: "precioBase", width: 12 },
-      { header: "Margen %", key: "marginPct", width: 10 },
-      { header: "Estado", key: "estado", width: 10 },
-      { header: "Stock total", key: "stockTotal", width: 12 }
+    const sheets = [
+      {
+        name: "Productos",
+        headers: ["Código", "Nombre", "Categoría", "Subcategoría", "Área", "Costo prom.", "Precio base", "Margen %", "Estado", "Stock total"],
+        rows: products.map((product) => {
+          const stockTotal = product.stocks.reduce((acc, stock) => acc + stock.stock, 0);
+          return [
+            product.code,
+            product.name,
+            product.category?.name ?? "",
+            product.subcategory?.name ?? "",
+            product.inventoryArea?.name ?? "",
+            Number(product.avgCost || product.cost || 0),
+            Number(product.baseSalePrice || product.price || 0),
+            product.marginPct ?? "",
+            (product as any).status || "Activo",
+            stockTotal
+          ];
+        })
+      },
+      {
+        name: "Servicios",
+        headers: ["Código", "Nombre", "Categoría", "Subcategoría", "Precio base", "Margen %", "Estado"],
+        rows: services.map((service) => [
+          service.code,
+          service.name,
+          service.category?.name ?? "",
+          service.subcategory?.name ?? "",
+          Number(service.price || 0),
+          service.marginPct ?? "",
+          service.status
+        ])
+      },
+      {
+        name: "Combos",
+        headers: ["Nombre", "Costo", "Precio base", "Estado", "Servicios", "Productos"],
+        rows: combos.map((combo) => [
+          combo.name,
+          Number((combo as any).costCalculated || combo.costProductsTotal || 0),
+          Number((combo as any).priceFinal || 0),
+          (combo as any).status || "Activo",
+          combo.services.map((service) => service.service?.name || service.serviceId).join(", "),
+          combo.products.map((product) => `${product.product?.code || product.productId} x${product.quantity}`).join(", ")
+        ])
+      },
+      {
+        name: "Categorías prod.",
+        headers: ["ID", "Nombre", "Tipo", "Orden", "Estado"],
+        rows: productCats.map((row) => [row.id, row.name, row.type, row.order, row.status])
+      },
+      {
+        name: "Subcategorías prod.",
+        headers: ["ID", "Nombre", "Categoría", "Orden", "Estado"],
+        rows: productSubcats.map((row) => [row.id, row.name, row.categoryId, row.order, row.status])
+      },
+      {
+        name: "Categorías serv.",
+        headers: ["ID", "Nombre", "Área", "Orden", "Estado"],
+        rows: serviceCats.map((row) => [row.id, row.name, row.area, row.order, row.status])
+      },
+      {
+        name: "Subcategorías serv.",
+        headers: ["ID", "Nombre", "Categoría", "Orden", "Estado"],
+        rows: serviceSubcats.map((row) => [row.id, row.name, row.categoryId, row.order, row.status])
+      },
+      {
+        name: "Áreas inventario",
+        headers: ["ID", "Nombre", "Slug", "Orden", "Externa"],
+        rows: areas.map((row) => [row.id, row.name, row.slug, row.order, row.isExternal])
+      },
+      {
+        name: "Listas de precios",
+        headers: ["ID", "Nombre", "Tipo", "Estado"],
+        rows: priceLists.map((row) => [row.id, row.name, row.type, (row as any).estado ?? ""])
+      },
+      {
+        name: "Precios",
+        headers: ["Lista", "ItemType", "ItemId", "Precio"],
+        rows: priceItems.map((row) => [row.priceListId, row.itemType, row.itemId, Number(row.precio || 0)])
+      }
     ];
-    products.forEach((p) => {
-      const stockTotal = p.stocks.reduce((acc, s) => acc + s.stock, 0);
-      wsProducts.addRow({
-        codigo: p.code,
-        nombre: p.name,
-        categoria: p.category?.name,
-        subcategoria: p.subcategory?.name,
-        area: p.inventoryArea?.name,
-        avgCost: Number(p.avgCost || p.cost || 0),
-        precioBase: Number(p.baseSalePrice || p.price || 0),
-        marginPct: p.marginPct ?? "",
-        estado: (p as any).status || "Activo",
-        stockTotal
-      });
+    const { buffer } = await exportExcelViaProcessingService({
+      context: {
+        tenantId: req.headers.get("x-tenant-id"),
+        actorId: `inventory-${auth.role || "admin"}`
+      },
+      fileName: "auditoria-inventario.xlsx",
+      sheets,
+      limits: {
+        maxFileMb: 20,
+        maxRows: 50_000,
+        maxCols: 200,
+        timeoutMs: 25_000
+      }
     });
-
-    const wsServices = wb.addWorksheet("Servicios");
-    wsServices.columns = [
-      { header: "Código", key: "codigo", width: 16 },
-      { header: "Nombre", key: "nombre", width: 32 },
-      { header: "Categoría", key: "categoria", width: 20 },
-      { header: "Subcategoría", key: "subcategoria", width: 20 },
-      { header: "Precio base", key: "precioBase", width: 12 },
-      { header: "Margen %", key: "marginPct", width: 10 },
-      { header: "Estado", key: "estado", width: 10 }
-    ];
-    services.forEach((s) => {
-      wsServices.addRow({
-        codigo: s.code,
-        nombre: s.name,
-        categoria: s.category?.name,
-        subcategoria: s.subcategory?.name,
-        precioBase: Number(s.price || 0),
-        marginPct: s.marginPct ?? "",
-        estado: s.status
-      });
-    });
-
-    const wsCombos = wb.addWorksheet("Combos");
-    wsCombos.columns = [
-      { header: "Nombre", key: "nombre", width: 28 },
-      { header: "Costo", key: "costo", width: 12 },
-      { header: "Precio base", key: "precioBase", width: 12 },
-      { header: "Estado", key: "estado", width: 10 },
-      { header: "Servicios", key: "servicios", width: 40 },
-      { header: "Productos", key: "productos", width: 40 }
-    ];
-    combos.forEach((c) => {
-      wsCombos.addRow({
-        nombre: c.name,
-        costo: Number((c as any).costCalculated || c.costProductsTotal || 0),
-        precioBase: Number((c as any).priceFinal || 0),
-        estado: (c as any).status || "Activo",
-        servicios: c.services.map((s) => s.service?.name || s.serviceId).join(", "),
-        productos: c.products.map((p) => `${p.product?.code || p.productId} x${p.quantity}`).join(", ")
-      });
-    });
-
-    const addSimpleSheet = (name: string, data: any[], columns: { header: string; key: string; width?: number }[]) => {
-      const ws = wb.addWorksheet(name);
-      ws.columns = columns;
-      data.forEach((row) => ws.addRow(row));
-    };
-
-    addSimpleSheet("Categorías prod.", productCats, [
-      { header: "ID", key: "id", width: 18 },
-      { header: "Nombre", key: "name", width: 24 },
-      { header: "Tipo", key: "type", width: 12 },
-      { header: "Orden", key: "order", width: 8 },
-      { header: "Estado", key: "status", width: 10 }
-    ]);
-    addSimpleSheet("Subcategorías prod.", productSubcats, [
-      { header: "ID", key: "id", width: 18 },
-      { header: "Nombre", key: "name", width: 24 },
-      { header: "Categoría", key: "categoryId", width: 18 },
-      { header: "Orden", key: "order", width: 8 },
-      { header: "Estado", key: "status", width: 10 }
-    ]);
-    addSimpleSheet("Categorías serv.", serviceCats, [
-      { header: "ID", key: "id", width: 18 },
-      { header: "Nombre", key: "name", width: 24 },
-      { header: "Área", key: "area", width: 18 },
-      { header: "Orden", key: "order", width: 8 },
-      { header: "Estado", key: "status", width: 10 }
-    ]);
-    addSimpleSheet("Subcategorías serv.", serviceSubcats, [
-      { header: "ID", key: "id", width: 18 },
-      { header: "Nombre", key: "name", width: 24 },
-      { header: "Categoría", key: "categoryId", width: 18 },
-      { header: "Orden", key: "order", width: 8 },
-      { header: "Estado", key: "status", width: 10 }
-    ]);
-    addSimpleSheet("Áreas inventario", areas, [
-      { header: "ID", key: "id", width: 18 },
-      { header: "Nombre", key: "name", width: 24 },
-      { header: "Slug", key: "slug", width: 18 },
-      { header: "Orden", key: "order", width: 8 },
-      { header: "Externa", key: "isExternal", width: 10 }
-    ]);
-    addSimpleSheet("Listas de precios", priceLists, [
-      { header: "ID", key: "id", width: 18 },
-      { header: "Nombre", key: "name", width: 24 },
-      { header: "Tipo", key: "type", width: 12 },
-      { header: "Estado", key: "estado", width: 12 }
-    ]);
-
-    const wsPrices = wb.addWorksheet("Precios");
-    wsPrices.columns = [
-      { header: "Lista", key: "lista", width: 18 },
-      { header: "ItemType", key: "itemType", width: 12 },
-      { header: "ItemId", key: "itemId", width: 18 },
-      { header: "Precio", key: "precio", width: 12 }
-    ];
-    priceItems.forEach((i) => {
-      wsPrices.addRow({
-        lista: i.priceListId,
-        itemType: i.itemType,
-        itemId: i.itemId,
-        precio: Number(i.precio || 0)
-      });
-    });
-
-    const buffer = await wb.xlsx.writeBuffer();
-    return new NextResponse(Buffer.from(buffer), {
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

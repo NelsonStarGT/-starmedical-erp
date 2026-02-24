@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import ExcelJS from "exceljs"; // exceljs sustituye a xlsx por seguridad
+import { getSessionUser } from "@/lib/auth";
+import { importExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 type RowEmpresa = {
   tipo_cliente?: string;
@@ -77,14 +78,29 @@ export async function POST(req: NextRequest) {
 
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(arrayBuffer);
+    const user = getSessionUser(req);
+    const imported = await importExcelViaProcessingService({
+      context: {
+        tenantId: user?.tenantId,
+        actorId: user?.id
+      },
+      fileBuffer: Buffer.from(arrayBuffer),
+      template: "clientes_v1",
+      limits: {
+        maxFileMb: 8,
+        maxRows: 5_000,
+        maxCols: 80,
+        timeoutMs: 15_000
+      }
+    });
 
-    const sheetEmpresas = workbook.getWorksheet("EMPRESAS_INSTITUCIONES");
-    const sheetPersonas = workbook.getWorksheet("PERSONAS_PACIENTES");
+    const payload = ((imported.job.result as Record<string, unknown>) || imported.artifactJson || {}) as {
+      empresas?: Array<{ index: number; raw: RowEmpresa }>;
+      personas?: Array<{ index: number; raw: RowPersona }>;
+    };
 
-    const empresas = sheetEmpresas ? readEmpresas(sheetEmpresas) : [];
-    const personas = sheetPersonas ? readPersonas(sheetPersonas) : [];
+    const empresas = readEmpresas(Array.isArray(payload.empresas) ? payload.empresas : []);
+    const personas = readPersonas(Array.isArray(payload.personas) ? payload.personas : []);
 
     return NextResponse.json({ empresas, personas });
   } catch (error) {
@@ -93,27 +109,28 @@ export async function POST(req: NextRequest) {
   }
 }
 
-const getVal = (row: ExcelJS.Row, col: number) => String(row.getCell(col).value ?? "").trim();
+function clean(value: unknown) {
+  return String(value ?? "").trim();
+}
 
-function readEmpresas(sheet: ExcelJS.Worksheet) {
+function readEmpresas(rows: Array<{ index: number; raw: RowEmpresa }>) {
   const results: Array<{ index: number; data: RowEmpresa; error?: string }> = [];
-  sheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return; // encabezados
+  rows.forEach((source) => {
     const data: RowEmpresa = {
-      tipo_cliente: getVal(row, 1),
-      nit_empresa: getVal(row, 2),
-      codigo_empresa: getVal(row, 3),
-      nombre_comercial: getVal(row, 4),
-      razon_social: getVal(row, 5),
-      sector: getVal(row, 6),
-      estado_cliente: getVal(row, 7),
-      email_corporativo: getVal(row, 8),
-      telefono_corporativo: getVal(row, 9),
-      ciudad: getVal(row, 10),
-      departamento: getVal(row, 11),
-      pais: getVal(row, 12),
-      direccion_fiscal: getVal(row, 13),
-      direccion_comercial: getVal(row, 14)
+      tipo_cliente: clean(source.raw?.tipo_cliente),
+      nit_empresa: clean(source.raw?.nit_empresa),
+      codigo_empresa: clean(source.raw?.codigo_empresa),
+      nombre_comercial: clean(source.raw?.nombre_comercial),
+      razon_social: clean(source.raw?.razon_social),
+      sector: clean(source.raw?.sector),
+      estado_cliente: clean(source.raw?.estado_cliente),
+      email_corporativo: clean(source.raw?.email_corporativo),
+      telefono_corporativo: clean(source.raw?.telefono_corporativo),
+      ciudad: clean(source.raw?.ciudad),
+      departamento: clean(source.raw?.departamento),
+      pais: clean(source.raw?.pais),
+      direccion_fiscal: clean(source.raw?.direccion_fiscal),
+      direccion_comercial: clean(source.raw?.direccion_comercial)
     };
 
     let error: string | undefined;
@@ -124,62 +141,56 @@ function readEmpresas(sheet: ExcelJS.Worksheet) {
     } else if (!data.nombre_comercial && !data.razon_social) {
       error = "nombre_comercial o razon_social requerido al crear";
     }
-    results.push({ index: rowNumber - 1, data, error });
+    results.push({ index: source.index, data, error });
   });
   return results;
 }
 
-function readPersonas(sheet: ExcelJS.Worksheet) {
+function readPersonas(rows: Array<{ index: number; raw: RowPersona }>) {
   const results: Array<{ index: number; data: RowPersona; error?: string }> = [];
-  sheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return; // encabezados
+  rows.forEach((source) => {
     const data: RowPersona = {
-    tipo_cliente: getVal(row, 1),
-    dpi_persona: getVal(row, 2),
-    dpi_tutor: getVal(row, 3),
-    primer_nombre: getVal(row, 4),
-    segundo_nombre: getVal(row, 5),
-    tercer_nombre: getVal(row, 6),
-    primer_apellido: getVal(row, 7),
-    segundo_apellido: getVal(row, 8),
-    apellido_casada: getVal(row, 9),
-    fecha_nacimiento: getVal(row, 10),
-    sexo: getVal(row, 11),
-    celular: getVal(row, 12),
-    telefono: getVal(row, 13),
-    email: getVal(row, 14),
-    estado_civil: getVal(row, 15),
-    ocupacion: getVal(row, 16),
-    lugar_trabajo: getVal(row, 17),
-    nacionalidad: getVal(row, 18),
-    nit_empresa: getVal(row, 19),
-    codigo_empresa: getVal(row, 20),
-    tipo_relacion: getVal(row, 21)
-  };
+      tipo_cliente: clean(source.raw?.tipo_cliente),
+      dpi_persona: clean(source.raw?.dpi_persona),
+      dpi_tutor: clean(source.raw?.dpi_tutor),
+      primer_nombre: clean(source.raw?.primer_nombre),
+      segundo_nombre: clean(source.raw?.segundo_nombre),
+      tercer_nombre: clean(source.raw?.tercer_nombre),
+      primer_apellido: clean(source.raw?.primer_apellido),
+      segundo_apellido: clean(source.raw?.segundo_apellido),
+      apellido_casada: clean(source.raw?.apellido_casada),
+      fecha_nacimiento: clean(source.raw?.fecha_nacimiento),
+      sexo: clean(source.raw?.sexo),
+      celular: clean(source.raw?.celular),
+      telefono: clean(source.raw?.telefono),
+      email: clean(source.raw?.email),
+      estado_civil: clean(source.raw?.estado_civil),
+      ocupacion: clean(source.raw?.ocupacion),
+      lugar_trabajo: clean(source.raw?.lugar_trabajo),
+      nacionalidad: clean(source.raw?.nacionalidad),
+      nit_empresa: clean(source.raw?.nit_empresa),
+      codigo_empresa: clean(source.raw?.codigo_empresa),
+      tipo_relacion: clean(source.raw?.tipo_relacion)
+    };
 
-  let error: string | undefined;
-  if (!data.tipo_cliente || !["Persona", "Empleado"].includes(data.tipo_cliente)) {
-    error = "tipo_cliente requerido (Persona o Empleado)";
-  } else if (!data.dpi_persona) {
-    error = "dpi_persona requerido";
-  } else if (!/^\d{13}$/.test(data.dpi_persona)) {
-    error = "dpi_persona debe tener 13 dígitos";
-  } else if (
-    !data.primer_nombre ||
-    !data.primer_apellido ||
-    !data.fecha_nacimiento ||
-    !data.sexo ||
-    !data.celular
-  ) {
-    error = "Faltan campos obligatorios para crear persona";
-  } else {
-    const age = getAge(data.fecha_nacimiento);
-    if (age !== null && age < 18) {
-      if (!data.dpi_tutor) error = "dpi_tutor requerido para menor de edad";
-      else if (!/^\d{13}$/.test(data.dpi_tutor)) error = "dpi_tutor debe tener 13 dígitos";
+    let error: string | undefined;
+    if (!data.tipo_cliente || !["Persona", "Empleado"].includes(data.tipo_cliente)) {
+      error = "tipo_cliente requerido (Persona o Empleado)";
+    } else if (!data.dpi_persona) {
+      error = "dpi_persona requerido";
+    } else if (!/^\d{13}$/.test(data.dpi_persona)) {
+      error = "dpi_persona debe tener 13 dígitos";
+    } else if (!data.primer_nombre || !data.primer_apellido || !data.fecha_nacimiento || !data.sexo || !data.celular) {
+      error = "Faltan campos obligatorios para crear persona";
+    } else {
+      const age = getAge(data.fecha_nacimiento);
+      if (age !== null && age < 18) {
+        if (!data.dpi_tutor) error = "dpi_tutor requerido para menor de edad";
+        else if (!/^\d{13}$/.test(data.dpi_tutor)) error = "dpi_tutor debe tener 13 dígitos";
+      }
     }
-  }
-  results.push({ index: rowNumber - 1, data, error });
+
+    results.push({ index: source.index, data, error });
   });
   return results;
 }

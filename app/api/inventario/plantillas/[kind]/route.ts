@@ -15,7 +15,7 @@ export async function GET(_: NextRequest, { params }: { params: { kind: string }
     }
     const buffer = await buildTemplate(kind);
     const filename = `${kind}.xlsx`;
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

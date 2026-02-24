@@ -1,6 +1,6 @@
-import ExcelJS from "exceljs";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { prisma } from "@/lib/prisma";
+import { exportExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 type Params = { dateFrom: Date; dateTo: Date; branchId?: string | null };
 
@@ -89,52 +89,65 @@ export async function calculateCierreSat({ dateFrom, dateTo, branchId }: Params)
 
 export async function generateCierreSatXlsx(params: Params) {
   const { rows, range } = await calculateCierreSat(params);
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Cierre SAT");
-  ws.columns = [
-    { header: "Código", key: "code", width: 16 },
-    { header: "Producto", key: "name", width: 32 },
-    { header: "Unidad", key: "unit", width: 10 },
-    { header: "Saldo inicial", key: "saldoInicial", width: 14 },
-    { header: "Entradas", key: "entradas", width: 12 },
-    { header: "Salidas", key: "salidas", width: 12 },
-    { header: "Ajustes", key: "ajustes", width: 12 },
-    { header: "Saldo final", key: "saldoFinal", width: 14 },
-    { header: "Valor inicial (Q)", key: "valorInicial", width: 16 },
-    { header: "Valor final (Q)", key: "valorFinal", width: 16 }
+  const headers = [
+    "Código",
+    "Producto",
+    "Unidad",
+    "Saldo inicial",
+    "Entradas",
+    "Salidas",
+    "Ajustes",
+    "Saldo final",
+    "Valor inicial (Q)",
+    "Valor final (Q)"
   ];
-
-  ws.addRow([
-    "Rango",
-    `${formatDate(range.dateFrom)} a ${formatDate(range.dateTo)}`,
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    ""
+  const dataRows = rows.map((row) => [
+    row.code,
+    row.name,
+    row.unit || "",
+    row.saldoInicial,
+    row.entradas,
+    row.salidas,
+    row.ajustes,
+    row.saldoFinal,
+    row.valorInicial ?? "",
+    row.valorFinal ?? ""
   ]);
-  ws.addRow([]);
-
-  rows.forEach((r) => {
-    ws.addRow({
-      code: r.code,
-      name: r.name,
-      unit: r.unit || "",
-      saldoInicial: r.saldoInicial,
-      entradas: r.entradas,
-      salidas: r.salidas,
-      ajustes: r.ajustes,
-      saldoFinal: r.saldoFinal,
-      valorInicial: r.valorInicial ?? "",
-      valorFinal: r.valorFinal ?? ""
-    });
+  const { buffer } = await exportExcelViaProcessingService({
+    context: {
+      tenantId: process.env.DEFAULT_TENANT_ID || "global",
+      actorId: "inventory-cierre-sat"
+    },
+    fileName: "cierre-sat.xlsx",
+    sheets: [
+      {
+        name: "Cierre SAT",
+        headers,
+        rows: [
+          [
+            `Rango: ${formatDate(range.dateFrom)} a ${formatDate(range.dateTo)}`,
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          ...dataRows
+        ]
+      }
+    ],
+    limits: {
+      maxFileMb: 16,
+      maxRows: 60_000,
+      maxCols: 120,
+      timeoutMs: 25_000
+    }
   });
-
-  const buffer = await wb.xlsx.writeBuffer();
-  return Buffer.from(buffer);
+  return buffer;
 }
 
 export async function generateCierreSatPdf(params: Params) {

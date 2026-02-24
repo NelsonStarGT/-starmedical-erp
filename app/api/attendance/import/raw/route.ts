@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
 import { AttendanceRawEventSource, AttendanceRawEventStatus, AttendanceRawEventType } from "@prisma/client";
+import { importExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 export const runtime = "nodejs";
 
@@ -17,19 +17,6 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ ok: false, error: { code: "UNAUTHENTICATED", message: "No autenticado" } }, { status: 401 });
   if (!hasPermission(user, "USERS:ADMIN") && !hasPermission(user, "HR:ATTENDANCE:WRITE")) return unauthorized();
   return NextResponse.json({ ok: true, message: "Attendance import listo" });
-}
-
-async function parseRows(buffer: Uint8Array | Buffer) {
-  const workbook = new ExcelJS.Workbook();
-  try {
-    const data: Buffer = Buffer.isBuffer(buffer) ? (buffer as Buffer) : Buffer.from(buffer as unknown as ArrayBuffer);
-    await workbook.xlsx.load(data as any);
-    return workbook;
-  } catch {
-    const csvBook = new ExcelJS.Workbook();
-    await (csvBook.csv as any).read(Buffer.from(buffer).toString("utf8"));
-    return csvBook;
-  }
 }
 
 function extractCell(row: Record<string, any>, keys: string[]) {
@@ -53,21 +40,36 @@ export async function POST(req: NextRequest) {
     }
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    const workbook = await parseRows(buffer);
-    const sheet = workbook.worksheets[0];
-    if (!sheet) return NextResponse.json({ ok: false, error: { code: "EMPTY_FILE", message: "Archivo sin datos" } }, { status: 400 });
+    const parsed = await importExcelViaProcessingService({
+      context: {
+        tenantId: user.tenantId,
+        actorId: user.id
+      },
+      fileBuffer: buffer,
+      template: "generic",
+      limits: {
+        maxFileMb: 8,
+        maxRows: 20_000,
+        maxCols: 120,
+        timeoutMs: 20_000
+      }
+    });
+    const parsedPayload = ((parsed.artifactJson || {}) as { rows?: Record<string, unknown>[]; columns?: unknown[] }) || {};
+    const rowsSource = Array.isArray(parsedPayload.rows) ? parsedPayload.rows : [];
+    if (!rowsSource.length) {
+      return NextResponse.json({ ok: false, error: { code: "EMPTY_FILE", message: "Archivo sin datos" } }, { status: 400 });
+    }
 
-    const headerRow = sheet.getRow(1);
-    const headers = headerRow.values as string[];
+    const headers = Array.isArray(parsedPayload.columns)
+      ? parsedPayload.columns.map((value) => String(value || "").trim()).filter(Boolean)
+      : Object.keys(rowsSource[0] || {});
     const records: any[] = [];
     const seenKeys = new Set<string>();
 
-    sheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
+    rowsSource.forEach((row) => {
       const values: Record<string, any> = {};
-      headers.forEach((h, idx) => {
-        const key = typeof h === "string" ? h : `col${idx}`;
-        values[key] = row.getCell(idx).text || row.getCell(idx).value;
+      headers.forEach((header) => {
+        values[header] = row[header];
       });
       const biometricId = String(extractCell(values, ["Ac-No", "AC-No.", "biometricId", "acno"]) || "").trim();
       const rawTime = extractCell(values, ["Time", "sTime", "DateTime", "datetime"]) || "";

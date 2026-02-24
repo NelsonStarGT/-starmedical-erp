@@ -1,5 +1,5 @@
-import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
+import { exportExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 export type QAItem = { id: string; label: string; link?: string; extra?: string };
 export type QAFinding = { key: string; title: string; severity: "OK" | "WARN" | "ERROR"; items: QAItem[] };
@@ -118,25 +118,32 @@ export async function runInventoryQA(now = new Date()): Promise<{
 }
 
 export async function qaToWorkbook(findings: QAFinding[]) {
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("QA");
-  ws.columns = [
-    { header: "Chequeo", key: "title", width: 30 },
-    { header: "Severidad", key: "severity", width: 12 },
-    { header: "ID", key: "id", width: 20 },
-    { header: "Descripción", key: "label", width: 40 },
-    { header: "Extra", key: "extra", width: 30 },
-    { header: "Link", key: "link", width: 40 }
-  ];
-  findings.forEach((f) => {
-    if (f.items.length === 0) {
-      ws.addRow({ title: f.title, severity: f.severity, id: "-", label: "Sin hallazgos" });
-    } else {
-      f.items.forEach((item) => {
-        ws.addRow({ title: f.title, severity: f.severity, id: item.id, label: item.label, extra: item.extra || "", link: item.link || "" });
-      });
+  const headers = ["Chequeo", "Severidad", "ID", "Descripción", "Extra", "Link"];
+  const rows: Array<Array<string>> = [];
+  findings.forEach((finding) => {
+    if (finding.items.length === 0) {
+      rows.push([finding.title, finding.severity, "-", "Sin hallazgos", "", ""]);
+      return;
+    }
+    finding.items.forEach((item) => {
+      rows.push([finding.title, finding.severity, item.id, item.label, item.extra || "", item.link || ""]);
+    });
+  });
+
+  const { buffer } = await exportExcelViaProcessingService({
+    context: {
+      tenantId: process.env.DEFAULT_TENANT_ID || "global",
+      actorId: "inventory-qa"
+    },
+    fileName: "qa-inventario.xlsx",
+    sheets: [{ name: "QA", headers, rows }],
+    limits: {
+      maxFileMb: 8,
+      maxRows: 20_000,
+      maxCols: 80,
+      timeoutMs: 20_000
     }
   });
-  const buffer = await wb.xlsx.writeBuffer();
-  return Buffer.from(buffer);
+
+  return buffer;
 }

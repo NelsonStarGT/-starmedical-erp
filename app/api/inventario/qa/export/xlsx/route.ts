@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   try {
     const { findings } = await runInventoryQA(new Date());
     const buffer = await qaToWorkbook(findings);
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

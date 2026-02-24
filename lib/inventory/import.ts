@@ -1,8 +1,8 @@
-import ExcelJS from "exceljs";
 import { MovementType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { registerInventoryMovement } from "./movements";
 import { proveedoresMock, unidadesMock, sucursalesInvMock } from "@/lib/mock/inventario-catalogos";
+import { exportExcelViaProcessingService, importExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 export type ImportKind = "productos" | "stock" | "precios" | "costos" | "servicios" | "combos";
 
@@ -23,22 +23,50 @@ type ImportOptions = {
 export async function buildTemplate(kind: ImportKind) {
   const columns = templateColumns[kind];
   if (!columns) throw new Error("Plantilla no soportada");
-
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet(getWorksheetName(kind));
-  ws.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width }));
-  const sampleRow = columns.reduce<Record<string, any>>((acc, col) => ({ ...acc, [col.key]: col.example }), {});
-  ws.addRow(sampleRow);
-  ws.getRow(1).font = { bold: true };
-  const buffer = await wb.xlsx.writeBuffer();
-  return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  const headers = columns.map((column) => column.header);
+  const sampleRow = columns.map((column) => column.example ?? "");
+  const { buffer } = await exportExcelViaProcessingService({
+    context: {
+      tenantId: process.env.DEFAULT_TENANT_ID || "global",
+      actorId: "inventory-template"
+    },
+    fileName: `${kind}.xlsx`,
+    sheets: [
+      {
+        name: getWorksheetName(kind),
+        headers,
+        rows: [sampleRow]
+      }
+    ],
+    limits: {
+      maxFileMb: 8,
+      maxRows: 5_000,
+      maxCols: 120,
+      timeoutMs: 20_000
+    }
+  });
+  return buffer;
 }
 
 export async function processImport(kind: ImportKind, file: Buffer, opts: ImportOptions): Promise<ImportResult> {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load((Buffer.isBuffer(file) ? file : Buffer.from(file)) as any);
-  const ws = wb.worksheets[0];
-  const rows = ws.getSheetValues().slice(2); // skip first empty + header
+  const imported = await importExcelViaProcessingService({
+    context: {
+      tenantId: process.env.DEFAULT_TENANT_ID || "global",
+      actorId: opts.userId || "inventory-import"
+    },
+    fileBuffer: Buffer.isBuffer(file) ? file : Buffer.from(file),
+    template: "generic",
+    limits: {
+      maxFileMb: 8,
+      maxRows: 30_000,
+      maxCols: 200,
+      timeoutMs: 25_000
+    }
+  });
+  const parsed = ((imported.artifactJson || {}) as { rows?: Record<string, unknown>[]; columns?: unknown[] }) || {};
+  const columns = Array.isArray(parsed.columns) ? parsed.columns.map((value) => String(value || "").trim()) : [];
+  const rawRows = Array.isArray(parsed.rows) ? parsed.rows : [];
+  const rows = rawRows.map((row) => [null, ...columns.map((column) => row[column] ?? "")]);
   const result: ImportResult = { created: 0, updated: 0, movements: 0, errors: [] };
   const branchId = opts.branchId || "s1";
   const allowedBranches = sucursalesInvMock.map((s) => s.id);

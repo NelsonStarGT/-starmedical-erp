@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { MovementType } from "@prisma/client";
 import { requireRoles } from "@/lib/api/auth";
+import { exportExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,38 +31,51 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" }
     });
 
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Movimientos");
-    ws.columns = [
-      { header: "Fecha", key: "fecha", width: 20 },
-      { header: "Producto", key: "producto", width: 30 },
-      { header: "Tipo", key: "tipo", width: 15 },
-      { header: "Cantidad", key: "cantidad", width: 12 },
-      { header: "Costo", key: "costo", width: 12 },
-      { header: "Precio", key: "precio", width: 12 },
-      { header: "Stock resultante", key: "stock", width: 18 },
-      { header: "Usuario", key: "usuario", width: 16 },
-      { header: "Referencia", key: "referencia", width: 24 },
-      { header: "Motivo", key: "motivo", width: 20 }
+    const headers = [
+      "Fecha",
+      "Producto",
+      "Tipo",
+      "Cantidad",
+      "Costo",
+      "Precio",
+      "Stock resultante",
+      "Usuario",
+      "Referencia",
+      "Motivo"
     ];
-
-    data.forEach((m) => {
-      ws.addRow({
-        fecha: m.createdAt.toISOString(),
-        producto: `${m.product?.name || ""} (${(m.product as any)?.code || m.productId})`,
-        tipo: m.type,
-        cantidad: m.quantity ?? "",
-        costo: m.unitCost ?? "",
-        precio: m.salePrice ?? "",
-        stock: "",
-        usuario: m.createdById,
-        referencia: m.reference || "",
-        motivo: m.reason || ""
-      });
+    const rows = data.map((movement) => [
+      movement.createdAt.toISOString(),
+      `${movement.product?.name || ""} (${(movement.product as any)?.code || movement.productId})`,
+      movement.type,
+      movement.quantity ?? "",
+      movement.unitCost !== null && movement.unitCost !== undefined ? Number(movement.unitCost) : "",
+      movement.salePrice !== null && movement.salePrice !== undefined ? Number(movement.salePrice) : "",
+      "",
+      movement.createdById,
+      movement.reference || "",
+      movement.reason || ""
+    ]);
+    const { buffer } = await exportExcelViaProcessingService({
+      context: {
+        tenantId: req.headers.get("x-tenant-id"),
+        actorId: `inventory-${auth.role || "operator"}`
+      },
+      fileName: "kardex.xlsx",
+      sheets: [
+        {
+          name: "Movimientos",
+          headers,
+          rows
+        }
+      ],
+      limits: {
+        maxFileMb: 8,
+        maxRows: 30_000,
+        maxCols: 120,
+        timeoutMs: 20_000
+      }
     });
-
-    const buffer = await wb.xlsx.writeBuffer();
-    return new NextResponse(Buffer.from(buffer), {
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

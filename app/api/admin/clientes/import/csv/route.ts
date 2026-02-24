@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import ExcelJS from "exceljs";
 import { ClientCatalogType, ClientProfileType, type Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { isValidEmail } from "@/lib/utils";
 import { dpiSchema } from "@/lib/validation/identity";
+import { importExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 export const runtime = "nodejs";
 
@@ -171,7 +171,13 @@ function parseCsvLine(line: string, delimiter: ";" | ",") {
   return result;
 }
 
-async function parseUploadedFile(file: File): Promise<ParseResult> {
+async function parseUploadedFile(
+  file: File,
+  context?: {
+    tenantId?: string | null;
+    actorId?: string | null;
+  }
+): Promise<ParseResult> {
   const fileName = file.name.toLowerCase();
 
   if (fileName.endsWith(".csv") || file.type.includes("csv")) {
@@ -199,39 +205,28 @@ async function parseUploadedFile(file: File): Promise<ParseResult> {
   }
 
   if (fileName.endsWith(".xlsx") || file.type.includes("sheet")) {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(await file.arrayBuffer());
-    const sheet = workbook.worksheets[0];
-    if (!sheet) return { columns: [], rows: [] };
-
-    const headerRow = sheet.getRow(1);
-    const columnDefs: Array<{ index: number; name: string }> = [];
-    headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-      const name = String(cell.value || "").trim();
-      if (!name) return;
-      columnDefs.push({ index: colNumber, name });
+    const imported = await importExcelViaProcessingService({
+      context,
+      fileBuffer: Buffer.from(await file.arrayBuffer()),
+      template: "generic",
+      limits: {
+        maxFileMb: 8,
+        maxRows: 8_000,
+        maxCols: 120,
+        timeoutMs: 20_000
+      }
     });
-    const columns = columnDefs.map((column) => column.name);
 
-    const rows: ParsedRow[] = [];
-    sheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
+    const parsed = ((imported.artifactJson || {}) as { rows?: Record<string, unknown>[]; columns?: unknown[] }) || {};
+    const columns = Array.isArray(parsed.columns) ? parsed.columns.map((value) => String(value || "").trim()).filter(Boolean) : [];
+    const sourceRows = Array.isArray(parsed.rows) ? parsed.rows : [];
+    const rows: ParsedRow[] = sourceRows.map((row, index) => {
       const values: Record<string, string> = {};
-      columnDefs.forEach((columnDef) => {
-        const cell = row.getCell(columnDef.index).value;
-        if (cell === null || cell === undefined) {
-          values[columnDef.name] = "";
-          return;
-        }
-        if (typeof cell === "object" && "text" in cell && typeof cell.text === "string") {
-          values[columnDef.name] = cell.text.trim();
-          return;
-        }
-        values[columnDef.name] = String(cell).trim();
+      columns.forEach((column) => {
+        values[column] = String(row[column] ?? "").trim();
       });
-      rows.push({ row: rowNumber, values });
+      return { row: index + 2, values };
     });
-
     return { columns, rows };
   }
 
@@ -617,7 +612,10 @@ export async function POST(req: NextRequest) {
 
   let parsed: ParseResult;
   try {
-    parsed = await parseUploadedFile(file);
+    parsed = await parseUploadedFile(file, {
+      tenantId: auth.user.tenantId,
+      actorId: auth.user.id
+    });
   } catch (err) {
     return NextResponse.json({ ok: false, error: (err as Error)?.message || "No se pudo leer el archivo." }, { status: 400 });
   }
