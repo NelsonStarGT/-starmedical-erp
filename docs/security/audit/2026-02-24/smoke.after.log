@@ -1,0 +1,8 @@
+
+> star-medical-erp@0.1.0 smoke
+> node scripts/smoke-test.js
+
+[OK] /api/health status=200
+[OK] /api/admin/config/email/test status=401
+[OK] /api/labtest/auth/send-otp status=401
+Smoke test PASSED
