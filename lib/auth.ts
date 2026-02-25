@@ -23,8 +23,8 @@ export type SessionUser = {
   legalEntityId?: string | null;
 };
 
-function signToken(payload: SessionUser) {
-  return jwt.sign(payload, AUTH_SECRET, { expiresIn: SESSION_TTL_SECONDS });
+function signToken(payload: SessionUser, ttlSeconds = SESSION_TTL_SECONDS) {
+  return jwt.sign(payload, AUTH_SECRET, { expiresIn: ttlSeconds });
 }
 
 function verifyToken(token: string) {
@@ -64,18 +64,46 @@ export function requireAuth(req: NextRequest) {
   return { user, errorResponse: null };
 }
 
-export function createLoginResponse(sessionUser: SessionUser) {
+export function createLoginResponse(
+  sessionUser: SessionUser,
+  options?: {
+    maxAgeSeconds?: number;
+    tokenTtlSeconds?: number;
+    persistent?: boolean;
+    sameSite?: "lax" | "strict" | "none";
+  }
+) {
   const response = NextResponse.json({ email: sessionUser.email, name: sessionUser.name });
-  const token = signToken(sessionUser);
-  response.cookies.set({
+  const maxAgeSeconds = Number(options?.maxAgeSeconds);
+  const tokenTtlCandidate = Number(options?.tokenTtlSeconds);
+  const ttlSeconds =
+    Number.isInteger(tokenTtlCandidate) && tokenTtlCandidate > 0
+      ? tokenTtlCandidate
+      : Number.isInteger(maxAgeSeconds) && maxAgeSeconds > 0
+        ? maxAgeSeconds
+        : SESSION_TTL_SECONDS;
+  const token = signToken(sessionUser, ttlSeconds);
+  const cookiePayload: {
+    name: string;
+    value: string;
+    httpOnly: true;
+    path: "/";
+    sameSite: "lax" | "strict" | "none";
+    secure: boolean;
+    maxAge?: number;
+  } = {
     name: AUTH_COOKIE_NAME,
     value: token,
     httpOnly: true,
     path: "/",
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: SESSION_TTL_SECONDS
-  });
+    sameSite: options?.sameSite || "strict",
+    secure: process.env.NODE_ENV === "production"
+  };
+  const persistent = options?.persistent !== false;
+  if (persistent) {
+    cookiePayload.maxAge = Number.isInteger(maxAgeSeconds) && maxAgeSeconds > 0 ? maxAgeSeconds : ttlSeconds;
+  }
+  response.cookies.set(cookiePayload);
   return response;
 }
 
@@ -86,6 +114,8 @@ export const createLogoutResponse = () => {
     value: "",
     httpOnly: true,
     path: "/",
+    sameSite: "strict",
+    secure: process.env.NODE_ENV === "production",
     maxAge: 0
   });
   return response;

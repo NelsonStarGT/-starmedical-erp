@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{6})$/;
+export const NIT_BASIC_REGEX = /^[A-Z0-9][A-Z0-9-]{1,19}$/;
 const HOUR_MINUTE_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const HOUR_RANGE_REGEX = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
 
@@ -16,6 +17,21 @@ const nullableTrimmedString = z
   .transform((value) => {
     if (!value) return null;
     const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  });
+
+const nullableNitString = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .min(2, "NIT requerido")
+  .max(20, "NIT demasiado largo")
+  .regex(NIT_BASIC_REGEX, "NIT inválido")
+  .optional()
+  .nullable()
+  .transform((value) => {
+    if (!value) return null;
+    const trimmed = value.trim().toUpperCase();
     return trimmed.length ? trimmed : null;
   });
 
@@ -175,7 +191,7 @@ export const legalEntityCreateSchema = z
   .object({
     legalName: z.string().trim().min(2, "Razón social requerida").max(180),
     tradeName: nullableTrimmedString,
-    nit: nullableTrimmedString,
+    nit: nullableNitString,
     address: nullableTrimmedString,
     isActive: z.boolean().default(true)
   })
@@ -216,23 +232,38 @@ export const billingProfileUpdateSchema = billingProfileCreateSchema
   })
   .strict();
 
-export const THEME_FONT_KEYS = ["inter", "poppins", "montserrat", "nunito", "roboto"] as const;
+export const THEME_FONT_HEADING_KEYS = ["montserrat", "poppins"] as const;
+export const THEME_FONT_BODY_KEYS = ["nunito", "inter"] as const;
+export const THEME_DENSITY_KEYS = ["compact", "normal"] as const;
 
 export const tenantThemePaletteSchema = z.object({
   primary: z.string().trim().regex(HEX_COLOR_REGEX),
-  secondary: z.string().trim().regex(HEX_COLOR_REGEX),
   accent: z.string().trim().regex(HEX_COLOR_REGEX),
+  structure: z.string().trim().regex(HEX_COLOR_REGEX),
   bg: z.string().trim().regex(HEX_COLOR_REGEX),
   surface: z.string().trim().regex(HEX_COLOR_REGEX),
-  text: z.string().trim().regex(HEX_COLOR_REGEX)
+  text: z.string().trim().regex(HEX_COLOR_REGEX),
+  muted: z.string().trim().regex(HEX_COLOR_REGEX),
+  border: z.string().trim().regex(HEX_COLOR_REGEX),
+  ring: z.string().trim().regex(HEX_COLOR_REGEX)
 });
 
 export const tenantThemePatchSchema = z
   .object({
-    theme: tenantThemePaletteSchema.optional(),
-    fontKey: z.enum(THEME_FONT_KEYS).optional(),
+    theme: tenantThemePaletteSchema
+      .partial()
+      .extend({
+        // Compatibilidad: versiones antiguas enviaban `secondary`.
+        secondary: z.string().trim().regex(HEX_COLOR_REGEX).optional()
+      })
+      .optional(),
+    fontHeadingKey: z.enum(THEME_FONT_HEADING_KEYS).optional(),
+    fontBodyKey: z.enum(THEME_FONT_BODY_KEYS).optional(),
+    densityDefault: z.enum(THEME_DENSITY_KEYS).optional(),
     logoUrl: z.string().trim().url().nullable().optional(),
-    logoAssetId: z.string().trim().min(1).nullable().optional()
+    logoAssetId: z.string().trim().min(1).nullable().optional(),
+    // Compatibilidad retroactiva con payloads legacy.
+    fontKey: z.enum(["inter", "poppins", "montserrat", "nunito", "roboto"]).optional()
   })
   .strict();
 

@@ -5,14 +5,16 @@ import { revalidatePath } from "next/cache";
 import {
   ClientAffiliationPayerType,
   ClientAffiliationStatus,
-  ClientBloodType,
   ClientCatalogType,
+  ClientEmailCategory,
   ClientDocumentApprovalStatus,
   ClientLocationType,
+  ClientPhoneCategory,
   InsurerBillingCutoffMode,
   InsurerBillingType,
   Prisma,
-  ClientProfileType
+  ClientProfileType,
+  PatientSex
 } from "@prisma/client";
 import type { ClientContactRelationType, ClientNoteType, ClientNoteVisibility } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -22,9 +24,33 @@ import { isAdmin } from "@/lib/rbac";
 import { canApproveDocsFromRoles, canEditClientProfileFromRoles, canEditDocsFromRoles } from "@/lib/clients/permissions";
 import { warnDevMissingRequiredDocsDelegate } from "@/lib/clients/requiredDocuments";
 import { isRulesConfigWeightsUnavailableError, warnDevRulesConfigWeightsUnavailable } from "@/lib/clients/rulesConfig";
+import {
+  isReferralAcquisitionSource,
+  isSocialAcquisitionSource,
+  validateAcquisitionConditionalFields
+} from "@/lib/clients/acquisition";
+import {
+  buildIdentityDocumentOptionsByCountry,
+  isFallbackDocumentTypeId,
+  isSensitiveIdentityDocument,
+  validateIdentityDocumentValue,
+  type IdentityDocumentOption
+} from "@/lib/clients/identityDocuments";
 import { isValidEmail } from "@/lib/utils";
 import { dpiSchema } from "@/lib/validation/identity";
 import { logClientAudit, logClientAuditTx } from "@/lib/clients/audit.service";
+import { resolveClientBloodType } from "@/lib/clients/bloodType";
+import { buildPersonLocationDrafts } from "@/lib/clients/personLocation";
+import { parseOptionalBirthDate } from "@/lib/clients/personValidation";
+import {
+  assertStrictLocalPhoneValue,
+  buildE164,
+  normalizeCallingCode,
+  sanitizeLocalNumber
+} from "@/lib/clients/phoneValidation";
+
+const CLIENT_PHOTO_MAX_SIZE_BYTES = 3 * 1024 * 1024;
+const CLIENT_PHOTO_ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
 
 async function requireAuthenticatedUser(): Promise<SessionUser> {
   const user = await getSessionUserFromCookies(cookies());
@@ -91,21 +117,6 @@ function normalizeSourceToken(value: string | null | undefined) {
     .replace(/^_+|_+$/g, "");
 }
 
-function isReferralSource(code?: string | null, name?: string | null) {
-  const token = normalizeSourceToken(code || name || "");
-  return token.includes("REFER");
-}
-
-function isSocialMediaSource(code?: string | null, name?: string | null) {
-  const token = normalizeSourceToken(code || name || "");
-  return token.includes("SOCIAL") || token.includes("REDES");
-}
-
-function isOtherSource(code?: string | null, name?: string | null) {
-  const token = normalizeSourceToken(code || name || "");
-  return token === "OTRO" || token === "OTHER";
-}
-
 function parseOptionalDate(value?: string | null) {
   const normalized = normalizeOptional(value);
   if (!normalized) return null;
@@ -138,39 +149,66 @@ function normalizeIdentifierValue(value: string) {
 }
 
 function normalizePhoneValue(value: string) {
-  return value.trim().replace(/[^\d+]/g, "");
+  return sanitizeLocalNumber(value);
 }
 
-const BLOOD_TYPE_CANONICAL: ReadonlyArray<ClientBloodType> = [
-  "A_POS",
-  "A_NEG",
-  "B_POS",
-  "B_NEG",
-  "AB_POS",
-  "AB_NEG",
-  "O_POS",
-  "O_NEG",
-  "DESCONOCIDO"
-];
+function normalizePhoneE164(value: string) {
+  const raw = value.trim();
+  if (!raw.startsWith("+")) return null;
+  const digits = sanitizeLocalNumber(raw);
+  return digits ? `+${digits}` : null;
+}
 
-function resolveClientBloodType(value?: string | null): ClientBloodType {
-  const token = normalizeSourceToken(value ?? "");
-  if (!token) return "DESCONOCIDO";
+type IdentityDocumentCatalogRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+};
 
-  if (token === "A" || token === "A_POS" || token === "APOS" || token === "A_POSITIVO") return "A_POS";
-  if (token === "A_NEG" || token === "ANEG" || token === "A_NEGATIVO") return "A_NEG";
-  if (token === "B" || token === "B_POS" || token === "BPOS" || token === "B_POSITIVO") return "B_POS";
-  if (token === "B_NEG" || token === "BNEG" || token === "B_NEGATIVO") return "B_NEG";
-  if (token === "AB" || token === "AB_POS" || token === "ABPOS" || token === "AB_POSITIVO") return "AB_POS";
-  if (token === "AB_NEG" || token === "ABNEG" || token === "AB_NEGATIVO") return "AB_NEG";
-  if (token === "O" || token === "O_POS" || token === "OPOS" || token === "O_POSITIVO") return "O_POS";
-  if (token === "O_NEG" || token === "ONEG" || token === "O_NEGATIVO") return "O_NEG";
-  if (token === "UNKNOWN" || token === "DESCONOCIDO") return "DESCONOCIDO";
+async function resolveCountryIso2ById(
+  tx: Prisma.TransactionClient | typeof prisma,
+  countryId?: string | null
+) {
+  const normalizedCountryId = normalizeOptional(countryId);
+  if (!normalizedCountryId) return null;
+  const country = await tx.geoCountry.findUnique({
+    where: { id: normalizedCountryId },
+    select: { iso2: true }
+  });
+  return country?.iso2 ?? null;
+}
 
-  if ((BLOOD_TYPE_CANONICAL as readonly string[]).includes(token)) {
-    return token as ClientBloodType;
+async function listActiveIdentityDocumentOptions(
+  tx: Prisma.TransactionClient | typeof prisma,
+  countryIso2?: string | null
+) {
+  const rows: IdentityDocumentCatalogRow[] = await tx.clientCatalogItem.findMany({
+    where: {
+      type: ClientCatalogType.DOCUMENT_TYPE,
+      isActive: true
+    },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      isActive: true
+    }
+  });
+
+  return buildIdentityDocumentOptionsByCountry(rows, countryIso2);
+}
+
+function normalizeIdentityDocumentSelection(input: {
+  options: IdentityDocumentOption[];
+  identityDocumentTypeId?: string | null;
+}) {
+  const selectedId = normalizeOptional(input.identityDocumentTypeId);
+  if (!selectedId) {
+    return input.options.find((item) => !item.optional) ?? input.options[0] ?? null;
   }
-  return "DESCONOCIDO";
+  return input.options.find((item) => item.id === selectedId) ?? null;
 }
 
 type AcquisitionResolutionResult = {
@@ -225,14 +263,19 @@ async function createPrimaryClientIdentifier(tx: Prisma.TransactionClient, input
   clientId: string;
   value: string | null;
   countryId?: string | null;
-  preferredDocumentTypeTokens: string[];
+  preferredDocumentTypeTokens?: string[];
+  documentTypeId?: string | null;
 }) {
   const raw = normalizeOptional(input.value);
   if (!raw) return;
   const valueNormalized = normalizeIdentifierValue(raw);
   if (!valueNormalized) return;
 
-  const documentTypeId = await resolveDocumentTypeByHints(tx, input.preferredDocumentTypeTokens);
+  const documentTypeId =
+    normalizeOptional(input.documentTypeId) ??
+    (input.preferredDocumentTypeTokens?.length
+      ? await resolveDocumentTypeByHints(tx, input.preferredDocumentTypeTokens)
+      : null);
   await tx.clientIdentifier.create({
     data: {
       clientId: input.clientId,
@@ -257,7 +300,18 @@ async function createPrimaryClientPhone(tx: Prisma.TransactionClient, input: {
   if (!number) return;
 
   const countryCode = normalizeSourceToken(input.countryIso2 ?? "").slice(0, 2) || "XX";
-  const e164 = number.startsWith("+") ? number : null;
+  const explicitE164 = normalizePhoneE164(raw);
+  let e164 = explicitE164;
+  if (!e164 && countryCode !== "XX") {
+    const codeRow = await tx.phoneCountryCode.findFirst({
+      where: {
+        iso2: countryCode,
+        isActive: true
+      },
+      select: { dialCode: true }
+    });
+    e164 = buildE164(codeRow?.dialCode ?? null, number);
+  }
 
   await tx.clientPhone.create({
     data: {
@@ -268,6 +322,354 @@ async function createPrimaryClientPhone(tx: Prisma.TransactionClient, input: {
       isPrimary: true,
       isActive: true
     }
+  });
+}
+
+type ClientPhoneChannelInput = {
+  category?: ClientPhoneCategory | string | null;
+  relationType?: ClientPhoneRelationType | string | null;
+  value?: string | null;
+  countryIso2?: string | null;
+  canCall?: boolean | null;
+  canWhatsapp?: boolean | null;
+  isPrimary?: boolean;
+  isActive?: boolean;
+};
+
+type ClientEmailChannelInput = {
+  category?: ClientEmailCategory | string | null;
+  value?: string | null;
+  isPrimary?: boolean;
+  isActive?: boolean;
+};
+
+type NormalizedClientPhoneChannel = {
+  category: ClientPhoneCategory;
+  relationType: ClientPhoneRelationType;
+  number: string;
+  countryCode: string;
+  e164: string | null;
+  canCall: boolean;
+  canWhatsapp: boolean;
+  isPrimary: boolean;
+  isActive: boolean;
+};
+
+type NormalizedClientEmailChannel = {
+  category: ClientEmailCategory;
+  valueRaw: string;
+  valueNormalized: string;
+  isPrimary: boolean;
+  isActive: boolean;
+};
+
+type ClientPhoneRelationType = "TITULAR" | "CONYUGE" | "HIJO_A" | "MADRE" | "PADRE" | "ENCARGADO" | "OTRO";
+type ClientServiceSegment = "PARTICULAR" | "COMPANY" | "INSTITUTION" | "INSURER";
+
+const CLIENT_PHONE_CATEGORIES = new Set(Object.values(ClientPhoneCategory));
+const CLIENT_EMAIL_CATEGORIES = new Set(Object.values(ClientEmailCategory));
+
+const CLIENT_PHONE_RELATION_FALLBACK = [
+  "TITULAR",
+  "CONYUGE",
+  "HIJO_A",
+  "MADRE",
+  "PADRE",
+  "ENCARGADO",
+  "OTRO"
+] as const;
+
+function getPrismaEnumValues(enumObj: unknown): string[] {
+  if (!enumObj || typeof enumObj !== "object") return [];
+  return Object.values(enumObj as Record<string, string>);
+}
+
+const prismaRuntimeEnums = Prisma as unknown as {
+  ClientPhoneRelationType?: Record<string, string>;
+  $Enums?: { ClientPhoneRelationType?: Record<string, string> };
+};
+
+const relationEnumValues = getPrismaEnumValues(
+  prismaRuntimeEnums.ClientPhoneRelationType ?? prismaRuntimeEnums.$Enums?.ClientPhoneRelationType
+);
+
+const CLIENT_PHONE_RELATION_TYPES = new Set<string>(
+  relationEnumValues.length ? relationEnumValues : CLIENT_PHONE_RELATION_FALLBACK
+);
+
+const CLIENT_SERVICE_SEGMENT_FALLBACK: ClientServiceSegment = "PARTICULAR";
+const CLIENT_SERVICE_SEGMENTS = new Set<ClientServiceSegment>([
+  "PARTICULAR",
+  "COMPANY",
+  "INSTITUTION",
+  "INSURER"
+]);
+
+function normalizeClientPhoneCategory(value?: ClientPhoneCategory | string | null): ClientPhoneCategory {
+  if (!value) return ClientPhoneCategory.PRIMARY;
+  const normalized = String(value).trim().toUpperCase() as ClientPhoneCategory;
+  return CLIENT_PHONE_CATEGORIES.has(normalized) ? normalized : ClientPhoneCategory.OTHER;
+}
+
+function normalizeClientPhoneRelationType(value?: ClientPhoneRelationType | string | null): ClientPhoneRelationType {
+  if (!value) return "TITULAR";
+  const normalized = String(value).trim().toUpperCase();
+  return CLIENT_PHONE_RELATION_TYPES.has(normalized) ? (normalized as ClientPhoneRelationType) : "OTRO";
+}
+
+function normalizeClientEmailCategory(value?: ClientEmailCategory | string | null): ClientEmailCategory {
+  if (!value) return ClientEmailCategory.PRIMARY;
+  const normalized = String(value).trim().toUpperCase() as ClientEmailCategory;
+  return CLIENT_EMAIL_CATEGORIES.has(normalized) ? normalized : ClientEmailCategory.OTHER;
+}
+
+function normalizeClientServiceSegments(values?: Array<ClientServiceSegment | string> | null): ClientServiceSegment[] {
+  const normalized = Array.isArray(values)
+    ? values
+        .map((value) => String(value ?? "").trim().toUpperCase())
+        .filter((value): value is ClientServiceSegment => CLIENT_SERVICE_SEGMENTS.has(value as ClientServiceSegment))
+    : [];
+  if (!normalized.length) return [CLIENT_SERVICE_SEGMENT_FALLBACK];
+  return [...new Set(normalized)];
+}
+
+function normalizeStrictPhoneForPerson(rawValue: string, fieldLabel: string): string {
+  const raw = (rawValue ?? "").trim();
+  if (raw.startsWith("+")) {
+    throw new Error(`${fieldLabel} inválido. Ingresa solo número local sin '+'.`);
+  }
+  return assertStrictLocalPhoneValue(raw, fieldLabel);
+}
+
+function normalizeClientPhoneChannels(input: {
+  channels?: ClientPhoneChannelInput[] | null;
+  fallbackPhone?: string | null;
+  fallbackCountryIso2?: string | null;
+}): NormalizedClientPhoneChannel[] {
+  const rows: NormalizedClientPhoneChannel[] = [];
+  const channels = Array.isArray(input.channels) ? input.channels : [];
+
+  for (const item of channels) {
+    const rawNumber = normalizeOptional(item.value);
+    if (!rawNumber) continue;
+    const number = normalizePhoneValue(rawNumber);
+    if (!number) continue;
+    const countryCode = normalizeSourceToken(item.countryIso2 ?? "").slice(0, 2) || "XX";
+    const e164 = normalizePhoneE164(rawNumber);
+    rows.push({
+      category: normalizeClientPhoneCategory(item.category),
+      relationType: normalizeClientPhoneRelationType(item.relationType),
+      number,
+      countryCode,
+      e164,
+      canCall: item.canCall !== false,
+      canWhatsapp: item.canWhatsapp === true,
+      isPrimary: Boolean(item.isPrimary),
+      isActive: item.isActive !== false
+    });
+  }
+
+  const fallbackRaw = normalizeOptional(input.fallbackPhone);
+  const fallbackNumber = fallbackRaw ? normalizePhoneValue(fallbackRaw) : null;
+  if (fallbackNumber) {
+    const fallbackCountryCode = normalizeSourceToken(input.fallbackCountryIso2 ?? "").slice(0, 2) || "XX";
+    const exists = rows.some((row) => row.number === fallbackNumber && row.countryCode === fallbackCountryCode);
+    if (!exists) {
+      const fallbackE164 = fallbackRaw ? normalizePhoneE164(fallbackRaw) : null;
+      rows.unshift({
+        category: ClientPhoneCategory.PRIMARY,
+        relationType: "TITULAR",
+        number: fallbackNumber,
+        countryCode: fallbackCountryCode,
+        e164: fallbackE164,
+        canCall: true,
+        canWhatsapp: false,
+        isPrimary: true,
+        isActive: true
+      });
+    }
+  }
+
+  const activeRows = rows.filter((row) => row.isActive);
+  if (!activeRows.length) return [];
+
+  const dedupedRows: NormalizedClientPhoneChannel[] = [];
+  const indexByPhoneKey = new Map<string, number>();
+  for (const row of activeRows) {
+    const dedupeKey = row.e164 ?? `${row.countryCode}|${row.number}`;
+    const existingIndex = indexByPhoneKey.get(dedupeKey);
+    if (existingIndex === undefined) {
+      indexByPhoneKey.set(dedupeKey, dedupedRows.length);
+      dedupedRows.push({ ...row, isActive: true });
+      continue;
+    }
+
+    const existing = dedupedRows[existingIndex];
+    dedupedRows[existingIndex] = {
+      ...existing,
+      category:
+        existing.category === ClientPhoneCategory.OTHER && row.category !== ClientPhoneCategory.OTHER
+          ? row.category
+          : existing.category,
+      relationType: existing.relationType === "OTRO" && row.relationType !== "OTRO" ? row.relationType : existing.relationType,
+      canCall: existing.canCall || row.canCall,
+      canWhatsapp: existing.canWhatsapp || row.canWhatsapp,
+      isPrimary: existing.isPrimary || row.isPrimary,
+      e164: existing.e164 ?? row.e164
+    };
+  }
+
+  let primaryIndex = dedupedRows.findIndex((row) => row.isPrimary);
+  if (primaryIndex < 0) primaryIndex = 0;
+
+  return dedupedRows.map((row, index) => ({
+    ...row,
+    isPrimary: index === primaryIndex
+  }));
+}
+
+function normalizeClientEmailChannels(input: {
+  channels?: ClientEmailChannelInput[] | null;
+  fallbackEmail?: string | null;
+}): NormalizedClientEmailChannel[] {
+  const rows: NormalizedClientEmailChannel[] = [];
+  const channels = Array.isArray(input.channels) ? input.channels : [];
+
+  for (const item of channels) {
+    const raw = normalizeOptional(item.value);
+    if (!raw) continue;
+    const valueNormalized = raw.toLowerCase();
+    if (!isValidEmail(valueNormalized)) continue;
+    rows.push({
+      category: normalizeClientEmailCategory(item.category),
+      valueRaw: raw,
+      valueNormalized,
+      isPrimary: Boolean(item.isPrimary),
+      isActive: item.isActive !== false
+    });
+  }
+
+  const fallbackEmail = normalizeOptional(input.fallbackEmail);
+  if (fallbackEmail && isValidEmail(fallbackEmail)) {
+    const normalizedFallback = fallbackEmail.toLowerCase();
+    const exists = rows.some((row) => row.valueNormalized === normalizedFallback);
+    if (!exists) {
+      rows.unshift({
+        category: ClientEmailCategory.PRIMARY,
+        valueRaw: fallbackEmail,
+        valueNormalized: normalizedFallback,
+        isPrimary: true,
+        isActive: true
+      });
+    }
+  }
+
+  const activeRows = rows.filter((row) => row.isActive);
+  if (!activeRows.length) return [];
+
+  if (!activeRows.some((row) => row.isPrimary)) {
+    activeRows[0].isPrimary = true;
+  }
+
+  return rows.filter((row) => row.isActive);
+}
+
+async function createClientContactChannels(
+  tx: Prisma.TransactionClient,
+  input: {
+    clientId: string;
+    phoneChannels: NormalizedClientPhoneChannel[];
+    emailChannels: NormalizedClientEmailChannel[];
+  }
+) {
+  if (input.phoneChannels.length) {
+    const iso2Codes = [...new Set(input.phoneChannels.map((row) => row.countryCode).filter((code) => code && code !== "XX"))];
+    const phoneCatalog = iso2Codes.length
+      ? await tx.phoneCountryCode.findMany({
+          where: {
+            iso2: { in: iso2Codes },
+            isActive: true
+          },
+          select: {
+            iso2: true,
+            dialCode: true
+          }
+        })
+      : [];
+    const dialByIso2 = new Map(phoneCatalog.map((row) => [row.iso2, normalizeCallingCode(row.dialCode)]));
+
+    await tx.clientPhone.createMany({
+      data: input.phoneChannels.map((row) => {
+        const resolvedE164 = row.e164 ?? buildE164(dialByIso2.get(row.countryCode) ?? null, row.number);
+        return {
+          clientId: input.clientId,
+          category: row.category,
+          relationType: row.relationType,
+          countryCode: row.countryCode,
+          number: row.number,
+          e164: resolvedE164,
+          canCall: row.canCall,
+          canWhatsapp: row.canWhatsapp,
+          isPrimary: row.isPrimary,
+          isActive: row.isActive
+        };
+      })
+    });
+  }
+
+  if (input.emailChannels.length) {
+    await tx.clientEmail.createMany({
+      data: input.emailChannels.map((row) => ({
+        clientId: input.clientId,
+        category: row.category,
+        valueRaw: row.valueRaw,
+        valueNormalized: row.valueNormalized,
+        isPrimary: row.isPrimary,
+        isActive: row.isActive
+      }))
+    });
+  }
+}
+
+function pickPrimaryPhoneChannel(channels: NormalizedClientPhoneChannel[]) {
+  return channels.find((row) => row.isPrimary) ?? channels[0] ?? null;
+}
+
+function pickPrimaryEmailChannel(channels: NormalizedClientEmailChannel[]) {
+  return channels.find((row) => row.isPrimary) ?? channels[0] ?? null;
+}
+
+async function createClientContactChannelsSafe(
+  tx: Prisma.TransactionClient,
+  input: {
+    clientId: string;
+    phoneChannels: NormalizedClientPhoneChannel[];
+    emailChannels: NormalizedClientEmailChannel[];
+    fallbackPhone?: string | null;
+    fallbackCountryIso2?: string | null;
+  }
+) {
+  if (!input.phoneChannels.length && !input.emailChannels.length) return;
+
+  try {
+    await createClientContactChannels(tx, {
+      clientId: input.clientId,
+      phoneChannels: input.phoneChannels,
+      emailChannels: input.emailChannels
+    });
+    return;
+  } catch (error) {
+    if (!isPrismaMissingTableError(error) && !isPrismaSchemaMismatchError(error)) {
+      throw error;
+    }
+    warnDevClientsCompat("clients.actions.createClientContactChannels", error);
+  }
+
+  const primaryPhone = pickPrimaryPhoneChannel(input.phoneChannels);
+  await createPrimaryClientPhone(tx, {
+    clientId: input.clientId,
+    phone: primaryPhone?.number ?? input.fallbackPhone ?? null,
+    countryIso2: primaryPhone?.countryCode ?? input.fallbackCountryIso2
   });
 }
 
@@ -328,32 +730,45 @@ async function resolveAcquisitionInput(
   });
   if (!source) throw new Error("Canal de adquisición inválido o inactivo.");
 
-  const social = isSocialMediaSource(source.code, source.name);
-  const other = isOtherSource(source.code, source.name);
-  const referral = isReferralSource(source.code, source.name);
+  const social = isSocialAcquisitionSource({ code: source.code, name: source.name });
+  const referral = isReferralAcquisitionSource({ code: source.code, name: source.name });
+  const preValidation = validateAcquisitionConditionalFields({
+    sourceCode: source.code,
+    sourceName: source.name,
+    detailOptionId,
+    otherNote
+  });
+  if (preValidation.detailError) throw new Error(preValidation.detailError);
 
   let normalizedDetailOptionId: string | null = null;
+  let detailCode: string | null = null;
+  let detailName: string | null = null;
   if (social) {
-    const requiredId = normalizeRequired(detailOptionId, "Selecciona la red social.");
+    const requiredId = detailOptionId as string;
     const detail = await tx.clientAcquisitionDetailOption.findFirst({
       where: { id: requiredId, sourceId: source.id, isActive: true },
-      select: { id: true }
+      select: { id: true, code: true, name: true }
     });
     if (!detail) throw new Error("Detalle de canal inválido para redes sociales.");
     normalizedDetailOptionId = detail.id;
+    detailCode = detail.code;
+    detailName = detail.name;
   }
 
-  let normalizedOtherNote: string | null = null;
-  if (other) {
-    const note = normalizeRequired(otherNote, "Describe cómo nos conoció.");
-    if (note.length > 150) throw new Error("La descripción del canal no puede exceder 150 caracteres.");
-    normalizedOtherNote = note;
-  }
+  const postValidation = validateAcquisitionConditionalFields({
+    sourceCode: source.code,
+    sourceName: source.name,
+    detailCode,
+    detailName,
+    detailOptionId: normalizedDetailOptionId,
+    otherNote
+  });
+  if (postValidation.noteError) throw new Error(postValidation.noteError);
 
   return {
     sourceId: source.id,
     detailOptionId: normalizedDetailOptionId,
-    otherNote: normalizedOtherNote,
+    otherNote: postValidation.normalizedOtherNote,
     sourceCode: source.code ?? null,
     sourceName: source.name,
     requiresReferral: referral
@@ -623,6 +1038,7 @@ type ResolvedGeoSelection = {
   geoAdmin2Id: string | null;
   geoAdmin3Id: string | null;
   countryName: string | null;
+  countryIso2: string | null;
   admin1Name: string | null;
   admin2Name: string | null;
   admin3Name: string | null;
@@ -635,141 +1051,290 @@ async function resolveGeoSelection(input: GeoSelectionInput): Promise<ResolvedGe
   const geoAdmin2Id = normalizeOptional(input.geoAdmin2Id);
   const geoAdmin3Id = normalizeOptional(input.geoAdmin3Id);
 
-  let country: { id: string; name: string } | null = null;
-  let admin1: { id: string; name: string; countryId: string } | null = null;
-  let admin2: { id: string; name: string; admin1Id: string; admin1: { id: string; countryId: string } } | null = null;
-  let admin3:
-    | { id: string; name: string; admin2Id: string; admin2: { id: string; admin1Id: string; admin1: { id: string; countryId: string } } }
-    | null = null;
+  const filterActive = onlyActive ? { isActive: true } : {};
+
+  let country: { id: string; name: string; iso2: string } | null = null;
+  let admin1Name: string | null = null;
+  let admin2Name: string | null = null;
+  let admin3Name: string | null = null;
+  let legacyAdmin1Id: string | null = null;
+  let legacyAdmin2Id: string | null = null;
+  let legacyAdmin3Id: string | null = null;
+  let resolvedAdmin1DivisionId: string | null = null;
+  let resolvedAdmin2DivisionId: string | null = null;
+
+  const hasIdMatch = (selectedId: string | null | undefined, candidates: Array<string | null | undefined>) => {
+    if (!selectedId) return true;
+    return candidates.filter(Boolean).includes(selectedId);
+  };
 
   if (geoCountryId) {
     country = await prisma.geoCountry.findFirst({
-      where: { id: geoCountryId, ...(onlyActive ? { isActive: true } : {}) },
-      select: { id: true, name: true }
+      where: { id: geoCountryId, ...filterActive },
+      select: { id: true, name: true, iso2: true }
     });
     if (!country) throw new Error("País inválido o inactivo.");
   }
 
   if (geoAdmin1Id) {
-    admin1 = await prisma.geoAdmin1.findFirst({
-      where: { id: geoAdmin1Id, ...(onlyActive ? { isActive: true } : {}) },
-      select: { id: true, name: true, countryId: true }
+    const division1 = await prisma.geoDivision.findFirst({
+      where: { id: geoAdmin1Id, level: 1, ...filterActive },
+      select: {
+        id: true,
+        name: true,
+        countryId: true,
+        legacyGeoAdmin1Id: true
+      }
     });
-    if (!admin1) throw new Error("Región/Departamento inválido o inactivo.");
 
-    if (country && admin1.countryId !== country.id) {
-      throw new Error("La Región/Departamento no corresponde al país seleccionado.");
-    }
+    if (division1) {
+      admin1Name = division1.name;
+      legacyAdmin1Id = division1.legacyGeoAdmin1Id ?? null;
+      resolvedAdmin1DivisionId = division1.id;
 
-    if (!country) {
-      country = await prisma.geoCountry.findUnique({
-        where: { id: admin1.countryId },
-        select: { id: true, name: true }
+      if (country && division1.countryId !== country.id) {
+        throw new Error("La Región/Departamento no corresponde al país seleccionado.");
+      }
+      if (!country) {
+        country = await prisma.geoCountry.findUnique({
+          where: { id: division1.countryId },
+          select: { id: true, name: true, iso2: true }
+        });
+        if (!country) throw new Error("País de la región no encontrado.");
+      }
+    } else {
+      const legacyAdmin1 = await prisma.geoAdmin1.findFirst({
+        where: { id: geoAdmin1Id, ...filterActive },
+        select: { id: true, name: true, countryId: true }
       });
-      if (!country) throw new Error("País de la región no encontrado.");
+      if (!legacyAdmin1) throw new Error("Región/Departamento inválido o inactivo.");
+
+      admin1Name = legacyAdmin1.name;
+      legacyAdmin1Id = legacyAdmin1.id;
+
+      if (country && legacyAdmin1.countryId !== country.id) {
+        throw new Error("La Región/Departamento no corresponde al país seleccionado.");
+      }
+      if (!country) {
+        country = await prisma.geoCountry.findUnique({
+          where: { id: legacyAdmin1.countryId },
+          select: { id: true, name: true, iso2: true }
+        });
+        if (!country) throw new Error("País de la región no encontrado.");
+      }
     }
   }
 
   if (geoAdmin2Id) {
-    admin2 = await prisma.geoAdmin2.findFirst({
-      where: { id: geoAdmin2Id, ...(onlyActive ? { isActive: true } : {}) },
+    const division2 = await prisma.geoDivision.findFirst({
+      where: { id: geoAdmin2Id, level: 2, ...filterActive },
       select: {
         id: true,
         name: true,
-        admin1Id: true,
-        admin1: { select: { id: true, countryId: true } }
-      }
-    });
-    if (!admin2) throw new Error("Ciudad/Municipio inválido o inactivo.");
-
-    if (admin1 && admin2.admin1Id !== admin1.id) {
-      throw new Error("La Ciudad/Municipio no corresponde a la región seleccionada.");
-    }
-    if (country && admin2.admin1.countryId !== country.id) {
-      throw new Error("La Ciudad/Municipio no corresponde al país seleccionado.");
-    }
-
-    if (!admin1) {
-      admin1 = await prisma.geoAdmin1.findUnique({
-        where: { id: admin2.admin1Id },
-        select: { id: true, name: true, countryId: true }
-      });
-      if (!admin1) throw new Error("Región de la ciudad no encontrada.");
-    }
-    if (!country) {
-      country = await prisma.geoCountry.findUnique({
-        where: { id: admin1.countryId },
-        select: { id: true, name: true }
-      });
-      if (!country) throw new Error("País de la ciudad no encontrado.");
-    }
-  }
-
-  if (geoAdmin3Id) {
-    admin3 = await prisma.geoAdmin3.findFirst({
-      where: { id: geoAdmin3Id, ...(onlyActive ? { isActive: true } : {}) },
-      select: {
-        id: true,
-        name: true,
-        admin2Id: true,
-        admin2: {
+        countryId: true,
+        legacyGeoAdmin2Id: true,
+        parent: {
           select: {
             id: true,
-            admin1Id: true,
-            admin1: { select: { id: true, countryId: true } }
+            level: true,
+            name: true,
+            countryId: true,
+            legacyGeoAdmin1Id: true
           }
         }
       }
     });
-    if (!admin3) throw new Error("Subdivisión inválida o inactiva.");
 
-    if (admin2 && admin3.admin2Id !== admin2.id) {
-      throw new Error("La subdivisión no corresponde a la ciudad seleccionada.");
-    }
-    if (admin1 && admin3.admin2.admin1Id !== admin1.id) {
-      throw new Error("La subdivisión no corresponde a la región seleccionada.");
-    }
-    if (country && admin3.admin2.admin1.countryId !== country.id) {
-      throw new Error("La subdivisión no corresponde al país seleccionado.");
-    }
+    if (division2) {
+      if (!division2.parent || division2.parent.level !== 1) {
+        throw new Error("La Ciudad/Municipio no tiene jerarquía válida.");
+      }
+      if (
+        !hasIdMatch(geoAdmin1Id, [resolvedAdmin1DivisionId, legacyAdmin1Id, division2.parent.id, division2.parent.legacyGeoAdmin1Id])
+      ) {
+        throw new Error("La Ciudad/Municipio no corresponde a la región seleccionada.");
+      }
+      if (country && division2.countryId !== country.id) {
+        throw new Error("La Ciudad/Municipio no corresponde al país seleccionado.");
+      }
 
-    if (!admin2) {
-      admin2 = await prisma.geoAdmin2.findUnique({
-        where: { id: admin3.admin2Id },
+      admin2Name = division2.name;
+      admin1Name = admin1Name ?? division2.parent.name;
+      legacyAdmin2Id = division2.legacyGeoAdmin2Id ?? null;
+      legacyAdmin1Id = legacyAdmin1Id ?? division2.parent.legacyGeoAdmin1Id ?? null;
+      resolvedAdmin1DivisionId = resolvedAdmin1DivisionId ?? division2.parent.id;
+      resolvedAdmin2DivisionId = division2.id;
+
+      if (!country) {
+        country = await prisma.geoCountry.findUnique({
+          where: { id: division2.countryId },
+          select: { id: true, name: true, iso2: true }
+        });
+        if (!country) throw new Error("País de la ciudad no encontrado.");
+      }
+    } else {
+      const legacyAdmin2 = await prisma.geoAdmin2.findFirst({
+        where: { id: geoAdmin2Id, ...filterActive },
         select: {
           id: true,
           name: true,
           admin1Id: true,
-          admin1: { select: { id: true, countryId: true } }
+          admin1: {
+            select: {
+              id: true,
+              name: true,
+              countryId: true
+            }
+          }
         }
       });
-      if (!admin2) throw new Error("Ciudad de la subdivisión no encontrada.");
+      if (!legacyAdmin2) throw new Error("Ciudad/Municipio inválido o inactivo.");
+
+      if (!hasIdMatch(geoAdmin1Id, [legacyAdmin1Id, legacyAdmin2.admin1Id])) {
+        throw new Error("La Ciudad/Municipio no corresponde a la región seleccionada.");
+      }
+      if (country && legacyAdmin2.admin1.countryId !== country.id) {
+        throw new Error("La Ciudad/Municipio no corresponde al país seleccionado.");
+      }
+
+      admin2Name = legacyAdmin2.name;
+      admin1Name = admin1Name ?? legacyAdmin2.admin1.name;
+      legacyAdmin2Id = legacyAdmin2.id;
+      legacyAdmin1Id = legacyAdmin1Id ?? legacyAdmin2.admin1Id;
+
+      if (!country) {
+        country = await prisma.geoCountry.findUnique({
+          where: { id: legacyAdmin2.admin1.countryId },
+          select: { id: true, name: true, iso2: true }
+        });
+        if (!country) throw new Error("País de la ciudad no encontrado.");
+      }
     }
-    if (!admin1) {
-      admin1 = await prisma.geoAdmin1.findUnique({
-        where: { id: admin2.admin1Id },
-        select: { id: true, name: true, countryId: true }
+  }
+
+  if (geoAdmin3Id) {
+    const division3 = await prisma.geoDivision.findFirst({
+      where: { id: geoAdmin3Id, level: 3, ...filterActive },
+      select: {
+        id: true,
+        name: true,
+        countryId: true,
+        legacyGeoAdmin3Id: true,
+        parent: {
+          select: {
+            id: true,
+            level: true,
+            name: true,
+            countryId: true,
+            legacyGeoAdmin2Id: true,
+            parent: {
+              select: {
+                id: true,
+                level: true,
+                name: true,
+                countryId: true,
+                legacyGeoAdmin1Id: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (division3) {
+      const parent2 = division3.parent;
+      const parent1 = parent2?.parent;
+      if (!parent2 || parent2.level !== 2 || !parent1 || parent1.level !== 1) {
+        throw new Error("La subdivisión no tiene jerarquía válida.");
+      }
+      if (!hasIdMatch(geoAdmin2Id, [resolvedAdmin2DivisionId, legacyAdmin2Id, parent2.id, parent2.legacyGeoAdmin2Id])) {
+        throw new Error("La subdivisión no corresponde a la ciudad seleccionada.");
+      }
+      if (!hasIdMatch(geoAdmin1Id, [resolvedAdmin1DivisionId, legacyAdmin1Id, parent1.id, parent1.legacyGeoAdmin1Id])) {
+        throw new Error("La subdivisión no corresponde a la región seleccionada.");
+      }
+      if (country && division3.countryId !== country.id) {
+        throw new Error("La subdivisión no corresponde al país seleccionado.");
+      }
+
+      admin3Name = division3.name;
+      admin2Name = admin2Name ?? parent2.name;
+      admin1Name = admin1Name ?? parent1.name;
+      legacyAdmin3Id = division3.legacyGeoAdmin3Id ?? null;
+      legacyAdmin2Id = legacyAdmin2Id ?? parent2.legacyGeoAdmin2Id ?? null;
+      legacyAdmin1Id = legacyAdmin1Id ?? parent1.legacyGeoAdmin1Id ?? null;
+      resolvedAdmin2DivisionId = resolvedAdmin2DivisionId ?? parent2.id;
+      resolvedAdmin1DivisionId = resolvedAdmin1DivisionId ?? parent1.id;
+
+      if (!country) {
+        country = await prisma.geoCountry.findUnique({
+          where: { id: division3.countryId },
+          select: { id: true, name: true, iso2: true }
+        });
+        if (!country) throw new Error("País de la subdivisión no encontrado.");
+      }
+    } else {
+      const legacyAdmin3 = await prisma.geoAdmin3.findFirst({
+        where: { id: geoAdmin3Id, ...filterActive },
+        select: {
+          id: true,
+          name: true,
+          admin2Id: true,
+          admin2: {
+            select: {
+              id: true,
+              name: true,
+              admin1Id: true,
+              admin1: {
+                select: {
+                  id: true,
+                  name: true,
+                  countryId: true
+                }
+              }
+            }
+          }
+        }
       });
-      if (!admin1) throw new Error("Región de la subdivisión no encontrada.");
-    }
-    if (!country) {
-      country = await prisma.geoCountry.findUnique({
-        where: { id: admin1.countryId },
-        select: { id: true, name: true }
-      });
-      if (!country) throw new Error("País de la subdivisión no encontrado.");
+      if (!legacyAdmin3) throw new Error("Subdivisión inválida o inactiva.");
+
+      if (!hasIdMatch(geoAdmin2Id, [legacyAdmin2Id, legacyAdmin3.admin2Id])) {
+        throw new Error("La subdivisión no corresponde a la ciudad seleccionada.");
+      }
+      if (!hasIdMatch(geoAdmin1Id, [legacyAdmin1Id, legacyAdmin3.admin2.admin1Id])) {
+        throw new Error("La subdivisión no corresponde a la región seleccionada.");
+      }
+      if (country && legacyAdmin3.admin2.admin1.countryId !== country.id) {
+        throw new Error("La subdivisión no corresponde al país seleccionado.");
+      }
+
+      admin3Name = legacyAdmin3.name;
+      admin2Name = admin2Name ?? legacyAdmin3.admin2.name;
+      admin1Name = admin1Name ?? legacyAdmin3.admin2.admin1.name;
+      legacyAdmin3Id = legacyAdmin3.id;
+      legacyAdmin2Id = legacyAdmin2Id ?? legacyAdmin3.admin2Id;
+      legacyAdmin1Id = legacyAdmin1Id ?? legacyAdmin3.admin2.admin1Id;
+
+      if (!country) {
+        country = await prisma.geoCountry.findUnique({
+          where: { id: legacyAdmin3.admin2.admin1.countryId },
+          select: { id: true, name: true, iso2: true }
+        });
+        if (!country) throw new Error("País de la subdivisión no encontrado.");
+      }
     }
   }
 
   return {
     geoCountryId: country?.id ?? null,
-    geoAdmin1Id: admin1?.id ?? null,
-    geoAdmin2Id: admin2?.id ?? null,
-    geoAdmin3Id: admin3?.id ?? null,
+    geoAdmin1Id: legacyAdmin1Id,
+    geoAdmin2Id: legacyAdmin2Id,
+    geoAdmin3Id: legacyAdmin3Id,
     countryName: country?.name ?? null,
-    admin1Name: admin1?.name ?? null,
-    admin2Name: admin2?.name ?? null,
-    admin3Name: admin3?.name ?? null
+    countryIso2: country?.iso2 ?? null,
+    admin1Name,
+    admin2Name,
+    admin3Name
   };
 }
 
@@ -894,17 +1459,29 @@ export async function actionCreatePersonClient(input: {
   lastName: string;
   secondLastName?: string;
   thirdLastName?: string;
-  dpi: string;
+  sex?: PatientSex;
+  dpi?: string;
+  identityCountryId?: string;
+  identityDocumentTypeId?: string;
+  identityDocumentValue?: string;
   phone: string;
   phoneCountryIso2?: string;
   email?: string;
+  photoAssetId?: string;
+  phones?: ClientPhoneChannelInput[];
+  emails?: ClientEmailChannelInput[];
   birthDate?: string;
+  birthCountryId?: string;
+  birthCity?: string;
+  residenceCountryId?: string;
+  residenceSameAsBirth?: boolean;
   bloodType?: string;
   professionCatalogId?: string;
   maritalStatusId?: string;
   academicLevelId?: string;
   responsibleClientId?: string;
   guardianRelationshipTypeId?: string;
+  serviceSegments?: Array<ClientServiceSegment | string>;
   acquisitionSourceId?: string;
   acquisitionDetailOptionId?: string;
   acquisitionOtherNote?: string;
@@ -919,6 +1496,19 @@ export async function actionCreatePersonClient(input: {
   geoPostalCode?: string;
   geoFreeState?: string;
   geoFreeCity?: string;
+  workGeoCountryId?: string;
+  workGeoAdmin1Id?: string;
+  workGeoAdmin2Id?: string;
+  workGeoAdmin3Id?: string;
+  workGeoPostalCode?: string;
+  workGeoFreeState?: string;
+  workGeoFreeCity?: string;
+  relatedContacts?: Array<{
+    relationshipTypeId?: string;
+    linkedPersonClientId?: string;
+    name?: string;
+    phone?: string;
+  }>;
   affiliations?: Array<{
     entityType?: ClientProfileType;
     entityClientId: string;
@@ -937,25 +1527,36 @@ export async function actionCreatePersonClient(input: {
   const thirdName = normalizeOptional(input.thirdName);
   const secondLastName = normalizeOptional(input.secondLastName);
   const thirdLastName = normalizeOptional(input.thirdLastName);
+  const sex = input.sex && Object.values(PatientSex).includes(input.sex) ? input.sex : null;
 
-  const dpi = normalizeRequired(input.dpi, "DPI requerido.");
-  const dpiParsed = dpiSchema.safeParse(dpi);
-  if (!dpiParsed.success) throw new Error(dpiParsed.error.issues[0]?.message ?? "DPI inválido.");
+  const identityCountryId = normalizeOptional(input.identityCountryId);
+  const identityDocumentTypeId = normalizeOptional(input.identityDocumentTypeId);
+  const identityDocumentRawValue = normalizeOptional(input.identityDocumentValue ?? input.dpi);
 
-  const phone = normalizeRequired(input.phone, "Teléfono requerido.");
+  const phone = normalizeStrictPhoneForPerson(
+    normalizeRequired(input.phone, "Teléfono requerido."),
+    "Teléfono principal"
+  );
   const email = normalizeOptional(input.email);
+  const photoAssetId = normalizeOptional(input.photoAssetId);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
-  const birthDate = parseOptionalDate(input.birthDate);
-  if (birthDate && birthDate.getTime() > Date.now()) {
-    throw new Error("La fecha de nacimiento no puede ser futura.");
-  }
+  const birthDate = parseOptionalBirthDate(input.birthDate);
   const bloodType = resolveClientBloodType(input.bloodType);
   const professionCatalogId = normalizeOptional(input.professionCatalogId);
   const maritalStatusId = normalizeOptional(input.maritalStatusId);
   const academicLevelId = normalizeOptional(input.academicLevelId);
+  const serviceSegments = normalizeClientServiceSegments(input.serviceSegments);
   const responsibleClientId = normalizeOptional(input.responsibleClientId);
   const guardianRelationshipTypeId = normalizeOptional(input.guardianRelationshipTypeId);
   const requiresResponsible = isMinorClient(birthDate);
+  const birthCountryId = normalizeOptional(input.birthCountryId);
+  const birthCity = normalizeOptional(input.birthCity);
+  const residenceCountryId = normalizeOptional(input.residenceCountryId);
+  const residenceSameAsBirth = Boolean(input.residenceSameAsBirth);
+  const effectiveBirthCountryId = birthCountryId ?? identityCountryId;
+  if (!effectiveBirthCountryId) {
+    throw new Error("País de nacimiento requerido.");
+  }
 
   const addressGeneral = normalizeOptional(input.addressGeneral);
   const addressHome = normalizeOptional(input.addressHome);
@@ -963,11 +1564,65 @@ export async function actionCreatePersonClient(input: {
   const geoPostalCode = normalizeOptional(input.geoPostalCode);
   const geoFreeState = normalizeOptional(input.geoFreeState);
   const geoFreeCity = normalizeOptional(input.geoFreeCity);
+  const workGeoPostalCode = normalizeOptional(input.workGeoPostalCode);
+  const workGeoFreeState = normalizeOptional(input.workGeoFreeState);
+  const workGeoFreeCity = normalizeOptional(input.workGeoFreeCity);
+  const normalizedRelatedContacts = (Array.isArray(input.relatedContacts) ? input.relatedContacts : []).map((item) => ({
+    relationshipTypeId: normalizeOptional(item.relationshipTypeId),
+    linkedPersonClientId: normalizeOptional(item.linkedPersonClientId),
+    name: normalizeOptional(item.name),
+    phone: item.phone ? normalizeStrictPhoneForPerson(item.phone, "Teléfono de relacionado") : null
+  }));
+  const effectiveGeoCountryId =
+    normalizeOptional(input.geoCountryId) ??
+    (residenceSameAsBirth ? effectiveBirthCountryId : residenceCountryId);
   const geo = await resolveGeoSelection({
-    geoCountryId: input.geoCountryId,
+    geoCountryId: effectiveGeoCountryId,
     geoAdmin1Id: input.geoAdmin1Id,
     geoAdmin2Id: input.geoAdmin2Id,
     geoAdmin3Id: input.geoAdmin3Id
+  });
+  const hasResidenceGeoSelection = Boolean(
+    normalizeOptional(input.geoAdmin1Id) ||
+      normalizeOptional(input.geoAdmin2Id) ||
+      normalizeOptional(input.geoAdmin3Id) ||
+      geoPostalCode ||
+      geoFreeState ||
+      geoFreeCity
+  );
+  if (hasResidenceGeoSelection && !addressGeneral && !addressHome) {
+    throw new Error("Dirección de vivienda requerida.");
+  }
+  const hasWorkGeoSelection = Boolean(
+    normalizeOptional(input.workGeoCountryId) ||
+      normalizeOptional(input.workGeoAdmin1Id) ||
+      normalizeOptional(input.workGeoAdmin2Id) ||
+      normalizeOptional(input.workGeoAdmin3Id) ||
+      workGeoPostalCode ||
+      workGeoFreeState ||
+      workGeoFreeCity
+  );
+  const workGeo = hasWorkGeoSelection
+    ? await resolveGeoSelection({
+        geoCountryId: input.workGeoCountryId,
+        geoAdmin1Id: input.workGeoAdmin1Id,
+        geoAdmin2Id: input.workGeoAdmin2Id,
+        geoAdmin3Id: input.workGeoAdmin3Id
+      })
+    : null;
+
+  for (const channel of Array.isArray(input.phones) ? input.phones : []) {
+    if (!normalizeOptional(channel.value)) continue;
+    normalizeStrictPhoneForPerson(channel.value as string, "Teléfono");
+  }
+  const phoneChannels = normalizeClientPhoneChannels({
+    channels: input.phones,
+    fallbackPhone: phone,
+    fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
+  });
+  const emailChannels = normalizeClientEmailChannels({
+    channels: input.emails,
+    fallbackEmail: email
   });
   const affiliations = Array.isArray(input.affiliations) ? input.affiliations : [];
 
@@ -1012,11 +1667,201 @@ export async function actionCreatePersonClient(input: {
         responsible = await resolveResponsibleAdultPerson(tx, responsibleId);
       }
 
+      if (photoAssetId) {
+        const photoAsset = await tx.fileAsset.findUnique({
+          where: { id: photoAssetId },
+          select: {
+            id: true,
+            mimeType: true,
+            sizeBytes: true,
+            storageKey: true
+          }
+        });
+        if (!photoAsset) throw new Error("Foto de perfil inválida.");
+        if (!CLIENT_PHOTO_ALLOWED_MIME_TYPES.has(photoAsset.mimeType.toLowerCase())) {
+          throw new Error("Foto de perfil inválida. Solo se permiten JPG, PNG o WEBP.");
+        }
+        if (photoAsset.sizeBytes > CLIENT_PHOTO_MAX_SIZE_BYTES) {
+          throw new Error("Foto de perfil inválida. Máximo 3MB.");
+        }
+        if (!photoAsset.storageKey.startsWith("clients/photos/")) {
+          throw new Error("Foto de perfil inválida. Debe subirse en el flujo de clientes.");
+        }
+      }
+
+      const [identityCountry, birthCountry, residenceCountry] = await Promise.all([
+        identityCountryId
+          ? tx.geoCountry.findFirst({
+              where: { id: identityCountryId, isActive: true },
+              select: { id: true, name: true, iso2: true }
+            })
+          : Promise.resolve(null),
+        effectiveBirthCountryId
+          ? tx.geoCountry.findFirst({
+              where: { id: effectiveBirthCountryId, isActive: true },
+              select: { id: true, name: true, iso2: true }
+            })
+          : Promise.resolve(null),
+        (residenceSameAsBirth ? effectiveBirthCountryId : residenceCountryId)
+          ? tx.geoCountry.findFirst({
+              where: { id: (residenceSameAsBirth ? effectiveBirthCountryId : residenceCountryId) as string, isActive: true },
+              select: { id: true, name: true, iso2: true }
+            })
+          : Promise.resolve(null)
+      ]);
+
+      if (identityCountryId && !identityCountry) throw new Error("País de identificación inválido o inactivo.");
+      if (effectiveBirthCountryId && !birthCountry) throw new Error("País de nacimiento inválido o inactivo.");
+      if ((residenceSameAsBirth ? effectiveBirthCountryId : residenceCountryId) && !residenceCountry) {
+        throw new Error("País de residencia inválido o inactivo.");
+      }
+
+      const identityCountryIso2 =
+        (identityCountry?.iso2 ?? residenceCountry?.iso2 ?? birthCountry?.iso2 ?? geo.countryIso2 ?? null);
+      const identityOptions = await listActiveIdentityDocumentOptions(tx, identityCountryIso2);
+      const selectedIdentityOption = normalizeIdentityDocumentSelection({
+        options: identityOptions,
+        identityDocumentTypeId
+      });
+      if (!selectedIdentityOption) {
+        throw new Error("No hay tipos de documento de identidad disponibles.");
+      }
+      if (identityCountryIso2 === "GT" && !["DPI", "PASSPORT"].includes(selectedIdentityOption.code)) {
+        throw new Error("Para Guatemala solo se permite DPI o Pasaporte.");
+      }
+
+      const identityValidation = validateIdentityDocumentValue({
+        value: identityDocumentRawValue,
+        documentCode: selectedIdentityOption.code,
+        documentName: selectedIdentityOption.name,
+        optional: selectedIdentityOption.optional
+      });
+      if (!identityValidation.ok) {
+        throw new Error(identityValidation.error ?? "Documento de identidad inválido.");
+      }
+
+      const identityDocumentValue = identityValidation.value;
+
       const acquisition = await resolveAcquisitionInput(tx, {
         acquisitionSourceId: input.acquisitionSourceId,
         acquisitionDetailOptionId: input.acquisitionDetailOptionId,
         acquisitionOtherNote: input.acquisitionOtherNote
       });
+
+      const hasGeoContext = Boolean(
+        geo.geoCountryId ||
+          geo.geoAdmin1Id ||
+          geo.geoAdmin2Id ||
+          geo.geoAdmin3Id ||
+          geoPostalCode ||
+          geoFreeState ||
+          geoFreeCity
+      );
+      const hasWorkGeoContext = Boolean(
+        workGeo?.geoCountryId ||
+          workGeo?.geoAdmin1Id ||
+          workGeo?.geoAdmin2Id ||
+          workGeo?.geoAdmin3Id ||
+          workGeoPostalCode ||
+          workGeoFreeState ||
+          workGeoFreeCity
+      );
+      const locationDrafts = buildPersonLocationDrafts({
+        addressGeneral,
+        addressHome,
+        addressWork,
+        hasGeoContext,
+        geoAdmin2Name: geo.admin2Name,
+        geoFreeCity,
+        geoAdmin1Name: geo.admin1Name,
+        geoFreeState,
+        geoCountryName: geo.countryName,
+        workHasGeoContext: hasWorkGeoContext,
+        workGeoAdmin2Name: workGeo?.admin2Name,
+        workGeoFreeCity: workGeoFreeCity,
+        workGeoAdmin1Name: workGeo?.admin1Name,
+        workGeoFreeState: workGeoFreeState,
+        workGeoCountryName: workGeo?.countryName
+      });
+      const locationCreateData = locationDrafts.map((loc) => {
+        const isResidenceLocation =
+          loc.type === ClientLocationType.GENERAL ||
+          loc.type === ClientLocationType.HOME ||
+          loc.type === ClientLocationType.MAIN;
+        const isWorkLocation = loc.type === ClientLocationType.WORK;
+        return {
+          type: loc.type,
+          address: loc.address,
+          addressLine1: loc.addressLine1,
+          isPrimary: Boolean(loc.isPrimary),
+          geoCountryId: isResidenceLocation ? geo.geoCountryId : isWorkLocation ? workGeo?.geoCountryId ?? null : null,
+          geoAdmin1Id: isResidenceLocation ? geo.geoAdmin1Id : isWorkLocation ? workGeo?.geoAdmin1Id ?? null : null,
+          geoAdmin2Id: isResidenceLocation ? geo.geoAdmin2Id : isWorkLocation ? workGeo?.geoAdmin2Id ?? null : null,
+          geoAdmin3Id: isResidenceLocation ? geo.geoAdmin3Id : isWorkLocation ? workGeo?.geoAdmin3Id ?? null : null,
+          freeState: isResidenceLocation ? geoFreeState : isWorkLocation ? workGeoFreeState : null,
+          freeCity: isResidenceLocation ? geoFreeCity : isWorkLocation ? workGeoFreeCity : null,
+          postalCode: isResidenceLocation ? geoPostalCode : isWorkLocation ? workGeoPostalCode : null,
+          department: isResidenceLocation
+            ? geo.admin1Name ?? geoFreeState
+            : isWorkLocation
+              ? workGeo?.admin1Name ?? workGeoFreeState ?? null
+              : null,
+          city: isResidenceLocation
+            ? geo.admin2Name ?? geoFreeCity
+            : isWorkLocation
+              ? workGeo?.admin2Name ?? workGeoFreeCity ?? null
+              : null,
+          country: isResidenceLocation ? geo.countryName : isWorkLocation ? workGeo?.countryName ?? null : null
+        };
+      });
+      const identifierCreateData =
+        identityDocumentValue && identityDocumentValue.trim()
+          ? [
+              {
+                value: identityDocumentValue,
+                valueNormalized: normalizeIdentifierValue(identityDocumentValue),
+                isPrimary: true,
+                isActive: true,
+                countryId: identityCountry?.id ?? geo.geoCountryId ?? null,
+                documentTypeId:
+                  selectedIdentityOption.source === "catalog" && !isFallbackDocumentTypeId(selectedIdentityOption.id)
+                    ? selectedIdentityOption.id
+                    : null
+              }
+            ]
+          : [];
+      const phoneIso2Codes = [...new Set(phoneChannels.map((row) => row.countryCode).filter((code) => code && code !== "XX"))];
+      const phoneCatalog = phoneIso2Codes.length
+        ? await tx.phoneCountryCode.findMany({
+            where: {
+              iso2: { in: phoneIso2Codes },
+              isActive: true
+            },
+            select: {
+              iso2: true,
+              dialCode: true
+            }
+          })
+        : [];
+      const dialByIso2 = new Map(phoneCatalog.map((row) => [row.iso2, normalizeCallingCode(row.dialCode)]));
+      const phoneCreateData = phoneChannels.map((row) => ({
+        category: row.category,
+        relationType: row.relationType,
+        countryCode: row.countryCode,
+        number: row.number,
+        e164: row.e164 ?? buildE164(dialByIso2.get(row.countryCode) ?? null, row.number),
+        canCall: row.canCall,
+        canWhatsapp: row.canWhatsapp,
+        isPrimary: row.isPrimary,
+        isActive: row.isActive
+      }));
+      const emailCreateData = emailChannels.map((row) => ({
+        category: row.category,
+        valueRaw: row.valueRaw,
+        valueNormalized: row.valueNormalized,
+        isPrimary: row.isPrimary,
+        isActive: row.isActive
+      }));
 
       const created = await tx.clientProfile.create({
         data: {
@@ -1027,20 +1872,74 @@ export async function actionCreatePersonClient(input: {
           lastName,
           secondLastName,
           thirdLastName,
+          sex,
           birthDate,
           bloodType,
-          professionCatalogId,
-          dpi,
-          phone,
-          email,
-          address: addressGeneral,
-          city: geo.admin2Name ?? geoFreeCity,
-          department: geo.admin1Name ?? geoFreeState,
-          country: geo.countryName,
-          acquisitionSourceId: acquisition.sourceId,
-          acquisitionDetailOptionId: acquisition.detailOptionId,
+          serviceSegments,
           acquisitionOtherNote: acquisition.otherNote,
-          statusId: defaultStatusId
+          ...(defaultStatusId
+            ? {
+                status: {
+                  connect: { id: defaultStatusId }
+                }
+              }
+            : {}),
+          ...(professionCatalogId
+            ? {
+                professionCatalog: {
+                  connect: { id: professionCatalogId }
+                }
+              }
+            : {}),
+          ...(acquisition.sourceId
+            ? {
+                acquisitionSource: {
+                  connect: { id: acquisition.sourceId }
+                }
+              }
+            : {}),
+          ...(acquisition.detailOptionId
+            ? {
+                acquisitionDetailOption: {
+                  connect: { id: acquisition.detailOptionId }
+                }
+              }
+            : {}),
+          ...(photoAssetId
+            ? {
+                photoAsset: {
+                  connect: { id: photoAssetId }
+                }
+              }
+            : {}),
+          ...(identifierCreateData.length
+            ? {
+                clientIdentifiers: {
+                  create: identifierCreateData
+                }
+              }
+            : {}),
+          ...(phoneCreateData.length
+            ? {
+                clientPhones: {
+                  create: phoneCreateData
+                }
+              }
+            : {}),
+          ...(emailCreateData.length
+            ? {
+                clientEmails: {
+                  create: emailCreateData
+                }
+              }
+            : {}),
+          ...(locationCreateData.length
+            ? {
+                clientLocations: {
+                  create: locationCreateData
+                }
+              }
+            : {})
         },
         select: { id: true }
       });
@@ -1056,7 +1955,11 @@ export async function actionCreatePersonClient(input: {
           clientId: created.id,
           maritalStatusId: maritalStatusIdResolved,
           academicLevelId: academicLevelIdResolved,
-          responsibleClientId: responsible?.id ?? null
+          responsibleClientId: responsible?.id ?? null,
+          birthCountryId: birthCountry?.id ?? null,
+          birthCity,
+          residenceCountryId: residenceCountry?.id ?? geo.geoCountryId ?? null,
+          residenceSameAsBirth
         }
       });
 
@@ -1070,61 +1973,66 @@ export async function actionCreatePersonClient(input: {
         });
       }
 
-      await createPrimaryClientIdentifier(tx, {
-        clientId: created.id,
-        value: dpi,
-        countryId: geo.geoCountryId,
-        preferredDocumentTypeTokens: ["DPI", "CEDULA", "IDENTIDAD", "PASAPORTE"]
-      });
+      for (const related of normalizedRelatedContacts) {
+        if (!related.relationshipTypeId && !related.linkedPersonClientId && !related.name && !related.phone) {
+          continue;
+        }
+        const relationshipTypeId = normalizeRequired(
+          related.relationshipTypeId,
+          "Selecciona el tipo de relación para contactos relacionados."
+        );
+        const relationshipCatalog = await tx.clientCatalogItem.findFirst({
+          where: {
+            id: relationshipTypeId,
+            type: ClientCatalogType.RELATIONSHIP_TYPE,
+            isActive: true
+          },
+          select: { id: true, name: true }
+        });
+        if (!relationshipCatalog) throw new Error("Tipo de relación inválido o inactivo.");
 
-      await createPrimaryClientPhone(tx, {
-        clientId: created.id,
-        phone,
-        countryIso2: input.phoneCountryIso2
-      });
+        let linkedPersonClientId: string | null = null;
+        let relatedName = related.name;
+        if (related.linkedPersonClientId) {
+          const linked = await tx.clientProfile.findFirst({
+            where: {
+              id: related.linkedPersonClientId,
+              type: ClientProfileType.PERSON,
+              deletedAt: null
+            },
+            select: {
+              id: true,
+              firstName: true,
+              middleName: true,
+              lastName: true,
+              secondLastName: true
+            }
+          });
+          if (!linked) throw new Error("Persona relacionada inválida.");
+          linkedPersonClientId = linked.id;
+          const fullName = [linked.firstName, linked.middleName, linked.lastName, linked.secondLastName]
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+          relatedName = fullName || relationshipCatalog.name;
+        }
 
-      const locations: Array<{ type: ClientLocationType; address: string; isPrimary?: boolean }> = [];
-      const hasGeoContext = Boolean(
-        geo.geoCountryId ||
-          geo.geoAdmin1Id ||
-          geo.geoAdmin2Id ||
-          geo.geoAdmin3Id ||
-          geoPostalCode ||
-          geoFreeState ||
-          geoFreeCity
-      );
-      const inferredGeneralAddress =
-        addressGeneral ||
-        [geo.admin2Name ?? geoFreeCity, geo.admin1Name ?? geoFreeState, geo.countryName]
-          .filter(Boolean)
-          .join(", ")
-          .trim() ||
-        null;
+        if (!relatedName) {
+          throw new Error("Ingresa nombre del relacionado cuando no seleccionas una persona existente.");
+        }
 
-      if (inferredGeneralAddress && (addressGeneral || hasGeoContext)) {
-        locations.push({ type: ClientLocationType.GENERAL, address: inferredGeneralAddress, isPrimary: true });
-      }
-      if (addressHome) locations.push({ type: ClientLocationType.HOME, address: addressHome });
-      if (addressWork) locations.push({ type: ClientLocationType.WORK, address: addressWork });
-
-      if (locations.length) {
-        await tx.clientLocation.createMany({
-          data: locations.map((loc) => ({
+        await tx.clientContact.create({
+          data: {
             clientId: created.id,
-            type: loc.type,
-            address: loc.address,
-            isPrimary: Boolean(loc.isPrimary),
-            geoCountryId: loc.type === ClientLocationType.GENERAL ? geo.geoCountryId : null,
-            geoAdmin1Id: loc.type === ClientLocationType.GENERAL ? geo.geoAdmin1Id : null,
-            geoAdmin2Id: loc.type === ClientLocationType.GENERAL ? geo.geoAdmin2Id : null,
-            geoAdmin3Id: loc.type === ClientLocationType.GENERAL ? geo.geoAdmin3Id : null,
-            freeState: loc.type === ClientLocationType.GENERAL ? geoFreeState : null,
-            freeCity: loc.type === ClientLocationType.GENERAL ? geoFreeCity : null,
-            postalCode: loc.type === ClientLocationType.GENERAL ? geoPostalCode : null,
-            department: loc.type === ClientLocationType.GENERAL ? geo.admin1Name ?? geoFreeState : null,
-            city: loc.type === ClientLocationType.GENERAL ? geo.admin2Name ?? geoFreeCity : null,
-            country: loc.type === ClientLocationType.GENERAL ? geo.countryName : null
-          }))
+            linkedPersonClientId,
+            relationType: "FAMILY",
+            role: relationshipCatalog.name,
+            name: relatedName,
+            phone: related.phone,
+            phoneE164: related.phone?.startsWith("+") ? related.phone : null,
+            isEmergencyContact: false,
+            isPrimary: false
+          }
         });
       }
 
@@ -1199,11 +2107,21 @@ export async function actionCreatePersonClient(input: {
           acquisitionSourceId: acquisition.sourceId,
           acquisitionSourceCode: acquisition.sourceCode,
           acquisitionDetailOptionId: acquisition.detailOptionId,
+          identityDocumentTypeId:
+            selectedIdentityOption.source === "catalog" && !isFallbackDocumentTypeId(selectedIdentityOption.id)
+              ? selectedIdentityOption.id
+              : null,
+          identityDocumentCode: selectedIdentityOption.code,
+          identityDocumentSensitive: selectedIdentityOption.sensitive,
           referredByClientId: referralResult.referrerClientId,
           maritalStatusId: maritalStatusIdResolved,
           academicLevelId: academicLevelIdResolved,
           responsibleClientId: responsible?.id ?? null,
-          isMinor: requiresResponsible
+          isMinor: requiresResponsible,
+          serviceSegments,
+          relatedContactsCount: normalizedRelatedContacts.filter(
+            (item) => item.relationshipTypeId || item.linkedPersonClientId || item.name || item.phone
+          ).length
         }
       });
 
@@ -1215,7 +2133,7 @@ export async function actionCreatePersonClient(input: {
     revalidatePath(`/admin/clientes/${result.id}`);
     return { id: result.id };
   } catch (err: any) {
-    if (err?.code === "P2002") throw new Error("Ya existe un cliente con ese DPI/NIT.");
+    if (err?.code === "P2002") throw new Error("Ya existe un cliente con ese documento/identificador.");
     throw err;
   }
 }
@@ -1225,9 +2143,16 @@ export async function actionCreateCompanyClient(input: {
   tradeName: string;
   nit: string;
   address: string;
-  city: string;
-  department: string;
-  country: string;
+  city?: string;
+  department?: string;
+  country?: string;
+  geoCountryId?: string;
+  geoAdmin1Id?: string;
+  geoAdmin2Id?: string;
+  geoAdmin3Id?: string;
+  geoPostalCode?: string;
+  geoFreeState?: string;
+  geoFreeCity?: string;
   companyCategoryId?: string;
   acquisitionSourceId?: string;
   acquisitionDetailOptionId?: string;
@@ -1236,6 +2161,8 @@ export async function actionCreateCompanyClient(input: {
   phone?: string;
   phoneCountryIso2?: string;
   email?: string;
+  phones?: ClientPhoneChannelInput[];
+  emails?: ClientEmailChannelInput[];
 }) {
   const user = await requireAdminUser();
 
@@ -1243,12 +2170,35 @@ export async function actionCreateCompanyClient(input: {
   const tradeName = normalizeRequired(input.tradeName, "Nombre comercial requerido.");
   const nit = normalizeRequired(input.nit, "NIT requerido.");
   const address = normalizeRequired(input.address, "Dirección requerida.");
-  const city = normalizeRequired(input.city, "Ciudad requerida.");
-  const department = normalizeRequired(input.department, "Departamento requerido.");
-  const country = normalizeRequired(input.country, "País requerido.");
+  const geoPostalCode = normalizeOptional(input.geoPostalCode);
+  const geoFreeState = normalizeOptional(input.geoFreeState);
+  const geoFreeCity = normalizeOptional(input.geoFreeCity);
+  const geo = await resolveGeoSelection({
+    geoCountryId: input.geoCountryId,
+    geoAdmin1Id: input.geoAdmin1Id,
+    geoAdmin2Id: input.geoAdmin2Id,
+    geoAdmin3Id: input.geoAdmin3Id
+  });
+  const country = normalizeOptional(input.country) ?? geo.countryName;
+  const department = normalizeOptional(input.department) ?? geo.admin1Name ?? geoFreeState;
+  const city = normalizeOptional(input.city) ?? geo.admin2Name ?? geoFreeCity;
+  if (!country) throw new Error("País requerido.");
+  if (!department) throw new Error("Departamento/Estado requerido.");
+  if (!city) throw new Error("Ciudad/Municipio requerido.");
   const companyCategoryId = normalizeOptional(input.companyCategoryId);
-  const phone = normalizeOptional(input.phone);
-  const email = normalizeOptional(input.email);
+  const phoneChannels = normalizeClientPhoneChannels({
+    channels: input.phones,
+    fallbackPhone: input.phone,
+    fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
+  });
+  const emailChannels = normalizeClientEmailChannels({
+    channels: input.emails,
+    fallbackEmail: input.email
+  });
+  const primaryPhone = pickPrimaryPhoneChannel(phoneChannels);
+  const primaryEmail = pickPrimaryEmailChannel(emailChannels);
+  const phone = primaryPhone?.number ?? normalizeOptional(input.phone);
+  const email = primaryEmail?.valueNormalized ?? normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
 
   const defaultStatusId = await resolveDefaultActiveStatusId();
@@ -1294,17 +2244,20 @@ export async function actionCreateCompanyClient(input: {
         select: { id: true }
       });
 
-      const countryId = await resolveCountryIdByName(tx, country);
+      const countryId = geo.geoCountryId ?? (await resolveCountryIdByName(tx, country));
       await createPrimaryClientIdentifier(tx, {
         clientId: created.id,
         value: nit,
         countryId,
         preferredDocumentTypeTokens: ["NIT", "RFC", "RUC", "CUIT", "TAX_ID"]
       });
-      await createPrimaryClientPhone(tx, {
+
+      await createClientContactChannelsSafe(tx, {
         clientId: created.id,
-        phone,
-        countryIso2: input.phoneCountryIso2
+        phoneChannels,
+        emailChannels,
+        fallbackPhone: phone,
+        fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
       });
 
       const referralResult = await createReferralIfNeeded(tx, {
@@ -1322,6 +2275,13 @@ export async function actionCreateCompanyClient(input: {
           city,
           department,
           country,
+          geoCountryId: geo.geoCountryId,
+          geoAdmin1Id: geo.geoAdmin1Id,
+          geoAdmin2Id: geo.geoAdmin2Id,
+          geoAdmin3Id: geo.geoAdmin3Id,
+          freeState: geoFreeState,
+          freeCity: geoFreeCity,
+          postalCode: geoPostalCode,
           isPrimary: true
         }
       });
@@ -1358,14 +2318,22 @@ export async function actionCreateInstitutionClient(input: {
   name: string;
   institutionTypeId: string;
   institutionCategoryId?: string;
+  institutionIsPublic?: boolean | null;
   institutionIsPayer?: boolean;
   institutionIsGroupOrganizer?: boolean;
   institutionIsSponsor?: boolean;
   nit?: string;
   address: string;
-  city: string;
-  department: string;
-  country: string;
+  city?: string;
+  department?: string;
+  country?: string;
+  geoCountryId?: string;
+  geoAdmin1Id?: string;
+  geoAdmin2Id?: string;
+  geoAdmin3Id?: string;
+  geoPostalCode?: string;
+  geoFreeState?: string;
+  geoFreeCity?: string;
   acquisitionSourceId?: string;
   acquisitionDetailOptionId?: string;
   acquisitionOtherNote?: string;
@@ -1373,23 +2341,49 @@ export async function actionCreateInstitutionClient(input: {
   phone?: string;
   phoneCountryIso2?: string;
   email?: string;
+  phones?: ClientPhoneChannelInput[];
+  emails?: ClientEmailChannelInput[];
 }) {
   const user = await requireAdminUser();
 
   const companyName = normalizeRequired(input.name, "Nombre de institución requerido.");
   const institutionTypeId = normalizeRequired(input.institutionTypeId, "Tipo de institución requerido.");
   const institutionCategoryId = normalizeOptional(input.institutionCategoryId);
+  const institutionIsPublic = typeof input.institutionIsPublic === "boolean" ? input.institutionIsPublic : null;
   const institutionIsPayer = Boolean(input.institutionIsPayer);
   const institutionIsGroupOrganizer = Boolean(input.institutionIsGroupOrganizer);
   const institutionIsSponsor = Boolean(input.institutionIsSponsor);
   const nit = normalizeOptional(input.nit);
   if (institutionIsPayer && !nit) throw new Error("NIT requerido para institución pagadora.");
   const address = normalizeRequired(input.address, "Dirección requerida.");
-  const city = normalizeRequired(input.city, "Ciudad requerida.");
-  const department = normalizeRequired(input.department, "Departamento requerido.");
-  const country = normalizeRequired(input.country, "País requerido.");
-  const phone = normalizeOptional(input.phone);
-  const email = normalizeOptional(input.email);
+  const geoPostalCode = normalizeOptional(input.geoPostalCode);
+  const geoFreeState = normalizeOptional(input.geoFreeState);
+  const geoFreeCity = normalizeOptional(input.geoFreeCity);
+  const geo = await resolveGeoSelection({
+    geoCountryId: input.geoCountryId,
+    geoAdmin1Id: input.geoAdmin1Id,
+    geoAdmin2Id: input.geoAdmin2Id,
+    geoAdmin3Id: input.geoAdmin3Id
+  });
+  const country = normalizeOptional(input.country) ?? geo.countryName;
+  const department = normalizeOptional(input.department) ?? geo.admin1Name ?? geoFreeState;
+  const city = normalizeOptional(input.city) ?? geo.admin2Name ?? geoFreeCity;
+  if (!country) throw new Error("País requerido.");
+  if (!department) throw new Error("Departamento/Estado requerido.");
+  if (!city) throw new Error("Ciudad/Municipio requerido.");
+  const phoneChannels = normalizeClientPhoneChannels({
+    channels: input.phones,
+    fallbackPhone: input.phone,
+    fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
+  });
+  const emailChannels = normalizeClientEmailChannels({
+    channels: input.emails,
+    fallbackEmail: input.email
+  });
+  const primaryPhone = pickPrimaryPhoneChannel(phoneChannels);
+  const primaryEmail = pickPrimaryEmailChannel(emailChannels);
+  const phone = primaryPhone?.number ?? normalizeOptional(input.phone);
+  const email = primaryEmail?.valueNormalized ?? normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
 
   const institutionType = await prisma.clientCatalogItem.findFirst({
@@ -1426,6 +2420,7 @@ export async function actionCreateInstitutionClient(input: {
           companyName,
           institutionTypeId,
           institutionCategoryId,
+          institutionIsPublic,
           institutionIsPayer,
           institutionIsGroupOrganizer,
           institutionIsSponsor,
@@ -1444,17 +2439,19 @@ export async function actionCreateInstitutionClient(input: {
         select: { id: true }
       });
 
-      const countryId = await resolveCountryIdByName(tx, country);
+      const countryId = geo.geoCountryId ?? (await resolveCountryIdByName(tx, country));
       await createPrimaryClientIdentifier(tx, {
         clientId: created.id,
         value: nit,
         countryId,
         preferredDocumentTypeTokens: ["NIT", "RFC", "RUC", "CUIT", "TAX_ID"]
       });
-      await createPrimaryClientPhone(tx, {
+      await createClientContactChannelsSafe(tx, {
         clientId: created.id,
-        phone,
-        countryIso2: input.phoneCountryIso2
+        phoneChannels,
+        emailChannels,
+        fallbackPhone: phone,
+        fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
       });
 
       const referralResult = await createReferralIfNeeded(tx, {
@@ -1472,6 +2469,13 @@ export async function actionCreateInstitutionClient(input: {
           city,
           department,
           country,
+          geoCountryId: geo.geoCountryId,
+          geoAdmin1Id: geo.geoAdmin1Id,
+          geoAdmin2Id: geo.geoAdmin2Id,
+          geoAdmin3Id: geo.geoAdmin3Id,
+          freeState: geoFreeState,
+          freeCity: geoFreeCity,
+          postalCode: geoPostalCode,
           isPrimary: true
         }
       });
@@ -1485,6 +2489,7 @@ export async function actionCreateInstitutionClient(input: {
           type: "INSTITUTION",
           institutionTypeId,
           institutionCategoryId,
+          institutionIsPublic,
           institutionIsPayer,
           institutionIsGroupOrganizer,
           institutionIsSponsor,
@@ -1516,7 +2521,14 @@ export async function actionCreateInsurerClient(input: {
   address?: string;
   city?: string;
   department?: string;
-  country: string;
+  country?: string;
+  geoCountryId?: string;
+  geoAdmin1Id?: string;
+  geoAdmin2Id?: string;
+  geoAdmin3Id?: string;
+  geoPostalCode?: string;
+  geoFreeState?: string;
+  geoFreeCity?: string;
   acquisitionSourceId?: string;
   acquisitionDetailOptionId?: string;
   acquisitionOtherNote?: string;
@@ -1529,6 +2541,8 @@ export async function actionCreateInsurerClient(input: {
   phone?: string;
   phoneCountryIso2?: string;
   email?: string;
+  phones?: ClientPhoneChannelInput[];
+  emails?: ClientEmailChannelInput[];
 }) {
   const user = await requireAdminUser();
 
@@ -1536,9 +2550,19 @@ export async function actionCreateInsurerClient(input: {
   const tradeName = normalizeOptional(input.tradeName);
   const nit = normalizeRequired(input.nit, "Documento fiscal requerido.");
   const address = normalizeOptional(input.address);
-  const city = normalizeOptional(input.city);
-  const department = normalizeOptional(input.department);
-  const country = normalizeRequired(input.country, "País requerido.");
+  const geoPostalCode = normalizeOptional(input.geoPostalCode);
+  const geoFreeState = normalizeOptional(input.geoFreeState);
+  const geoFreeCity = normalizeOptional(input.geoFreeCity);
+  const geo = await resolveGeoSelection({
+    geoCountryId: input.geoCountryId,
+    geoAdmin1Id: input.geoAdmin1Id,
+    geoAdmin2Id: input.geoAdmin2Id,
+    geoAdmin3Id: input.geoAdmin3Id
+  });
+  const country = normalizeOptional(input.country) ?? geo.countryName;
+  const department = normalizeOptional(input.department) ?? geo.admin1Name ?? geoFreeState;
+  const city = normalizeOptional(input.city) ?? geo.admin2Name ?? geoFreeCity;
+  if (!country) throw new Error("País requerido.");
   const insurerCutoffMode = input.insurerCutoffMode ?? null;
   const insurerCutoffDay = input.insurerCutoffDay ?? null;
   const insurerBillingType = input.insurerBillingType ?? null;
@@ -1549,8 +2573,19 @@ export async function actionCreateInsurerClient(input: {
       throw new Error("El día de corte debe estar entre 1 y 31.");
     }
   }
-  const phone = normalizeOptional(input.phone);
-  const email = normalizeOptional(input.email);
+  const phoneChannels = normalizeClientPhoneChannels({
+    channels: input.phones,
+    fallbackPhone: input.phone,
+    fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
+  });
+  const emailChannels = normalizeClientEmailChannels({
+    channels: input.emails,
+    fallbackEmail: input.email
+  });
+  const primaryPhone = pickPrimaryPhoneChannel(phoneChannels);
+  const primaryEmail = pickPrimaryEmailChannel(emailChannels);
+  const phone = primaryPhone?.number ?? normalizeOptional(input.phone);
+  const email = primaryEmail?.valueNormalized ?? normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
 
   const defaultStatusId = await resolveDefaultActiveStatusId();
@@ -1588,17 +2623,20 @@ export async function actionCreateInsurerClient(input: {
         select: { id: true }
       });
 
-      const countryId = await resolveCountryIdByName(tx, country);
+      const countryId = geo.geoCountryId ?? (await resolveCountryIdByName(tx, country));
       await createPrimaryClientIdentifier(tx, {
         clientId: created.id,
         value: nit,
         countryId,
         preferredDocumentTypeTokens: ["NIT", "RFC", "RUC", "CUIT", "TAX_ID"]
       });
-      await createPrimaryClientPhone(tx, {
+
+      await createClientContactChannelsSafe(tx, {
         clientId: created.id,
-        phone,
-        countryIso2: input.phoneCountryIso2
+        phoneChannels,
+        emailChannels,
+        fallbackPhone: phone,
+        fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
       });
 
       const referralResult = await createReferralIfNeeded(tx, {
@@ -1617,6 +2655,13 @@ export async function actionCreateInsurerClient(input: {
             city,
             department,
             country,
+            geoCountryId: geo.geoCountryId,
+            geoAdmin1Id: geo.geoAdmin1Id,
+            geoAdmin2Id: geo.geoAdmin2Id,
+            geoAdmin3Id: geo.geoAdmin3Id,
+            freeState: geoFreeState,
+            freeCity: geoFreeCity,
+            postalCode: geoPostalCode,
             isPrimary: true
           }
         });
@@ -1814,6 +2859,140 @@ export async function actionCheckPersonDpi(input: { dpi: string; excludeClientId
   };
 }
 
+export async function actionListPersonIdentityDocumentTypes(input?: { countryId?: string }) {
+  await requireAdminUser();
+
+  const countryId = normalizeOptional(input?.countryId);
+  const countryIso2 = await resolveCountryIso2ById(prisma, countryId);
+  const items = await listActiveIdentityDocumentOptions(prisma, countryIso2);
+
+  return {
+    countryIso2,
+    items
+  };
+}
+
+export async function actionCheckPersonIdentityDocument(input: {
+  value?: string;
+  documentTypeId?: string;
+  countryId?: string;
+  excludeClientId?: string;
+}) {
+  await requireAdminUser();
+
+  const countryIso2 = await resolveCountryIso2ById(prisma, input.countryId);
+  const options = await listActiveIdentityDocumentOptions(prisma, countryIso2);
+  const selectedOption = normalizeIdentityDocumentSelection({
+    options,
+    identityDocumentTypeId: input.documentTypeId
+  });
+  if (!selectedOption) {
+    throw new Error("No hay tipos de documento de identidad disponibles.");
+  }
+  if (countryIso2 === "GT" && !["DPI", "PASSPORT"].includes(selectedOption.code)) {
+    throw new Error("Para Guatemala solo se permite DPI o Pasaporte.");
+  }
+
+  const validation = validateIdentityDocumentValue({
+    value: input.value,
+    documentCode: selectedOption?.code,
+    documentName: selectedOption?.name,
+    optional: selectedOption?.optional
+  });
+  if (!validation.ok) {
+    throw new Error(validation.error ?? "Documento inválido.");
+  }
+
+  if (!validation.normalized || !validation.value) {
+    return {
+      exists: false,
+      clientId: null,
+      label: null,
+      optionalSkipped: true,
+      selected: selectedOption
+        ? {
+            id: selectedOption.id,
+            name: selectedOption.name,
+            code: selectedOption.code,
+            sensitive: selectedOption.sensitive,
+            optional: selectedOption.optional
+          }
+        : null
+    };
+  }
+
+  const excludeClientId = normalizeOptional(input.excludeClientId);
+  const hasCatalogDocumentType = selectedOption?.source === "catalog" && !isFallbackDocumentTypeId(selectedOption.id);
+  const existingIdentifier = await prisma.clientIdentifier.findFirst({
+    where: {
+      valueNormalized: validation.normalized,
+      isActive: true,
+      ...(hasCatalogDocumentType ? { documentTypeId: selectedOption.id } : {}),
+      client: {
+        deletedAt: null,
+        ...(excludeClientId ? { id: { not: excludeClientId } } : {})
+      }
+    },
+    select: {
+      client: {
+        select: {
+          id: true,
+          type: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          secondLastName: true,
+          companyName: true,
+          tradeName: true,
+          dpi: true,
+          nit: true
+        }
+      }
+    }
+  });
+
+  let existingClient = existingIdentifier?.client ?? null;
+  if (!existingClient && !selectedOption?.sensitive) {
+    const maybeLegacy = await prisma.clientProfile.findFirst({
+      where: {
+        type: ClientProfileType.PERSON,
+        dpi: validation.value,
+        deletedAt: null,
+        ...(excludeClientId ? { id: { not: excludeClientId } } : {})
+      },
+      select: {
+        id: true,
+        type: true,
+        firstName: true,
+        middleName: true,
+        lastName: true,
+        secondLastName: true,
+        companyName: true,
+        tradeName: true,
+        dpi: true,
+        nit: true
+      }
+    });
+    existingClient = maybeLegacy ?? null;
+  }
+
+  return {
+    exists: Boolean(existingClient),
+    clientId: existingClient?.id ?? null,
+    label: existingClient ? formatClientLabel(existingClient) : null,
+    optionalSkipped: false,
+    selected: selectedOption
+      ? {
+          id: selectedOption.id,
+          name: selectedOption.name,
+          code: selectedOption.code,
+          sensitive: selectedOption.sensitive,
+          optional: selectedOption.optional
+        }
+      : null
+  };
+}
+
 export async function actionSearchGeoCountries(input: { q?: string; limit?: number; onlyActive?: boolean }) {
   await requireAdminUser();
   const q = input.q?.trim() ?? "";
@@ -1974,6 +3153,11 @@ export async function actionListGeoExplorerCountries(input?: {
       iso2: true,
       iso3: true,
       name: true,
+      callingCode: true,
+      admin1Label: true,
+      admin2Label: true,
+      admin3Label: true,
+      adminMaxLevel: true,
       isActive: true,
       meta: {
         select: {
@@ -2039,6 +3223,11 @@ export async function actionListGeoExplorerCountries(input?: {
         code: row.iso2,
         iso3: row.iso3,
         name: row.name,
+        callingCode: row.callingCode,
+        admin1Label: row.admin1Label ?? row.meta?.level1Label ?? null,
+        admin2Label: row.admin2Label ?? row.meta?.level2Label ?? null,
+        admin3Label: row.admin3Label ?? row.meta?.level3Label ?? null,
+        adminMaxLevel: row.adminMaxLevel ?? row.meta?.maxLevel ?? null,
         isActive: row.isActive,
         level1Count,
         officialCount: sourceStats.official,
@@ -2256,6 +3445,191 @@ export async function actionCreateGeoDivision(input: {
 
   revalidatePath("/admin/clientes/configuracion");
   return { id: created.id };
+}
+
+type GeoDivisionImportRow = {
+  level?: number;
+  code?: string | null;
+  name?: string | null;
+  parentId?: string | null;
+  parentCode?: string | null;
+  parentName?: string | null;
+  postalCode?: string | null;
+  dataSource?: "official" | "operational" | null;
+  isActive?: boolean | null;
+};
+
+export async function actionImportGeoDivisions(input: {
+  countryId: string;
+  rows: GeoDivisionImportRow[];
+  defaultLevel?: number;
+  defaultParentId?: string | null;
+}) {
+  const user = await requireAdminUser();
+  const countryId = normalizeRequired(input.countryId, "País requerido.");
+  const defaultLevel = Math.min(8, Math.max(1, Number(input.defaultLevel || 2)));
+  const defaultParentId = normalizeOptional(input.defaultParentId);
+  const rows = Array.isArray(input.rows) ? input.rows : [];
+  if (!rows.length) throw new Error("No hay filas para importar.");
+
+  const country = await prisma.geoCountry.findUnique({
+    where: { id: countryId },
+    select: { id: true }
+  });
+  if (!country) throw new Error("País inválido.");
+
+  const summary = {
+    total: rows.length,
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [] as Array<{ row: number; reason: string }>
+  };
+
+  const parentCache = new Map<string, string | null>();
+  const resolveParentId = async (row: GeoDivisionImportRow, level: number): Promise<string | null> => {
+    if (level <= 1) return null;
+    const explicitParentId = normalizeOptional(row.parentId) ?? defaultParentId;
+    if (explicitParentId) return explicitParentId;
+
+    const parentCode = normalizeOptional(row.parentCode);
+    const parentName = normalizeOptional(row.parentName);
+    if (!parentCode && !parentName) return null;
+
+    const cacheKey = `${level - 1}:${parentCode ?? ""}:${(parentName ?? "").toLowerCase()}`;
+    if (parentCache.has(cacheKey)) {
+      return parentCache.get(cacheKey) ?? null;
+    }
+
+    const parent = await prisma.geoDivision.findFirst({
+      where: {
+        countryId,
+        level: level - 1,
+        OR: [
+          ...(parentCode
+            ? [
+                {
+                  code: { equals: parentCode, mode: "insensitive" as const }
+                }
+              ]
+            : []),
+          ...(parentName
+            ? [
+                {
+                  name: { equals: parentName, mode: "insensitive" as const }
+                }
+              ]
+            : [])
+        ]
+      },
+      select: { id: true }
+    });
+    parentCache.set(cacheKey, parent?.id ?? null);
+    return parent?.id ?? null;
+  };
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const level = Math.min(8, Math.max(1, Number(row.level || defaultLevel)));
+    const code = normalizeOptional(row.code)?.toUpperCase() ?? null;
+    const name = normalizeOptional(row.name);
+    if (!name || !code) {
+      summary.skipped += 1;
+      summary.errors.push({ row: index + 1, reason: "Fila omitida: nombre/código requerido." });
+      continue;
+    }
+
+    const parentId = await resolveParentId(row, level);
+    if (level > 1 && !parentId) {
+      summary.skipped += 1;
+      summary.errors.push({ row: index + 1, reason: "Fila omitida: no se pudo resolver parentId." });
+      continue;
+    }
+
+    const dataSource = row.dataSource === "official" ? GEO_DIVISION_DATA_SOURCE.official : GEO_DIVISION_DATA_SOURCE.operational;
+    const existing = await prisma.geoDivision.findFirst({
+      where: {
+        countryId,
+        level,
+        parentId,
+        OR: [
+          { code: { equals: code, mode: "insensitive" } },
+          { name: { equals: name, mode: "insensitive" } }
+        ]
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        postalCode: true,
+        dataSource: true,
+        isActive: true
+      }
+    });
+
+    if (!existing) {
+      await prisma.geoDivision.create({
+        data: {
+          countryId,
+          level,
+          code,
+          name,
+          parentId,
+          postalCode: normalizeOptional(row.postalCode),
+          dataSource,
+          isActive: row.isActive !== false
+        }
+      });
+      summary.inserted += 1;
+      continue;
+    }
+
+    const nextPostalCode = normalizeOptional(row.postalCode);
+    const nextIsActive = row.isActive !== false;
+    const hasChanges =
+      existing.code.toUpperCase() !== code ||
+      existing.name !== name ||
+      (existing.postalCode ?? null) !== nextPostalCode ||
+      existing.dataSource !== dataSource ||
+      existing.isActive !== nextIsActive;
+
+    if (!hasChanges) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    await prisma.geoDivision.update({
+      where: { id: existing.id },
+      data: {
+        code,
+        name,
+        postalCode: nextPostalCode,
+        dataSource,
+        isActive: nextIsActive
+      }
+    });
+    summary.updated += 1;
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_GEO_DIVISION_IMPORT",
+      entityType: "GeoDivision",
+      entityId: countryId,
+      metadata: {
+        total: summary.total,
+        inserted: summary.inserted,
+        updated: summary.updated,
+        skipped: summary.skipped,
+        errorCount: summary.errors.length
+      }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  return summary;
 }
 
 export async function actionAddClientAffiliation(input: {

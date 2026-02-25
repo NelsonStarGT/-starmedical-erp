@@ -31,10 +31,11 @@ export async function PATCH(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
 
   try {
-    const before = await prisma.branch.findUnique({
-      where: { id: resolved.id },
+    const before = await prisma.branch.findFirst({
+      where: { id: resolved.id, tenantId },
       select: { id: true, isActive: true, name: true, code: true }
     });
 

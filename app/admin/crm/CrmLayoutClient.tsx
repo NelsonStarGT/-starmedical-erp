@@ -11,13 +11,6 @@ const typeOptions = [
   { key: "b2c", label: CRM_PIPELINE_TYPES.b2c.label }
 ] as const;
 
-const views = [
-  { key: "inbox", label: "Bandeja", href: "/admin/crm/inbox" },
-  { key: "pipeline", label: "Pipeline", href: "/admin/crm/pipeline" },
-  { key: "list", label: "Worklist", href: "/admin/crm/list" },
-  { key: "calendario", label: "Calendario", href: "/admin/crm/calendario" }
-] as const;
-
 export default function CrmLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -91,26 +84,6 @@ export default function CrmLayout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2">
-        {views.map((view) => {
-          const href = withParams(view.href);
-          const active = pathname.startsWith(view.href);
-          return (
-            <Link
-              key={view.key}
-              href={href}
-              className={cn(
-                "inline-flex h-[var(--crm-control-h)] items-center rounded-lg px-3 text-sm font-medium transition",
-                active
-                  ? "bg-[#2e75ba] text-white shadow-sm"
-                  : "border border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-              )}
-            >
-              {view.label}
-            </Link>
-          );
-        })}
-      </div>
       {children}
     </div>
   );

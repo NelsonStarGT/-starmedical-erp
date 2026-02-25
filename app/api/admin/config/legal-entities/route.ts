@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auditLog } from "@/lib/audit";
 import {
   conflict409,
@@ -11,12 +12,21 @@ import {
   warnDevCentralCompat
 } from "@/lib/config-central";
 import { prisma } from "@/lib/prisma";
+import { isAdmin, isOwner } from "@/lib/rbac";
+import { normalizeTenantId } from "@/lib/tenant";
+import { enforceRateLimit } from "@/lib/api/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function canManageLegalEntities(user: ReturnType<typeof requireConfigCentralCapability>["user"]) {
+  if (!user) return false;
+  return isAdmin(user) || isOwner(user);
+}
+
 function toUiEntity(row: {
   id: string;
+  tenantId: string | null;
   name: string;
   comercialName: string | null;
   nit: string | null;
@@ -32,7 +42,7 @@ function toUiEntity(row: {
 }) {
   return {
     id: row.id,
-    tenantId: null,
+    tenantId: row.tenantId,
     legalName: row.name,
     tradeName: row.comercialName,
     nit: row.nit,
@@ -53,13 +63,18 @@ export async function GET(req: NextRequest) {
   if (auth.response) return auth.response;
 
   const includeInactive = req.nextUrl.searchParams.get("includeInactive") === "1";
+  const tenantId = normalizeTenantId(auth.user?.tenantId);
 
   try {
     const rows = await prisma.legalEntity.findMany({
-      where: includeInactive ? {} : { isActive: true },
+      where: {
+        tenantId,
+        ...(includeInactive ? {} : { isActive: true })
+      },
       orderBy: [{ isActive: "desc" }, { name: "asc" }],
       select: {
         id: true,
+        tenantId: true,
         name: true,
         comercialName: true,
         nit: true,
@@ -92,8 +107,17 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
+  if (!canManageLegalEntities(auth.user)) {
+    return NextResponse.json(
+      { ok: false, code: "FORBIDDEN", error: "Solo roles owner/admin pueden gestionar patentes." },
+      { status: 403 }
+    );
+  }
+
+  const tenantId = normalizeTenantId(auth.user?.tenantId);
 
   try {
+    enforceRateLimit(req, { limit: 25, windowMs: 60_000 });
     const body = await req.json().catch(() => null);
     const parsed = legalEntityCreateSchema.safeParse(body ?? {});
     if (!parsed.success) {
@@ -106,8 +130,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const duplicateFilters: Prisma.LegalEntityWhereInput[] = [
+      { name: { equals: parsed.data.legalName, mode: "insensitive" } }
+    ];
+    if (parsed.data.nit) {
+      duplicateFilters.push({ nit: { equals: parsed.data.nit, mode: "insensitive" } });
+    }
+
+    const duplicated = await prisma.legalEntity.findFirst({
+      where: {
+        tenantId,
+        OR: duplicateFilters
+      },
+      select: {
+        id: true,
+        name: true,
+        nit: true
+      }
+    });
+
+    if (duplicated) {
+      return conflict409("Entidad legal duplicada dentro del tenant (NIT o razón social).", {
+        resource: "LegalEntity",
+        duplicatedField:
+          parsed.data.nit && duplicated.nit && duplicated.nit.toUpperCase() === parsed.data.nit.toUpperCase()
+            ? "nit"
+            : "legalName"
+      });
+    }
+
     const created = await prisma.legalEntity.create({
       data: {
+        tenantId,
         name: parsed.data.legalName,
         comercialName: parsed.data.tradeName,
         nit: parsed.data.nit,
@@ -116,6 +170,7 @@ export async function POST(req: NextRequest) {
       },
       select: {
         id: true,
+        tenantId: true,
         name: true,
         comercialName: true,
         nit: true,
@@ -137,6 +192,22 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: toUiEntity(created) }, { status: 201 });
   } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "status" in error &&
+      (error as { status?: unknown }).status === 429
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "RATE_LIMIT",
+          error: "Demasiadas solicitudes. Espera un momento para reintentar."
+        },
+        { status: 429 }
+      );
+    }
+
     if (isCentralConfigCompatError(error)) {
       warnDevCentralCompat("config.legalEntities.create", error);
       return service503("DB_NOT_READY", "Entidades legales no disponibles. Ejecuta migraciones y prisma generate.");

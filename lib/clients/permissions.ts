@@ -12,6 +12,13 @@ const DOCS_VIEW_ROLES = new Set([
   "MEDICAL_RECORDS"
 ]);
 const PROFILE_EDIT_ROLES = new Set(["SUPER_ADMIN", "ADMIN"]);
+const CLIENTS_READ_ROLES = new Set([
+  ...DOCS_VIEW_ROLES,
+  ...PROFILE_EDIT_ROLES,
+  "HR_USER",
+  "HR_MANAGER",
+  "HR_ADMIN"
+]);
 
 export function normalizeClientRole(role?: string | null) {
   if (!role) return "";
@@ -45,6 +52,11 @@ export function canApproveDocsFromRoles(roles?: Array<string | null | undefined>
 export function canEditClientProfileFromRoles(roles?: Array<string | null | undefined>) {
   const normalized = normalizeClientRoleList(roles);
   return hasAnyRole(normalized, PROFILE_EDIT_ROLES);
+}
+
+export function canReadClientsFromRoles(roles?: Array<string | null | undefined>) {
+  const normalized = normalizeClientRoleList(roles);
+  return hasAnyRole(normalized, CLIENTS_READ_ROLES);
 }
 
 export function getClientDocumentPermissions(user: Pick<SessionUser, "roles"> | null | undefined) {

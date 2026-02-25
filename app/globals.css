@@ -3,24 +3,59 @@
 @tailwind utilities;
 
 :root {
-  --brand-primary: #4aa59c;
-  --brand-secondary: #4aadf5;
-  --brand-corporate: #2e75ba;
-  --brand-accent: #4aadf5;
+  --color-primary: #4aa59c;
+  --color-accent: #4aadf5;
+  --color-structure: #2e75ba;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #dbe6f0;
+  --ring: #4aadf5;
+
+  --color-primary-rgb: 74 165 156;
+  --color-accent-rgb: 74 173 245;
+  --color-structure-rgb: 46 117 186;
+  --bg-rgb: 248 250 252;
+  --surface-rgb: 255 255 255;
+  --text-rgb: 15 23 42;
+  --border-rgb: 219 230 240;
+
+  --font-heading: var(--font-montserrat), var(--font-poppins), "Montserrat", "Poppins", "Inter", system-ui, sans-serif;
+  --font-sans: var(--font-nunito), var(--font-inter), "Nunito Sans", "Inter", system-ui, sans-serif;
+
+  --density-scale: 1;
+  --app-text: calc(14px * var(--density-scale));
+  --app-card-pad: calc(16px * var(--density-scale));
+  --app-gap: calc(16px * var(--density-scale));
+  --app-control-h: calc(40px * var(--density-scale));
+
+  /* Compatibilidad con tokens legacy */
+  --brand-primary: var(--color-primary);
+  --brand-secondary: var(--color-accent);
+  --brand-corporate: var(--color-structure);
+  --brand-accent: var(--color-accent);
   --brand-soft: #edf7f6;
-  --brand-text: #1f2937;
-  --diagnostics-primary: #4aa59c;
-  --diagnostics-secondary: #4aadf5;
-  --diagnostics-corporate: #2e75ba;
-  --diagnostics-background: #f8fafc;
-  --app-bg: #f8fafc;
-  --app-surface: #ffffff;
-  --app-text-color: #1f2937;
-  --app-text: 14px;
-  --app-card-pad: 16px;
-  --app-gap: 16px;
-  --app-control-h: 40px;
-  --font-sans: "Inter", "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --brand-text: var(--text);
+  --diagnostics-primary: var(--color-primary);
+  --diagnostics-secondary: var(--color-accent);
+  --diagnostics-corporate: var(--color-structure);
+  --diagnostics-background: var(--bg);
+  --app-bg: var(--bg);
+  --app-surface: var(--surface);
+  --app-text-color: var(--text);
+}
+
+.erp-density[data-density="compact"] {
+  --density-scale: 0.88;
+  --app-text: 13px;
+  --app-card-pad: 12px;
+  --app-gap: 12px;
+  --app-control-h: 36px;
+}
+
+.erp-density[data-density="normal"] {
+  --density-scale: 1;
 }
 
 @media (max-width: 1024px) {
@@ -41,19 +76,34 @@
   }
 }
 
+html,
 body {
-  min-height: 100vh;
+  min-height: 100%;
+}
+
+body {
   font-family: var(--font-sans);
   color: var(--app-text-color);
   font-size: var(--app-text);
   background:
-    radial-gradient(960px circle at 0% 0%, rgba(74, 173, 245, 0.1), transparent 40%),
-    radial-gradient(720px circle at 100% 0%, rgba(74, 165, 156, 0.1), transparent 38%),
-    linear-gradient(180deg, var(--app-bg) 0%, #ffffff 75%);
+    radial-gradient(980px circle at 0% 0%, rgba(74, 173, 245, 0.12), transparent 40%),
+    radial-gradient(760px circle at 100% 0%, rgba(74, 165, 156, 0.11), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, var(--app-bg) 78%);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
 }
 
 input,
-button {
+button,
+select,
+textarea {
   font: inherit;
 }
 
@@ -62,13 +112,14 @@ button {
 }
 
 .surface-card {
-  @apply bg-white/90 border border-slate-100 shadow-soft;
+  @apply bg-white/95 border shadow-sm;
+  border-color: rgb(var(--border-rgb) / 0.9);
 }
 
 @keyframes rise-fade {
   0% {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(10px);
   }
   100% {
     opacity: 1;
@@ -100,17 +151,27 @@ button {
 
 .erp-kpi-value {
   font-size: calc(var(--app-text) * 2);
-  line-height: 1.15;
+  line-height: 1.12;
+}
+
+.erp-table table thead th {
+  background: rgb(var(--color-structure-rgb) / 0.08);
+  color: rgb(var(--color-structure-rgb));
+  font-weight: 700;
+}
+
+.erp-table table tbody tr:nth-child(even) {
+  background: rgb(var(--bg-rgb) / 0.65);
 }
 
 .erp-table :where(table th, table td) {
   padding-top: calc(var(--app-gap) * 0.5);
   padding-bottom: calc(var(--app-gap) * 0.5);
-  padding-left: calc(var(--app-gap) * 0.75);
-  padding-right: calc(var(--app-gap) * 0.75);
+  padding-left: calc(var(--app-gap) * 0.72);
+  padding-right: calc(var(--app-gap) * 0.72);
 }
 
 .module-top-tabs__tab {
-  padding: calc(var(--app-gap) * 0.45) calc(var(--app-gap) * 0.7);
+  padding: calc(var(--app-gap) * 0.42) calc(var(--app-gap) * 0.66);
   font-size: var(--app-text);
 }

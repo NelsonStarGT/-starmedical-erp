@@ -367,7 +367,7 @@ async function upsertGeoDivision(
       code: input.code,
       parentId: input.parentId
     },
-    select: { id: true }
+    select: { id: true, dataSource: true }
   });
 
   if (existing) {
@@ -378,6 +378,7 @@ async function upsertGeoDivision(
         legacyGeoAdmin1Id: input.legacyGeoAdmin1Id ?? null,
         legacyGeoAdmin2Id: input.legacyGeoAdmin2Id ?? null,
         legacyGeoAdmin3Id: input.legacyGeoAdmin3Id ?? null,
+        dataSource: existing.dataSource === "operational" ? "operational" : "seed_baseline",
         isActive: true
       }
     });
@@ -393,6 +394,7 @@ async function upsertGeoDivision(
       legacyGeoAdmin1Id: input.legacyGeoAdmin1Id ?? null,
       legacyGeoAdmin2Id: input.legacyGeoAdmin2Id ?? null,
       legacyGeoAdmin3Id: input.legacyGeoAdmin3Id ?? null,
+      dataSource: "seed_baseline",
       isActive: true
     }
   });
@@ -424,6 +426,16 @@ async function seedCountrySubdivisions(
   });
 
   const labels = normalizeCountryLabels(seed);
+  await prisma.geoCountry.update({
+    where: { id: country.id },
+    data: {
+      admin1Label: labels.level1Label,
+      admin2Label: labels.level2Label,
+      admin3Label: labels.level3Label,
+      adminMaxLevel: labels.maxLevel
+    }
+  });
+
   await prisma.geoCountryMeta.upsert({
     where: { countryId: country.id },
     update: {
@@ -846,10 +858,17 @@ export async function seedGeoCatalogs(prisma: PrismaClient) {
   }
 
   const countries = loadJson<CountrySeed[]>("prisma/seeds/geo-countries.json");
-  const guatemala = loadJson<GuatemalaSeed>("prisma/seeds/geo-guatemala.json");
+  const guatemala = loadJson<GuatemalaSeed>("data/geo/gt_departamentos_municipios.json");
   const centralAmerica = loadJson<GeoCountrySubdivisionSeedFile>("prisma/seeds/geo-central-america-admin.json");
   const globalExtra = loadJson<GeoCountrySubdivisionSeedFile>("prisma/seeds/geo-global-admin-extra.json");
+  const americaLevel1 = loadJson<GeoCountrySubdivisionSeedFile>("prisma/seeds/geo-america-admin1.json");
   const postalCodes = loadJson<GeoPostalCodeSeedFile>("prisma/seeds/geo-postal-codes.json");
+  const phoneCodes = await prisma.phoneCountryCode.findMany({
+    select: { iso2: true, dialCode: true }
+  });
+  const callingCodeByIso2 = new Map(
+    phoneCodes.map((row) => [row.iso2.trim().toUpperCase(), row.dialCode])
+  );
 
   if (!countries.length) {
     console.warn("[seed:geo] countries seed is empty. Skipping.");
@@ -869,12 +888,14 @@ export async function seedGeoCatalogs(prisma: PrismaClient) {
       update: {
         iso3: country.iso3?.trim().toUpperCase() || null,
         name: country.name.trim(),
+        callingCode: callingCodeByIso2.get(iso2) ?? null,
         isActive: true
       },
       create: {
         iso2,
         iso3: country.iso3?.trim().toUpperCase() || null,
         name: country.name.trim(),
+        callingCode: callingCodeByIso2.get(iso2) ?? null,
         isActive: true
       }
     });
@@ -888,7 +909,8 @@ export async function seedGeoCatalogs(prisma: PrismaClient) {
   const seedsToApply: GeoCountrySubdivisionSeed[] = [
     normalizeCountrySubdivisionSeed(guatemala),
     ...centralAmerica.countries,
-    ...globalExtra.countries
+    ...globalExtra.countries,
+    ...americaLevel1.countries
   ];
 
   const seededStats: SeedCountrySubdivisionResult[] = [];

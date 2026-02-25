@@ -33,6 +33,7 @@ export async function PUT(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
 
   try {
     const body = await req.json().catch(() => null);
@@ -47,8 +48,8 @@ export async function PUT(
       );
     }
 
-    const before = await prisma.branch.findUnique({
-      where: { id: resolved.id },
+    const before = await prisma.branch.findFirst({
+      where: { id: resolved.id, tenantId },
       select: {
         id: true,
         name: true,

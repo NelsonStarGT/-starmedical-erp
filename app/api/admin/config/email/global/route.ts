@@ -11,6 +11,7 @@ import {
 import { encryptSecret } from "@/lib/email/crypto";
 import { invalidateEmailCache } from "@/lib/email/mailer";
 import { prisma } from "@/lib/prisma";
+import { normalizeTenantId } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,8 +25,16 @@ type GlobalEmailConfigRecord = {
   smtpPasswordEnc: string;
   fromName: string;
   fromEmail: string;
+  deliverabilityChecklist: unknown;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type TenantDeliverabilityStatus = {
+  spf: boolean;
+  dkim: boolean;
+  dmarc: boolean;
+  updatedAt: string | null;
 };
 
 type GlobalEmailConfigPublic = {
@@ -37,6 +46,7 @@ type GlobalEmailConfigPublic = {
   fromName: string;
   fromEmail: string;
   hasPassword: boolean;
+  deliverability: TenantDeliverabilityStatus;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -52,6 +62,7 @@ type GlobalEmailConfigDelegate = {
       smtpUser: string;
       fromName: string;
       fromEmail: string;
+      deliverabilityChecklist: unknown;
       smtpPasswordEnc?: string;
     };
     create: {
@@ -63,6 +74,7 @@ type GlobalEmailConfigDelegate = {
       smtpPasswordEnc: string;
       fromName: string;
       fromEmail: string;
+      deliverabilityChecklist: unknown;
     };
   }) => Promise<GlobalEmailConfigRecord>;
 };
@@ -75,7 +87,44 @@ function getGlobalEmailConfigDelegate(): GlobalEmailConfigDelegate | null {
   return prismaClient.globalEmailConfig ?? null;
 }
 
-function toPublicRow(row: GlobalEmailConfigRecord): GlobalEmailConfigPublic {
+function normalizeDeliverabilityMap(value: unknown): Record<string, TenantDeliverabilityStatus> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const entries = Object.entries(value as Record<string, unknown>).map(([tenantId, snapshot]) => {
+    const normalizedTenantId = normalizeTenantId(tenantId);
+    const row = (snapshot && typeof snapshot === "object" ? snapshot : {}) as Partial<TenantDeliverabilityStatus>;
+    return [
+      normalizedTenantId,
+      {
+        spf: row.spf === true,
+        dkim: row.dkim === true,
+        dmarc: row.dmarc === true,
+        updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : null
+      }
+    ] as const;
+  });
+
+  return Object.fromEntries(entries);
+}
+
+function resolveTenantDeliverability(
+  map: Record<string, TenantDeliverabilityStatus>,
+  tenantId: string
+): TenantDeliverabilityStatus {
+  const row = map[normalizeTenantId(tenantId)];
+  if (!row) {
+    return {
+      spf: false,
+      dkim: false,
+      dmarc: false,
+      updatedAt: null
+    };
+  }
+  return row;
+}
+
+function toPublicRow(row: GlobalEmailConfigRecord, tenantId: string): GlobalEmailConfigPublic {
+  const deliverabilityMap = normalizeDeliverabilityMap(row.deliverabilityChecklist);
   return {
     id: row.id,
     smtpHost: row.smtpHost,
@@ -85,6 +134,7 @@ function toPublicRow(row: GlobalEmailConfigRecord): GlobalEmailConfigPublic {
     fromName: row.fromName,
     fromEmail: row.fromEmail,
     hasPassword: Boolean(row.smtpPasswordEnc),
+    deliverability: resolveTenantDeliverability(deliverabilityMap, tenantId),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -104,6 +154,7 @@ function isValidEmail(value: string) {
 export async function GET(req: NextRequest) {
   const auth = requireConfigCentralCapability(req, "CONFIG_EMAIL_READ");
   if (auth.response) return auth.response;
+  const tenantId = normalizeTenantId(auth.user?.tenantId);
 
   const delegate = getGlobalEmailConfigDelegate();
   if (!delegate) {
@@ -113,7 +164,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const row = await delegate.findUnique({ where: { id: "global" } });
-    return NextResponse.json({ ok: true, data: row ? toPublicRow(row) : null });
+    return NextResponse.json({ ok: true, data: row ? toPublicRow(row, tenantId) : null });
   } catch (error) {
     if (isCentralConfigCompatError(error)) {
       warnDevCentralCompat("config.email.global.get", error);
@@ -129,6 +180,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = requireConfigCentralCapability(req, "CONFIG_EMAIL_WRITE");
   if (auth.response) return auth.response;
+  const tenantId = normalizeTenantId(auth.user?.tenantId);
 
   const delegate = getGlobalEmailConfigDelegate();
   if (!delegate) {
@@ -146,6 +198,7 @@ export async function POST(req: NextRequest) {
       fromEmail?: unknown;
       includePassword?: unknown;
       smtpPassword?: unknown;
+      deliverability?: unknown;
     } | null;
 
     const smtpHost = typeof body?.smtpHost === "string" ? body.smtpHost.trim() : "";
@@ -154,6 +207,10 @@ export async function POST(req: NextRequest) {
     const fromEmail = typeof body?.fromEmail === "string" ? body.fromEmail.trim() : "";
     const includePassword = body?.includePassword === true;
     const smtpPassword = typeof body?.smtpPassword === "string" ? body.smtpPassword : "";
+    const deliverabilityPatch =
+      body?.deliverability && typeof body.deliverability === "object" && !Array.isArray(body.deliverability)
+        ? (body.deliverability as { spf?: unknown; dkim?: unknown; dmarc?: unknown })
+        : null;
 
     const parsedPort =
       typeof body?.smtpPort === "number"
@@ -207,6 +264,17 @@ export async function POST(req: NextRequest) {
       smtpPasswordEnc = encryptSecret(smtpPassword.trim());
     }
 
+    const currentDeliverabilityMap = normalizeDeliverabilityMap(existing?.deliverabilityChecklist);
+    const nextDeliverabilityMap = { ...currentDeliverabilityMap };
+    if (deliverabilityPatch) {
+      nextDeliverabilityMap[tenantId] = {
+        spf: deliverabilityPatch.spf === true,
+        dkim: deliverabilityPatch.dkim === true,
+        dmarc: deliverabilityPatch.dmarc === true,
+        updatedAt: new Date().toISOString()
+      };
+    }
+
     const saved = await delegate.upsert({
       where: { id: "global" },
       update: {
@@ -216,6 +284,7 @@ export async function POST(req: NextRequest) {
         smtpUser,
         fromName,
         fromEmail,
+        deliverabilityChecklist: nextDeliverabilityMap,
         ...(smtpPasswordEnc ? { smtpPasswordEnc } : {})
       },
       create: {
@@ -226,7 +295,8 @@ export async function POST(req: NextRequest) {
         smtpUser,
         smtpPasswordEnc: smtpPasswordEnc || encryptSecret(smtpPassword.trim()),
         fromName,
-        fromEmail
+        fromEmail,
+        deliverabilityChecklist: nextDeliverabilityMap
       }
     });
 
@@ -246,7 +316,8 @@ export async function POST(req: NextRequest) {
             smtpUser: existing.smtpUser,
             fromName: existing.fromName,
             fromEmail: existing.fromEmail,
-            hasPassword: Boolean(existing.smtpPasswordEnc)
+            hasPassword: Boolean(existing.smtpPasswordEnc),
+            deliverability: resolveTenantDeliverability(currentDeliverabilityMap, tenantId)
           }
         : null,
       after: {
@@ -256,15 +327,17 @@ export async function POST(req: NextRequest) {
         smtpUser: saved.smtpUser,
         fromName: saved.fromName,
         fromEmail: saved.fromEmail,
-        hasPassword: Boolean(saved.smtpPasswordEnc)
+        hasPassword: Boolean(saved.smtpPasswordEnc),
+        deliverability: resolveTenantDeliverability(nextDeliverabilityMap, tenantId)
       },
       metadata: {
         rotatedPassword: includePassword,
-        channel: "smtp"
+        channel: "smtp",
+        tenantId
       }
     });
 
-    return NextResponse.json({ ok: true, data: toPublicRow(saved) });
+    return NextResponse.json({ ok: true, data: toPublicRow(saved, tenantId) });
   } catch (error) {
     if (isCentralConfigCompatError(error)) {
       warnDevCentralCompat("config.email.global.update", error);

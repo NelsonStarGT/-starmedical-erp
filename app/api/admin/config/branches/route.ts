@@ -20,10 +20,14 @@ export async function GET(req: NextRequest) {
   if (auth.response) return auth.response;
 
   const includeInactive = req.nextUrl.searchParams.get("includeInactive") === "1";
+  const tenantId = auth.user?.tenantId || "global";
 
   try {
     const branches = await prisma.branch.findMany({
-      where: includeInactive ? {} : { isActive: true },
+      where: {
+        tenantId,
+        ...(includeInactive ? {} : { isActive: true })
+      },
       orderBy: [{ isActive: "desc" }, { name: "asc" }],
       select: {
         id: true,
@@ -62,6 +66,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
   if (auth.response) return auth.response;
+  const tenantId = auth.user?.tenantId || "global";
 
   try {
     const body = await req.json().catch(() => null);
@@ -78,6 +83,7 @@ export async function POST(req: NextRequest) {
 
     const created = await prisma.branch.create({
       data: {
+        tenantId,
         name: parsed.data.name,
         code: parsed.data.code,
         address: parsed.data.address,

@@ -16,6 +16,9 @@ import {
   warnDevCentralCompat
 } from "@/lib/config-central";
 import { getSystemFeatureConfig, isFlagEnabledFromSnapshot } from "@/lib/system-flags/service";
+import { contrastRatio, isRecommendedContrast } from "@/lib/theme/utils";
+import { normalizeTenantId } from "@/lib/tenant";
+import { enforceRateLimit } from "@/lib/api/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +28,7 @@ export async function GET(req: NextRequest) {
   if (auth.response) return auth.response;
 
   try {
-    const config = await getTenantThemeConfig();
+    const config = await getTenantThemeConfig(normalizeTenantId(auth.user?.tenantId));
     return NextResponse.json({ ok: true, data: config });
   } catch (error) {
     if (error instanceof ThemeConfigUnavailableError || isCentralConfigCompatError(error)) {
@@ -43,6 +46,7 @@ export async function PUT(req: NextRequest) {
   if (auth.response) return auth.response;
 
   try {
+    enforceRateLimit(req, { limit: 20, windowMs: 60_000 });
     const body = await req.json().catch(() => null);
     const expectedVersion = Number(body?.expectedVersion);
     if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
@@ -56,6 +60,7 @@ export async function PUT(req: NextRequest) {
       systemConfig.strictMode || isFlagEnabledFromSnapshot(systemConfig, "theme.requireValidHex");
     const patch = parseTenantThemePatch(body?.patch ?? {}, { allowInvalidHex: !requireValidHex });
     const updated = await updateTenantThemeConfig({
+      tenantId: normalizeTenantId(auth.user?.tenantId),
       expectedVersion,
       patch,
       updatedByUserId: auth.user?.id ?? null
@@ -66,18 +71,34 @@ export async function PUT(req: NextRequest) {
           .filter(([, value]) => typeof value === "string" && !HEX_COLOR_REGEX.test(value))
           .map(([key]) => key)
       : [];
+    const contrastWarnings: string[] = [];
+    const textVsBg = contrastRatio(updated.theme.text, updated.theme.bg);
+    if (!isRecommendedContrast(updated.theme.text, updated.theme.bg)) {
+      contrastWarnings.push(
+        `Contraste bajo texto/fondo (${textVsBg}:1). Recomendado >= 4.5:1 para accesibilidad.`
+      );
+    }
+
+    const structureVsSurface = contrastRatio(updated.theme.structure, updated.theme.surface);
+    if (!isRecommendedContrast(updated.theme.structure, updated.theme.surface, 3.2)) {
+      contrastWarnings.push(
+        `Contraste bajo en color estructural/superficie (${structureVsSurface}:1).`
+      );
+    }
 
     return NextResponse.json({
       ok: true,
       data: updated,
-      warnings:
+      warnings: [
         invalidHexKeys.length > 0
           ? [
               `HEX inválidos permitidos por flag: ${invalidHexKeys.join(
                 ", "
               )}. Revísalos antes de publicar en producción.`
             ]
-          : []
+          : [],
+        contrastWarnings
+      ].flat()
     });
   } catch (error) {
     if (error instanceof ZodError) {
@@ -99,6 +120,22 @@ export async function PUT(req: NextRequest) {
     if (error instanceof ThemeConfigUnavailableError || isCentralConfigCompatError(error)) {
       warnDevCentralCompat("config.theme.put", error);
       return service503("DB_NOT_READY", "Theme/branding no disponible. Ejecuta migraciones y prisma generate.");
+    }
+
+    if (
+      error &&
+      typeof error === "object" &&
+      "status" in error &&
+      (error as { status?: unknown }).status === 429
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "RATE_LIMIT",
+          error: "Demasiadas solicitudes. Espera un momento para reintentar."
+        },
+        { status: 429 }
+      );
     }
 
     const message = error instanceof Error ? error.message : "No se pudo actualizar el tema.";

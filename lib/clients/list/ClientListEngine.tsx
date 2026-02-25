@@ -348,7 +348,8 @@ export async function ClientListEngine({
           <>
             <Link
               href={config.createPath}
-              className="inline-flex items-center gap-2 rounded-full bg-diagnostics-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-diagnostics-primary/90"
+              className="inline-flex items-center gap-2 rounded-full bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#4aadf5]"
+              style={{ backgroundColor: "#4aa59c", color: "#ffffff" }}
             >
               <Plus size={16} />
               {config.createLabel}
@@ -512,7 +513,8 @@ export async function ClientListEngine({
                 action={
                   <Link
                     href={config.createPath}
-                    className="inline-flex items-center gap-2 rounded-full bg-diagnostics-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-diagnostics-primary/90"
+                    className="inline-flex items-center gap-2 rounded-full bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#4aadf5]"
+                    style={{ backgroundColor: "#4aa59c", color: "#ffffff" }}
                   >
                     <Plus size={16} />
                     {config.createLabel}
@@ -537,7 +539,8 @@ export async function ClientListEngine({
               action={
                 <Link
                   href={config.createPath}
-                  className="inline-flex items-center gap-2 rounded-full bg-diagnostics-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-diagnostics-primary/90"
+                  className="inline-flex items-center gap-2 rounded-full bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#4aadf5]"
+                  style={{ backgroundColor: "#4aa59c", color: "#ffffff" }}
                 >
                   <Plus size={16} />
                   {config.createLabel}

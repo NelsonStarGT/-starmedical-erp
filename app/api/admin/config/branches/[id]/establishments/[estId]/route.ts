@@ -37,6 +37,7 @@ export async function PUT(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
 
   try {
     const body = await req.json().catch(() => null);
@@ -68,13 +69,17 @@ export async function PUT(
       return notFound404("Establecimiento SAT no encontrado.");
     }
 
+    const branchScoped = await prisma.branch.findFirst({
+      where: { id: resolved.id, tenantId },
+      select: { id: true, isActive: true }
+    });
+    if (!branchScoped) {
+      return notFound404("Sucursal no encontrada.");
+    }
+
     const nextIsActive = typeof parsed.data.isActive === "boolean" ? parsed.data.isActive : before.isActive;
     if (nextIsActive) {
-      const branch = await prisma.branch.findUnique({
-        where: { id: resolved.id },
-        select: { id: true, isActive: true }
-      });
-      if (!branch?.isActive) {
+      if (!branchScoped.isActive) {
         return validation422("No puedes activar establecimientos SAT en una sucursal inactiva.");
       }
     }
@@ -141,6 +146,7 @@ export async function PATCH(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
 
   try {
     const before = await prisma.branchSatEstablishment.findUnique({
@@ -157,12 +163,16 @@ export async function PATCH(
       return notFound404("Establecimiento SAT no encontrado.");
     }
 
+    const branchScoped = await prisma.branch.findFirst({
+      where: { id: resolved.id, tenantId },
+      select: { id: true, isActive: true }
+    });
+    if (!branchScoped) {
+      return notFound404("Sucursal no encontrada.");
+    }
+
     if (!before.isActive) {
-      const branch = await prisma.branch.findUnique({
-        where: { id: resolved.id },
-        select: { id: true, isActive: true }
-      });
-      if (!branch?.isActive) {
+      if (!branchScoped.isActive) {
         return validation422("No puedes activar establecimientos SAT en una sucursal inactiva.");
       }
     }

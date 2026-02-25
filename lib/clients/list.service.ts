@@ -14,6 +14,12 @@ import {
   type RequiredDocumentRecordSnapshot,
   type RequiredDocumentRuleSnapshot
 } from "./requiredDocuments";
+import {
+  getPrimaryEmailValue,
+  getPrimaryIdentifierValue,
+  getPrimaryPhoneValue,
+  getResidenceSnapshot
+} from "./readModel";
 
 export type ClientListAlertFilter =
   | "INCOMPLETE"
@@ -215,9 +221,19 @@ function buildSearchWhere(type: ClientProfileType, q: string): Prisma.ClientProf
         { middleName: { contains: needle, mode: "insensitive" } },
         { lastName: { contains: needle, mode: "insensitive" } },
         { secondLastName: { contains: needle, mode: "insensitive" } },
-        { dpi: { contains: needle, mode: "insensitive" } },
-        { phone: { contains: needle, mode: "insensitive" } },
-        { phoneE164: { contains: needle, mode: "insensitive" } }
+        { clientIdentifiers: { some: { isActive: true, value: { contains: needle, mode: "insensitive" } } } },
+        {
+          clientPhones: {
+            some: {
+              isActive: true,
+              OR: [
+                { number: { contains: needle, mode: "insensitive" } },
+                { e164: { contains: needle, mode: "insensitive" } }
+              ]
+            }
+          }
+        },
+        { clientEmails: { some: { isActive: true, valueNormalized: { contains: needle.toLowerCase() } } } }
       ]
     };
   }
@@ -229,9 +245,18 @@ function buildSearchWhere(type: ClientProfileType, q: string): Prisma.ClientProf
         { companyName: { contains: needle, mode: "insensitive" } },
         { tradeName: { contains: needle, mode: "insensitive" } },
         { nit: { contains: needle, mode: "insensitive" } },
-        { email: { contains: needle, mode: "insensitive" } },
-        { phone: { contains: needle, mode: "insensitive" } },
-        { phoneE164: { contains: needle, mode: "insensitive" } }
+        { clientEmails: { some: { isActive: true, valueNormalized: { contains: needle.toLowerCase() } } } },
+        {
+          clientPhones: {
+            some: {
+              isActive: true,
+              OR: [
+                { number: { contains: needle, mode: "insensitive" } },
+                { e164: { contains: needle, mode: "insensitive" } }
+              ]
+            }
+          }
+        }
       ]
     };
   }
@@ -243,9 +268,18 @@ function buildSearchWhere(type: ClientProfileType, q: string): Prisma.ClientProf
         { companyName: { contains: needle, mode: "insensitive" } },
         { tradeName: { contains: needle, mode: "insensitive" } },
         { nit: { contains: needle, mode: "insensitive" } },
-        { email: { contains: needle, mode: "insensitive" } },
-        { phone: { contains: needle, mode: "insensitive" } },
-        { phoneE164: { contains: needle, mode: "insensitive" } }
+        { clientEmails: { some: { isActive: true, valueNormalized: { contains: needle.toLowerCase() } } } },
+        {
+          clientPhones: {
+            some: {
+              isActive: true,
+              OR: [
+                { number: { contains: needle, mode: "insensitive" } },
+                { e164: { contains: needle, mode: "insensitive" } }
+              ]
+            }
+          }
+        }
       ]
     };
   }
@@ -255,9 +289,18 @@ function buildSearchWhere(type: ClientProfileType, q: string): Prisma.ClientProf
     OR: [
       { companyName: { contains: needle, mode: "insensitive" } },
       { nit: { contains: needle, mode: "insensitive" } },
-      { email: { contains: needle, mode: "insensitive" } },
-      { phone: { contains: needle, mode: "insensitive" } },
-      { phoneE164: { contains: needle, mode: "insensitive" } },
+      { clientEmails: { some: { isActive: true, valueNormalized: { contains: needle.toLowerCase() } } } },
+      {
+        clientPhones: {
+          some: {
+            isActive: true,
+            OR: [
+              { number: { contains: needle, mode: "insensitive" } },
+              { e164: { contains: needle, mode: "insensitive" } }
+            ]
+          }
+        }
+      },
       { institutionType: { is: { name: { contains: needle, mode: "insensitive" } } } }
     ]
   };
@@ -492,19 +535,54 @@ export async function listClients(query: ClientListQuery): Promise<ClientListRes
       middleName: true,
       lastName: true,
       secondLastName: true,
-      dpi: true,
       nit: true,
-      phone: true,
-      phoneE164: true,
-      email: true,
-      address: true,
-      city: true,
-      department: true,
       institutionTypeId: true,
       institutionType: { select: { name: true } },
       status: { select: { name: true } },
       deletedAt: true,
       createdAt: true,
+      clientIdentifiers: {
+        where: { isActive: true },
+        select: {
+          value: true,
+          isPrimary: true,
+          isActive: true
+        }
+      },
+      clientPhones: {
+        where: { isActive: true },
+        select: {
+          number: true,
+          e164: true,
+          isPrimary: true,
+          isActive: true
+        }
+      },
+      clientEmails: {
+        where: { isActive: true },
+        select: {
+          valueRaw: true,
+          valueNormalized: true,
+          isPrimary: true,
+          isActive: true
+        }
+      },
+      clientLocations: {
+        where: { isActive: true },
+        select: {
+          type: true,
+          isPrimary: true,
+          isActive: true,
+          address: true,
+          addressLine1: true,
+          country: true,
+          department: true,
+          city: true,
+          freeState: true,
+          freeCity: true,
+          postalCode: true
+        }
+      },
       clientDocuments: {
         where: rowDocumentWhere,
         select: {
@@ -522,20 +600,24 @@ export async function listClients(query: ClientListQuery): Promise<ClientListRes
   });
 
   const items = rows.map((row): ClientListItem => {
+    const primaryIdentifier = getPrimaryIdentifierValue(row.clientIdentifiers);
+    const primaryPhone = getPrimaryPhoneValue(row.clientPhones);
+    const primaryEmail = getPrimaryEmailValue(row.clientEmails);
+    const residence = getResidenceSnapshot(row.clientLocations);
     const snapshot: ClientCompletenessSnapshot = {
       type: row.type,
       firstName: row.firstName,
       middleName: row.middleName,
       lastName: row.lastName,
       secondLastName: row.secondLastName,
-      dpi: row.dpi,
-      phone: row.phoneE164 ?? row.phone,
+      dpi: row.type === ClientProfileType.PERSON ? primaryIdentifier : null,
+      phone: primaryPhone,
       companyName: row.companyName,
       tradeName: row.tradeName,
       nit: row.nit,
-      address: row.address,
-      city: row.city,
-      department: row.department,
+      address: residence.addressLine1,
+      city: residence.city,
+      department: residence.department,
       institutionTypeId: row.institutionTypeId
     };
 
@@ -576,7 +658,7 @@ export async function listClients(query: ClientListQuery): Promise<ClientListRes
           "Persona"
         : row.companyName || row.tradeName || "Cliente";
 
-    const identifier = row.type === ClientProfileType.PERSON ? row.dpi : row.nit;
+    const identifier = row.type === ClientProfileType.PERSON ? primaryIdentifier : row.nit;
 
     return {
       id: row.id,
@@ -584,8 +666,8 @@ export async function listClients(query: ClientListQuery): Promise<ClientListRes
       displayName,
       identifier,
       institutionTypeName: row.institutionType?.name ?? null,
-      phone: row.phoneE164 ?? row.phone,
-      email: row.email,
+      phone: primaryPhone,
+      email: primaryEmail,
       statusLabel: row.status?.name ?? null,
       isIncomplete,
       healthScore,

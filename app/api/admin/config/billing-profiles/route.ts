@@ -86,6 +86,7 @@ function serializeRow(row: BillingProfileRow) {
 export async function GET(req: NextRequest) {
   const auth = requireConfigCentralCapability(req, "CONFIG_SAT_READ");
   if (auth.response) return auth.response;
+  const tenantId = auth.user?.tenantId || "global";
 
   const delegate = getBranchBillingDelegate();
   if (!delegate?.findMany) {
@@ -99,6 +100,7 @@ export async function GET(req: NextRequest) {
   try {
     const rows = await delegate.findMany({
       where: {
+        tenantId,
         ...(branchId ? { branchId } : {}),
         ...(includeInactive ? {} : { isActive: true })
       },
@@ -158,6 +160,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
+  const tenantId = auth.user?.tenantId || "global";
 
   const delegate = getBranchBillingDelegate();
   if (!delegate?.create || !delegate?.findFirst) {
@@ -185,15 +188,20 @@ export async function POST(req: NextRequest) {
       }),
       prisma.legalEntity.findUnique({
         where: { id: parsed.data.legalEntityId },
-        select: { id: true, isActive: true }
+        select: { id: true, isActive: true, tenantId: true }
       })
     ]);
 
     if (!branch) {
       return validation422("Sucursal no encontrada.", [{ path: "branchId", message: "Selecciona una sucursal válida." }]);
     }
+    if ((branch.tenantId || "global") !== tenantId) {
+      return validation422("Sucursal fuera del tenant actual.", [
+        { path: "branchId", message: "La sucursal no pertenece al tenant actual." }
+      ]);
+    }
 
-    if (!legalEntity || !legalEntity.isActive) {
+    if (!legalEntity || !legalEntity.isActive || (legalEntity.tenantId || "global") !== tenantId) {
       return validation422("Entidad legal no encontrada o inactiva.", [
         { path: "legalEntityId", message: "Selecciona una entidad legal activa." }
       ]);
@@ -238,6 +246,7 @@ export async function POST(req: NextRequest) {
 
     const duplicated = await delegate.findFirst({
       where: {
+        tenantId,
         branchId: branch.id,
         legalEntityId: legalEntity.id,
         establishmentId
@@ -251,7 +260,7 @@ export async function POST(req: NextRequest) {
 
     const created = await delegate.create({
       data: {
-        tenantId: branch.tenantId ?? auth.user?.tenantId ?? "global",
+        tenantId,
         branchId: branch.id,
         legalEntityId: legalEntity.id,
         establishmentId,

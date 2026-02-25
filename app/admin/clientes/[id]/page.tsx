@@ -86,13 +86,19 @@ function getDisplayName(client: {
   type: ClientProfileType;
   firstName: string | null;
   middleName: string | null;
+  thirdName?: string | null;
   lastName: string | null;
   secondLastName: string | null;
+  thirdLastName?: string | null;
   companyName: string | null;
   tradeName: string | null;
 }) {
   if (client.type === ClientProfileType.PERSON) {
-    return [client.firstName, client.middleName, client.lastName, client.secondLastName].filter(Boolean).join(" ") || "Persona";
+    return (
+      [client.firstName, client.middleName, client.thirdName, client.lastName, client.secondLastName, client.thirdLastName]
+        .filter(Boolean)
+        .join(" ") || "Persona"
+    );
   }
   return client.companyName || client.tradeName || "Cliente";
 }
@@ -104,12 +110,14 @@ function getEntityLabel(client: {
   nit: string | null;
   firstName?: string | null;
   middleName?: string | null;
+  thirdName?: string | null;
   lastName?: string | null;
   secondLastName?: string | null;
+  thirdLastName?: string | null;
   dpi?: string | null;
 }) {
   if (client.type === ClientProfileType.PERSON) {
-    const fullName = [client.firstName, client.middleName, client.lastName, client.secondLastName]
+    const fullName = [client.firstName, client.middleName, client.thirdName, client.lastName, client.secondLastName, client.thirdLastName]
       .filter(Boolean)
       .join(" ")
       .trim();
@@ -448,6 +456,81 @@ export default async function ClientePortalPage({
   const isIncomplete = healthScore < 100;
   const currentUser = await getSessionUserFromCookies(cookies());
   const docPermissions = getClientDocumentPermissions(currentUser);
+  const referralSummary = await (async () => {
+    try {
+      const [referredByEdge, generatedEdges] = await Promise.all([
+        prisma.clientReferral.findFirst({
+          where: { referredClientId: clientId },
+          orderBy: { createdAt: "asc" },
+          select: {
+            referrerClient: {
+              select: {
+                id: true,
+                type: true,
+                companyName: true,
+                tradeName: true,
+                nit: true,
+                firstName: true,
+                middleName: true,
+                lastName: true,
+                secondLastName: true,
+                dpi: true,
+                deletedAt: true
+              }
+            }
+          }
+        }),
+        prisma.clientReferral.findMany({
+          where: { referrerClientId: clientId },
+          orderBy: { createdAt: "desc" },
+          take: 10,
+          select: {
+            id: true,
+            createdAt: true,
+            referredClient: {
+              select: {
+                id: true,
+                type: true,
+                companyName: true,
+                tradeName: true,
+                nit: true,
+                firstName: true,
+                middleName: true,
+                lastName: true,
+                secondLastName: true,
+                dpi: true
+              }
+            }
+          }
+        })
+      ]);
+
+      const referredBy = referredByEdge?.referrerClient
+        ? {
+            id: referredByEdge.referrerClient.id,
+            label: getEntityLabel(referredByEdge.referrerClient),
+            archived: Boolean(referredByEdge.referrerClient.deletedAt)
+          }
+        : null;
+
+      return {
+        source: "live" as const,
+        referredBy,
+        generated: generatedEdges.map((edge) => ({
+          id: edge.id,
+          createdAt: edge.createdAt,
+          clientId: edge.referredClient.id,
+          label: getEntityLabel(edge.referredClient)
+        }))
+      };
+    } catch (error) {
+      if (isPrismaMissingTableError(error)) {
+        warnDevMissingTable("clients.detail.referrals", error);
+        return { source: "compat" as const, referredBy: null, generated: [] as Array<{ id: string; createdAt: Date; clientId: string; label: string }> };
+      }
+      throw error;
+    }
+  })();
 
   const Icon =
     client.type === ClientProfileType.PERSON
@@ -767,6 +850,46 @@ export default async function ClientePortalPage({
                 >
                   Ir a documentos
                 </Link>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <p className="font-semibold text-slate-900">Referidos</p>
+              {referralSummary.source === "compat" ? (
+                <p className="mt-1 text-xs text-slate-500">No disponible (migración pendiente).</p>
+              ) : (
+                <>
+                  <p className="mt-1">
+                    Referido por:{" "}
+                    {referralSummary.referredBy ? (
+                      <Link
+                        href={`/admin/clientes/${referralSummary.referredBy.id}`}
+                        className="font-semibold text-[#2e75ba] hover:text-[#4aadf5]"
+                      >
+                        {referralSummary.referredBy.label}
+                        {referralSummary.referredBy.archived ? " (archivado)" : ""}
+                      </Link>
+                    ) : (
+                      "Sin referido"
+                    )}
+                  </p>
+                  <p className="mt-1">Referidos generados: <span className="font-semibold">{referralSummary.generated.length}</span></p>
+                  {referralSummary.generated.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {referralSummary.generated.map((item) => (
+                        <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-2 py-1">
+                          <span className="truncate text-xs text-slate-700">{item.label}</span>
+                          <Link
+                            href={`/admin/clientes/${item.clientId}`}
+                            className="text-xs font-semibold text-[#2e75ba] hover:text-[#4aadf5]"
+                          >
+                            Ver ficha
+                          </Link>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </section>

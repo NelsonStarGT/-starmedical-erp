@@ -1,11 +1,13 @@
 import AdminShellClient from "./AdminShellClient";
-import type { CSSProperties } from "react";
 import { cookies } from "next/headers";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { resolveReceptionRole } from "@/lib/reception/rbac";
 import { canSeePortales } from "@/components/layout/nav";
 import { resolveActiveBranchWithMeta } from "@/lib/branch/activeBranch";
-import { getTenantThemeConfig } from "@/lib/config-central";
+import { getTenantNavigationPolicy, getTenantThemeConfig } from "@/lib/config-central";
+import { resolveConfigCapabilities } from "@/lib/security/configCapabilities";
+import { tenantIdFromUser } from "@/lib/tenant";
+import { buildThemeCssVariables } from "@/lib/theme/utils";
 
 function normalizeRole(role: string) {
   return role.trim().toUpperCase().replace(/\s+/g, "_");
@@ -19,41 +21,6 @@ function hasAnyRole(roles: string[], allowed: string[]) {
 function hasPermission(permissions: string[], key: string) {
   const permissionSet = new Set(permissions.map((perm) => perm.toUpperCase()));
   return permissionSet.has(key.toUpperCase());
-}
-
-function fontFamilyFromKey(key: string) {
-  switch (key) {
-    case "poppins":
-      return "\"Poppins\", \"Inter\", system-ui, sans-serif";
-    case "montserrat":
-      return "\"Montserrat\", \"Inter\", system-ui, sans-serif";
-    case "nunito":
-      return "\"Nunito\", \"Inter\", system-ui, sans-serif";
-    case "roboto":
-      return "\"Roboto\", \"Inter\", system-ui, sans-serif";
-    case "inter":
-    default:
-      return "\"Inter\", \"SF Pro Display\", \"SF Pro Text\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif";
-  }
-}
-
-function buildThemeStyleVariables(input: Awaited<ReturnType<typeof getTenantThemeConfig>>): CSSProperties {
-  return {
-    "--brand-primary": input.theme.primary,
-    "--brand-secondary": input.theme.secondary,
-    "--brand-corporate": input.theme.primary,
-    "--brand-accent": input.theme.accent,
-    "--brand-soft": "#E8F2FF",
-    "--brand-text": input.theme.text,
-    "--diagnostics-primary": input.theme.accent,
-    "--diagnostics-secondary": input.theme.secondary,
-    "--diagnostics-corporate": input.theme.primary,
-    "--diagnostics-background": input.theme.bg,
-    "--app-bg": input.theme.bg,
-    "--app-surface": input.theme.surface,
-    "--app-text": input.theme.text,
-    "--font-sans": fontFamilyFromKey(input.fontKey)
-  } as CSSProperties;
 }
 
 export default async function AdminShellServer({
@@ -72,8 +39,13 @@ export default async function AdminShellServer({
   const canAccessMedicalOperations = hasAnyRole(roles, ["SUPER_ADMIN", "ADMIN", "SUPERVISOR"]);
   const canAccessMedicalConfig = hasPermission(permissions, "SYSTEM:ADMIN") || hasAnyRole(roles, ["SUPER_ADMIN", "ADMIN"]);
   const canAccessPortales = canSeePortales({ roles, permissions });
-  const themeConfig = await getTenantThemeConfig().catch(() => null);
-  const themeStyle = themeConfig ? buildThemeStyleVariables(themeConfig) : undefined;
+  const configCapabilities = resolveConfigCapabilities(user);
+  const tenantId = tenantIdFromUser(user);
+  const [themeConfig, navigationPolicy] = await Promise.all([
+    getTenantThemeConfig(tenantId).catch(() => null),
+    getTenantNavigationPolicy(tenantId).catch(() => null)
+  ]);
+  const themeStyle = themeConfig ? buildThemeCssVariables(themeConfig) : undefined;
 
   let activeBranchId: string | null = null;
   let activeBranchName: string | null = null;
@@ -110,6 +82,19 @@ export default async function AdminShellServer({
       canAccessMedicalOperations={canAccessMedicalOperations}
       canAccessMedicalConfig={canAccessMedicalConfig}
       canAccessPortales={canAccessPortales}
+      canAccessConfigOps={configCapabilities.canAccessConfigOps}
+      canAccessConfigProcessing={configCapabilities.canViewConfigProcessing}
+      defaultDensityMode={themeConfig?.densityDefault}
+      tenantNavigationPolicy={
+        navigationPolicy
+          ? {
+              defaultSidebarCollapsed: navigationPolicy.defaultSidebarCollapsed,
+              forceSidebarCollapsed: navigationPolicy.forceSidebarCollapsed,
+              moduleOrderingEnabled: navigationPolicy.moduleOrderingEnabled,
+              moduleOrder: navigationPolicy.moduleOrder
+            }
+          : undefined
+      }
     >
       {children}
     </AdminShellClient>

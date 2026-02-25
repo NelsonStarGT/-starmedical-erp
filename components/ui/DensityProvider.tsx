@@ -2,30 +2,19 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
-
-type DensityMode = "auto" | "compact" | "comfortable";
-type DensityResolved = "compact" | "comfortable";
+import { resolveDensityModePreference, type DensityMode } from "@/lib/ui/persistence";
 
 type DensityContextValue = {
   mode: DensityMode;
-  resolved: DensityResolved;
   setMode: (mode: DensityMode) => void;
 };
 
 const STORAGE_KEY = "star-erp-density-mode";
-const MOBILE_BREAKPOINT = 1100;
 
 const DensityContext = createContext<DensityContextValue>({
-  mode: "auto",
-  resolved: "comfortable",
+  mode: "normal",
   setMode: () => undefined
 });
-
-function toResolved(mode: DensityMode, viewportWidth: number): DensityResolved {
-  if (mode === "compact") return "compact";
-  if (mode === "comfortable") return "comfortable";
-  return viewportWidth <= MOBILE_BREAKPOINT ? "compact" : "comfortable";
-}
 
 export function useDensity() {
   return useContext(DensityContext);
@@ -33,37 +22,30 @@ export function useDensity() {
 
 export default function DensityProvider({
   children,
-  className
+  className,
+  defaultMode = "normal"
 }: {
   children: React.ReactNode;
   className?: string;
+  defaultMode?: DensityMode;
 }) {
-  const [mode, setMode] = useState<DensityMode>("auto");
-  const [viewportWidth, setViewportWidth] = useState(1280);
+  const [mode, setMode] = useState<DensityMode>(defaultMode);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === "compact" || stored === "comfortable" || stored === "auto") {
-      setMode(stored);
-    }
-
-    const applyViewport = () => {
-      setViewportWidth(window.innerWidth);
-    };
-
-    applyViewport();
-    window.addEventListener("resize", applyViewport);
-    return () => window.removeEventListener("resize", applyViewport);
-  }, []);
-
-  const resolved = useMemo(() => toResolved(mode, viewportWidth), [mode, viewportWidth]);
+    setMode(
+      resolveDensityModePreference({
+        storedValue: stored,
+        defaultMode
+      })
+    );
+  }, [defaultMode]);
 
   const contextValue = useMemo<DensityContextValue>(
     () => ({
       mode,
-      resolved,
       setMode: (nextMode) => {
         setMode(nextMode);
         if (typeof window !== "undefined") {
@@ -71,12 +53,12 @@ export default function DensityProvider({
         }
       }
     }),
-    [mode, resolved]
+    [mode]
   );
 
   return (
     <DensityContext.Provider value={contextValue}>
-      <div className={cn("erp-density", className)} data-density={resolved}>
+      <div className={cn("erp-density", className)} data-density={mode}>
         {children}
       </div>
     </DensityContext.Provider>

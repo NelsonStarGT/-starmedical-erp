@@ -1,391 +1,316 @@
-"use client";
+import Link from "next/link";
+import { ClientCatalogType } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { safeGetClientRulesConfig } from "@/lib/clients/rulesConfig";
+import ClientCatalogManager from "@/components/clients/config/ClientCatalogManager";
+import ClientRulesEditor from "@/components/clients/config/ClientRulesEditor";
+import ClientRequiredDocumentsRulesEditor from "@/components/clients/config/ClientRequiredDocumentsRulesEditor";
+import GeoCatalogManager from "@/components/clients/config/GeoCatalogManager";
+import ClientAcquisitionSourceManager from "@/components/clients/config/ClientAcquisitionSourceManager";
+import { cn } from "@/lib/utils";
 
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { useClientData } from "@/components/clients/ClientProvider";
-import {
-  CondicionPago,
-  DocumentoClienteDefinicion,
-  SectorIndustria,
-  TipoCliente,
-  TipoRelacionComercial
-} from "@/lib/types";
+type Section = "catalogos" | "canales" | "reglas" | "validaciones" | "futuro";
 
-export default function ClientesConfiguracion() {
-  const {
-    tiposCliente,
-    sectores,
-    relaciones,
-    condicionesPago,
-    documentosDef,
-    addTipoCliente,
-    addSector,
-    addRelacion,
-    addCondicionPago,
-    addDocumentoDef
-  } = useClientData();
+type SearchParams = {
+  section?: string | string[];
+};
 
-  const [tipoForm, setTipoForm] = useState<Partial<TipoCliente>>({
-    nombreTipo: "",
-    descripcion: "",
-    estado: "Activo"
-  });
-  const [sectorForm, setSectorForm] = useState<Partial<SectorIndustria>>({
-    nombreSector: "",
-    descripcion: "",
-    estado: "Activo"
-  });
-  const [relacionForm, setRelacionForm] = useState<Partial<TipoRelacionComercial>>({
-    nombre: "",
-    descripcion: ""
-  });
-  const [condicionForm, setCondicionForm] = useState<Partial<CondicionPago>>({
-    nombreCondicion: "",
-    descripcion: ""
-  });
-  const [docForm, setDocForm] = useState<Partial<DocumentoClienteDefinicion>>({
-    nombreDocumento: "",
-    aplicaA: "Todos",
-    esObligatorio: false,
-    tieneVencimiento: false
-  });
-  const [message, setMessage] = useState("");
+const SECTION_TABS: Array<{ key: Section; label: string; description: string }> = [
+  { key: "catalogos", label: "Catálogos", description: "Catálogos maestros usados por formularios de Clientes" },
+  {
+    key: "canales",
+    label: "Canales y comercial",
+    description: "Canal de adquisición separado de relación comercial legacy"
+  },
+  { key: "reglas", label: "Reglas", description: "Reglas operativas de score, alertas y documentos" },
+  {
+    key: "validaciones",
+    label: "Validaciones por país",
+    description: "Consola técnica para geografía y validaciones dinámicas"
+  },
+  { key: "futuro", label: "Futuro", description: "Funciones deshabilitadas hasta activar Finanzas/Contabilidad" }
+];
 
-  const nextId = (list: { id: number }[]) =>
-    list.length ? Math.max(...list.map((i) => i.id)) + 1 : 1;
+function firstParam(value?: string | string[]) {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
 
-  const handleAddTipo = () => {
-    if (!tipoForm.nombreTipo) return;
-    addTipoCliente({
-      id: nextId(tiposCliente),
-      nombreTipo: tipoForm.nombreTipo,
-      descripcion: tipoForm.descripcion,
-      estado: (tipoForm.estado as TipoCliente["estado"]) || "Activo"
-    });
-    setTipoForm({ nombreTipo: "", descripcion: "", estado: "Activo" });
-    setMessage("Tipo de cliente agregado.");
-  };
+function toSection(value?: string | null): Section {
+  const normalized = (value || "").toLowerCase();
+  if (normalized === "catalogos" || normalized === "canales" || normalized === "reglas" || normalized === "validaciones" || normalized === "futuro") {
+    return normalized;
+  }
+  return "catalogos";
+}
 
-  const handleAddSector = () => {
-    if (!sectorForm.nombreSector) return;
-    addSector({
-      id: nextId(sectores),
-      nombreSector: sectorForm.nombreSector,
-      descripcion: sectorForm.descripcion,
-      estado: (sectorForm.estado as SectorIndustria["estado"]) || "Activo"
-    });
-    setSectorForm({ nombreSector: "", descripcion: "", estado: "Activo" });
-    setMessage("Sector agregado.");
-  };
+export default async function ClientesConfiguracionPage({
+  searchParams
+}: {
+  searchParams?: Promise<SearchParams | undefined> | SearchParams;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const section = toSection(firstParam(resolvedSearchParams?.section));
 
-  const handleAddRelacion = () => {
-    if (!relacionForm.nombre) return;
-    addRelacion({
-      id: nextId(relaciones),
-      nombre: relacionForm.nombre,
-      descripcion: relacionForm.descripcion
-    });
-    setRelacionForm({ nombre: "", descripcion: "" });
-    setMessage("Relación comercial agregada.");
-  };
-
-  const handleAddCondicion = () => {
-    if (!condicionForm.nombreCondicion) return;
-    addCondicionPago({
-      id: nextId(condicionesPago),
-      nombreCondicion: condicionForm.nombreCondicion,
-      descripcion: condicionForm.descripcion
-    });
-    setCondicionForm({ nombreCondicion: "", descripcion: "" });
-    setMessage("Condición de pago agregada.");
-  };
-
-  const handleAddDocumento = () => {
-    if (!docForm.nombreDocumento) return;
-    addDocumentoDef({
-      id: nextId(documentosDef),
-      nombreDocumento: docForm.nombreDocumento,
-      aplicaA: docForm.aplicaA as DocumentoClienteDefinicion["aplicaA"],
-      esObligatorio: Boolean(docForm.esObligatorio),
-      tieneVencimiento: Boolean(docForm.tieneVencimiento)
-    });
-    setDocForm({
-      nombreDocumento: "",
-      aplicaA: "Todos",
-      esObligatorio: false,
-      tieneVencimiento: false
-    });
-    setMessage("Documento agregado.");
-  };
+  const [
+    personCategories,
+    professions,
+    maritalStatuses,
+    academicLevels,
+    companyCategories,
+    institutionCategories,
+    institutionTypes,
+    clientStatuses,
+    relationTypes,
+    documentTypes,
+    acquisitionSources,
+    acquisitionDetails,
+    socialNetworks,
+    relationshipTypes,
+    locationTypes,
+    rulesConfig,
+    requiredRules,
+    requiredDocumentTypes
+  ] = await Promise.all([
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.PERSON_CATEGORY },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.PERSON_PROFESSION },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.MARITAL_STATUS },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.ACADEMIC_LEVEL },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.COMPANY_CATEGORY },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.INSTITUTION_CATEGORY },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.INSTITUTION_TYPE },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.CLIENT_STATUS },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.RELATION_TYPE },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.DOCUMENT_TYPE },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientAcquisitionSource.findMany({
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, code: true, category: true, isActive: true }
+    }),
+    prisma.clientAcquisitionDetailOption.findMany({
+      orderBy: [{ source: { name: "asc" } }, { name: "asc" }],
+      select: {
+        id: true,
+        sourceId: true,
+        code: true,
+        name: true,
+        isActive: true
+      }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.SOCIAL_NETWORK },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.RELATIONSHIP_TYPE },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.LOCATION_TYPE },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    }),
+    safeGetClientRulesConfig("clients.config"),
+    prisma.clientRequiredDocumentRule.findMany({
+      orderBy: [{ clientType: "asc" }, { documentType: { name: "asc" } }],
+      select: {
+        id: true,
+        clientType: true,
+        documentTypeId: true,
+        isRequired: true,
+        requiresApproval: true,
+        requiresExpiry: true,
+        weight: true,
+        isActive: true,
+        documentType: { select: { name: true } }
+      }
+    }),
+    prisma.clientCatalogItem.findMany({
+      where: { type: ClientCatalogType.DOCUMENT_TYPE },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, isActive: true }
+    })
+  ]);
 
   return (
-    <div className="space-y-6">
-      {message && (
-        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-          {message}
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-[#dce7f5] bg-white p-5 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#2e75ba]">Clientes</p>
+        <h1 className="mt-1 text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
+          Configuración · Data Console
+        </h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Consola de gobierno de datos para formularios, reglas y validaciones de Clientes. Escalable en tablas, sin cards dispersas.
+        </p>
+      </section>
+
+      <section className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {SECTION_TABS.map((tab) => (
+            <Link
+              key={tab.key}
+              href={`/admin/clientes/configuracion?section=${tab.key}`}
+              className={cn(
+                "inline-flex items-center rounded-full border px-4 py-2 text-sm font-semibold transition",
+                section === tab.key
+                  ? "border-[#2e75ba] bg-[#2e75ba] text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              )}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-slate-500">{SECTION_TABS.find((tab) => tab.key === section)?.description}</p>
+      </section>
+
+      {section === "catalogos" && (
+        <div className="grid gap-4 xl:grid-cols-2">
+          <ClientCatalogManager title="Categorías de persona" type={ClientCatalogType.PERSON_CATEGORY} items={personCategories} />
+          <ClientCatalogManager title="Profesiones" type={ClientCatalogType.PERSON_PROFESSION} items={professions} />
+          <ClientCatalogManager title="Estados civiles" type={ClientCatalogType.MARITAL_STATUS} items={maritalStatuses} />
+          <ClientCatalogManager title="Niveles académicos" type={ClientCatalogType.ACADEMIC_LEVEL} items={academicLevels} />
+          <ClientCatalogManager title="Categorías de empresa" type={ClientCatalogType.COMPANY_CATEGORY} items={companyCategories} />
+          <ClientCatalogManager title="Categorías de institución" type={ClientCatalogType.INSTITUTION_CATEGORY} items={institutionCategories} />
+          <ClientCatalogManager title="Tipos de institución" type={ClientCatalogType.INSTITUTION_TYPE} items={institutionTypes} />
+          <ClientCatalogManager title="Estados de cliente" type={ClientCatalogType.CLIENT_STATUS} items={clientStatuses} />
+          <ClientCatalogManager title="Tipos de documento" type={ClientCatalogType.DOCUMENT_TYPE} items={documentTypes} />
+          <ClientCatalogManager title="Tipos de ubicación" type={ClientCatalogType.LOCATION_TYPE} items={locationTypes} />
         </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Tipos de cliente</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 overflow-auto">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Nombre</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Estado</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Descripción</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {tiposCliente.map((t) => (
-                  <tr key={t.id}>
-                    <td className="px-4 py-2 text-sm font-semibold text-slate-900">{t.nombreTipo}</td>
-                    <td className="px-4 py-2">
-                      <Badge variant={t.estado === "Activo" ? "success" : "neutral"}>{t.estado}</Badge>
-                    </td>
-                    <td className="px-4 py-2 text-sm text-slate-700">{t.descripcion}</td>
+      {section === "canales" && (
+        <div className="space-y-4">
+          <ClientAcquisitionSourceManager sources={acquisitionSources} details={acquisitionDetails} />
+          <section className="rounded-2xl border border-[#dce7f5] bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-diagnostics-corporate">Canales y comercial</p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
+              Relación comercial (legacy)
+            </h3>
+            <p className="text-sm text-slate-600">Se mantiene por compatibilidad histórica. No reemplaza el canal de adquisición.</p>
+            <div className="mt-4">
+              <ClientCatalogManager title="Tipo de relación comercial" type={ClientCatalogType.RELATION_TYPE} items={relationTypes} />
+            </div>
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              <ClientCatalogManager title="Tipos de parentesco" type={ClientCatalogType.RELATIONSHIP_TYPE} items={relationshipTypes} />
+              <ClientCatalogManager title="Redes sociales" type={ClientCatalogType.SOCIAL_NETWORK} items={socialNetworks} />
+            </div>
+          </section>
+        </div>
+      )}
+
+      {section === "reglas" && (
+        <div className="space-y-4">
+          <ClientRulesEditor
+            initialAlertDays30={rulesConfig.alertDays30}
+            initialAlertDays15={rulesConfig.alertDays15}
+            initialAlertDays7={rulesConfig.alertDays7}
+            initialHealthProfileWeight={rulesConfig.healthProfileWeight}
+            initialHealthDocsWeight={rulesConfig.healthDocsWeight}
+          />
+
+          <ClientRequiredDocumentsRulesEditor
+            rules={requiredRules.map((rule) => ({
+              id: rule.id,
+              clientType: rule.clientType,
+              documentTypeId: rule.documentTypeId,
+              documentTypeName: rule.documentType.name,
+              isRequired: rule.isRequired,
+              requiresApproval: rule.requiresApproval,
+              requiresExpiry: rule.requiresExpiry,
+              weight: rule.weight,
+              isActive: rule.isActive
+            }))}
+            documentTypeOptions={requiredDocumentTypes}
+          />
+        </div>
+      )}
+
+      {section === "validaciones" && (
+        <div className="space-y-4">
+          <GeoCatalogManager />
+          <section className="rounded-2xl border border-[#dce7f5] bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-diagnostics-corporate">Validaciones por país</p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
+              Tipos de documento activos
+            </h3>
+            <p className="text-sm text-slate-600">Los tipos de documento alimentan validaciones dinámicas en formularios y panel de documentos.</p>
+            <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-[#f8fafc] text-[#2e75ba]">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Documento</th>
+                    <th className="px-3 py-2 text-left font-semibold">Descripción</th>
+                    <th className="px-3 py-2 text-left font-semibold">Estado</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="space-y-3">
-            <input
-              placeholder="Nombre del tipo"
-              value={tipoForm.nombreTipo}
-              onChange={(e) => setTipoForm({ ...tipoForm, nombreTipo: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            />
-            <textarea
-              placeholder="Descripción"
-              value={tipoForm.descripcion}
-              onChange={(e) => setTipoForm({ ...tipoForm, descripcion: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            />
-            <select
-              value={tipoForm.estado}
-              onChange={(e) => setTipoForm({ ...tipoForm, estado: e.target.value as TipoCliente["estado"] })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            >
-              <option value="Activo">Activo</option>
-              <option value="Inactivo">Inactivo</option>
-            </select>
-            <button
-              onClick={handleAddTipo}
-              className="w-full rounded-xl bg-brand-primary px-4 py-2 text-white font-semibold shadow-sm hover:shadow-md"
-            >
-              Guardar tipo
-            </button>
-          </div>
-        </CardContent>
-      </Card>
+                </thead>
+                <tbody>
+                  {documentTypes.map((item, index) => (
+                    <tr key={item.id} className={index % 2 ? "bg-slate-50/60" : "bg-white"}>
+                      <td className="px-3 py-2 font-semibold text-slate-900">{item.name}</td>
+                      <td className="px-3 py-2 text-slate-600">{item.description || "—"}</td>
+                      <td className="px-3 py-2">{item.isActive ? "Activo" : "Inactivo"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Sectores / Industrias</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 overflow-auto">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Sector</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Estado</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Descripción</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {sectores.map((s) => (
-                  <tr key={s.id}>
-                    <td className="px-4 py-2 text-sm font-semibold text-slate-900">{s.nombreSector}</td>
-                    <td className="px-4 py-2">
-                      <Badge variant={s.estado === "Activo" ? "success" : "neutral"}>{s.estado}</Badge>
-                    </td>
-                    <td className="px-4 py-2 text-sm text-slate-700">{s.descripcion}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="space-y-3">
-            <input
-              placeholder="Nombre del sector"
-              value={sectorForm.nombreSector}
-              onChange={(e) => setSectorForm({ ...sectorForm, nombreSector: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            />
-            <textarea
-              placeholder="Descripción"
-              value={sectorForm.descripcion}
-              onChange={(e) => setSectorForm({ ...sectorForm, descripcion: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            />
-            <select
-              value={sectorForm.estado}
-              onChange={(e) => setSectorForm({ ...sectorForm, estado: e.target.value as SectorIndustria["estado"] })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            >
-              <option value="Activo">Activo</option>
-              <option value="Inactivo">Inactivo</option>
-            </select>
-            <button
-              onClick={handleAddSector}
-              className="w-full rounded-xl bg-brand-primary px-4 py-2 text-white font-semibold shadow-sm hover:shadow-md"
-            >
-              Guardar sector
-            </button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Tipos de relación comercial</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-2">
-            {relaciones.map((r) => (
-              <div key={r.id} className="rounded-xl border border-slate-200 p-3 bg-white">
-                <p className="text-sm font-semibold text-slate-900">{r.nombre}</p>
-                <p className="text-xs text-slate-500">{r.descripcion}</p>
-              </div>
-            ))}
-          </div>
-          <div className="space-y-3">
-            <input
-              placeholder="Nombre"
-              value={relacionForm.nombre}
-              onChange={(e) => setRelacionForm({ ...relacionForm, nombre: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            />
-            <textarea
-              placeholder="Descripción"
-              value={relacionForm.descripcion}
-              onChange={(e) => setRelacionForm({ ...relacionForm, descripcion: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            />
-            <button
-              onClick={handleAddRelacion}
-              className="w-full rounded-xl bg-brand-primary px-4 py-2 text-white font-semibold shadow-sm hover:shadow-md"
-            >
-              Guardar relación
-            </button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Condiciones de pago</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-2">
-            {condicionesPago.map((c) => (
-              <div key={c.id} className="rounded-xl border border-slate-200 p-3 bg-white">
-                <p className="text-sm font-semibold text-slate-900">{c.nombreCondicion}</p>
-                <p className="text-xs text-slate-500">{c.descripcion}</p>
-              </div>
-            ))}
-          </div>
-          <div className="space-y-3">
-            <input
-              placeholder="Nombre de la condición"
-              value={condicionForm.nombreCondicion}
-              onChange={(e) => setCondicionForm({ ...condicionForm, nombreCondicion: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            />
-            <textarea
-              placeholder="Descripción"
-              value={condicionForm.descripcion}
-              onChange={(e) => setCondicionForm({ ...condicionForm, descripcion: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            />
-            <button
-              onClick={handleAddCondicion}
-              className="w-full rounded-xl bg-brand-primary px-4 py-2 text-white font-semibold shadow-sm hover:shadow-md"
-            >
-              Guardar condición
-            </button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Documentos requeridos</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 overflow-auto">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Documento</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Aplica a</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Obligatorio</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Vencimiento</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {documentosDef.map((d) => (
-                  <tr key={d.id}>
-                    <td className="px-4 py-2 text-sm font-semibold text-slate-900">{d.nombreDocumento}</td>
-                    <td className="px-4 py-2 text-sm text-slate-700">{d.aplicaA}</td>
-                    <td className="px-4 py-2 text-sm text-slate-700">{d.esObligatorio ? "Sí" : "No"}</td>
-                    <td className="px-4 py-2 text-sm text-slate-700">{d.tieneVencimiento ? "Sí" : "No"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="space-y-3">
-            <input
-              placeholder="Nombre del documento"
-              value={docForm.nombreDocumento}
-              onChange={(e) => setDocForm({ ...docForm, nombreDocumento: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            />
-            <select
-              value={docForm.aplicaA}
-              onChange={(e) =>
-                setDocForm({ ...docForm, aplicaA: e.target.value as DocumentoClienteDefinicion["aplicaA"] })
-              }
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-            >
-              <option value="Todos">Todos</option>
-              <option value="Empresa">Empresa</option>
-              <option value="Persona">Persona</option>
-              <option value="Institución">Institución</option>
-            </select>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={Boolean(docForm.esObligatorio)}
-                onChange={(e) => setDocForm({ ...docForm, esObligatorio: e.target.checked })}
-              />
-              Obligatorio
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={Boolean(docForm.tieneVencimiento)}
-                onChange={(e) => setDocForm({ ...docForm, tieneVencimiento: e.target.checked })}
-              />
-              Requiere fecha de vencimiento
-            </label>
-            <button
-              onClick={handleAddDocumento}
-              className="w-full rounded-xl bg-brand-primary px-4 py-2 text-white font-semibold shadow-sm hover:shadow-md"
-            >
-              Guardar documento
-            </button>
-          </div>
-        </CardContent>
-      </Card>
+      {section === "futuro" && (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">Futuro</p>
+          <h3 className="mt-1 text-lg font-semibold text-amber-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
+            Condiciones de pago
+          </h3>
+          <p className="mt-2 text-sm text-amber-900/90">
+            Disponible cuando se active Facturación/Contabilidad. Esta sección queda deshabilitada para evitar deuda conceptual en Clientes.
+          </p>
+        </section>
+      )}
     </div>
   );
 }

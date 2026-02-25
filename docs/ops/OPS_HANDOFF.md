@@ -51,3 +51,9 @@ Son rutas y servicios que mezclan seguridad (tokens/HMAC), acciones críticas (r
   - `bash scripts/ops/verify-ops.sh`
   - `bash scripts/ops/verify-tenant.sh`
 - Adjuntar evidencia (requestId/audit rows/capturas Mailpit cuando aplique).
+
+## Nota de coordinacion (Config/Security recovery)
+- La recuperacion de configuracion/seguridad (tema, patentes, billing-series, processing-service, security-policy) NO modifica el alcance OPS.
+- Hay una migracion nueva requerida para esos modulos:
+  - `prisma/migrations/20260630130000_config_security_recovery`
+- Si en ambientes viejos aparecen warnings de auditoria (`AuditLog.createdAt`), aplicar migraciones pendientes antes de continuar con pruebas de seguridad.

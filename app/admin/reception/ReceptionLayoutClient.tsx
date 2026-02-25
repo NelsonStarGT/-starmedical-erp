@@ -4,10 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
-import ReceptionModuleNav from "@/components/reception/ReceptionModuleNav";
 import AdmissionModal from "@/components/reception/AdmissionModal";
 import { AdmissionModalProvider, useAdmissionModal } from "@/components/reception/useAdmissionModal";
-import { useReceptionNav } from "@/components/reception/useReceptionNav";
 import { cn } from "@/lib/utils";
 import { RECEPTION_ROLE_LABELS, type ReceptionCapability, type ReceptionRole } from "@/lib/reception/permissions";
 import { ReceptionBranchProvider, useReceptionBranch, type ReceptionBranchOption } from "./BranchContext";
@@ -70,14 +68,6 @@ function ReceptionLayoutContent({
       capabilities.includes("VISIT_CHECKOUT_OVERRIDE"),
     [capabilities]
   );
-
-  const navItems = useReceptionNav({
-    canNavigateOperational,
-    onRequireBranch: (href) => {
-      setPendingHref(href);
-      setShowBranchPrompt(true);
-    }
-  });
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -193,9 +183,6 @@ function ReceptionLayoutContent({
           <span className="font-semibold text-[#2e75ba]">Esc</span> cerrar modal.
         </div>
 
-        <div className="mt-4">
-          <ReceptionModuleNav items={navItems} />
-        </div>
       </section>
 
       {children}

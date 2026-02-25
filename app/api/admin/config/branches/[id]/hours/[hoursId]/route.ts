@@ -39,6 +39,7 @@ export async function PATCH(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
 
   try {
     const body = await req.json().catch(() => null);
@@ -51,6 +52,14 @@ export async function PATCH(
           message: issue.message
         }))
       );
+    }
+
+    const branch = await prisma.branch.findFirst({
+      where: { id: resolved.id, tenantId },
+      select: { id: true }
+    });
+    if (!branch) {
+      return notFound404("Sucursal no encontrada.");
     }
 
     const before = await prisma.branchBusinessHours.findUnique({

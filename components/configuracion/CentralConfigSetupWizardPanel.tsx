@@ -8,10 +8,12 @@ export type ConfiguracionAdvancedTabTarget =
   | "empresa"
   | "sucursales"
   | "tema"
+  | "navegacion"
+  | "patentes"
   | "facturacion"
-  | "permisos"
-  | "correo"
-  | "comportamiento";
+  | "servicios"
+  | "seguridad"
+  | "comunicaciones";
 
 type SetupStatus = "OK" | "FALTA" | "BLOQUEADO";
 
@@ -29,6 +31,7 @@ type SetupSnapshot = {
   smokeCode?: string;
   companyReady: boolean;
   branchReady: boolean;
+  hoursReady: boolean;
   satReady: boolean;
   securityReady: boolean;
   communicationReady: boolean;
@@ -66,6 +69,7 @@ export default function CentralConfigSetupWizardPanel({ onOpenAdvanced, onOpenOp
     smokeCode: undefined,
     companyReady: false,
     branchReady: false,
+    hoursReady: false,
     satReady: false,
     securityReady: false,
     communicationReady: false
@@ -128,7 +132,8 @@ export default function CentralConfigSetupWizardPanel({ onOpenAdvanced, onOpenOp
         smokeOk: smokeRes.ok && smokeJson.ok === true,
         smokeCode: smokeJson.code,
         companyReady: Boolean(companyName && timezone),
-        branchReady: hasActiveBranch && hasAnyHours,
+        branchReady: hasActiveBranch,
+        hoursReady: hasAnyHours,
         satReady: hasAnySat,
         securityReady: roles.length > 0 && permissions.length > 0,
         communicationReady: Boolean(smtpHost && fromEmail)
@@ -155,7 +160,7 @@ export default function CentralConfigSetupWizardPanel({ onOpenAdvanced, onOpenOp
           ? "Smoke de Configuración Central en estado OK."
           : `Smoke falló o no ejecutado (${snapshot.smokeCode || "sin código"}).`,
         status: smokeStatus,
-        actionLabel: "Ir a Operación",
+        actionLabel: "Ir a corregir",
         action: onOpenOperation
       },
       {
@@ -163,40 +168,42 @@ export default function CentralConfigSetupWizardPanel({ onOpenAdvanced, onOpenOp
         title: "Paso 2 · Empresa / Tenant",
         description: "Datos legales y de zona horaria para el ERP.",
         status: snapshot.companyReady ? "OK" : "FALTA",
-        actionLabel: "Ir a Empresa",
+        actionLabel: "Ir a corregir",
         action: () => onOpenAdvanced("empresa")
       },
       {
         id: "step-3",
-        title: "Paso 3 · Sucursales y horarios",
-        description: "Define sede activa y horario vigente sin solapes.",
+        title: "Paso 3 · Sucursales",
+        description: "Debe existir al menos una sucursal activa.",
         status: snapshot.branchReady ? "OK" : "FALTA",
-        actionLabel: "Ir a Sucursales",
+        actionLabel: "Ir a corregir",
         action: () => onOpenAdvanced("sucursales")
       },
       {
         id: "step-4",
-        title: "Paso 4 · SAT/FEL",
-        description: "Configura establecimientos SAT por sucursal (draft/activo).",
-        status: snapshot.satReady ? "OK" : "FALTA",
-        actionLabel: "Ir a Facturación",
-        action: () => onOpenAdvanced("facturacion")
+        title: "Paso 4 · Horarios vigentes",
+        description: "Publica al menos una vigencia de horario sin solapes.",
+        status: snapshot.hoursReady ? "OK" : "FALTA",
+        actionLabel: "Ir a corregir",
+        action: () => onOpenAdvanced("sucursales")
       },
       {
         id: "step-5",
-        title: "Paso 5 · Seguridad",
-        description: "Revisa roles, permisos y trazabilidad de cambios.",
-        status: snapshot.securityReady ? "OK" : "FALTA",
-        actionLabel: "Ir a Permisos",
-        action: () => onOpenAdvanced("permisos")
+        title: "Paso 5 · SAT / FEL",
+        description: "Configura establecimientos SAT/FEL por sucursal.",
+        status: snapshot.satReady ? "OK" : "FALTA",
+        actionLabel: "Ir a corregir",
+        action: () => onOpenAdvanced("sucursales")
       },
       {
         id: "step-6",
-        title: "Paso 6 · Comunicaciones",
-        description: "Configura SMTP global y prueba de envío.",
-        status: snapshot.communicationReady ? "OK" : "FALTA",
-        actionLabel: "Ir a Correo",
-        action: () => onOpenAdvanced("correo")
+        title: "Paso 6 · Seguridad / Comunicaciones",
+        description: snapshot.communicationReady
+          ? "RBAC listo y SMTP validado."
+          : "RBAC listo. SMTP es opcional pero recomendado para alertas.",
+        status: snapshot.securityReady ? "OK" : "FALTA",
+        actionLabel: "Ir a corregir",
+        action: () => onOpenAdvanced(snapshot.securityReady ? "comunicaciones" : "seguridad")
       }
     ];
   }, [onOpenAdvanced, onOpenOperation, snapshot]);

@@ -23,6 +23,8 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
+      - name: UI token policy
+        run: npm run qa:ui:tokens
       - name: Typecheck
         run: npm run typecheck
       - name: Tests (baseline)
@@ -82,5 +84,9 @@ jobs:
         run: npm run db:migrate:deploy
       - name: Migrate status
         run: npm run db:migrate:status
+      - name: Seed central config baseline
+        run: npm run db:seed:central-config
+      - name: Config central readiness gate
+        run: npm run qa:config-central:readiness
       - name: Drift check (DB vs migrations)
         run: npm run db:migrate:diff

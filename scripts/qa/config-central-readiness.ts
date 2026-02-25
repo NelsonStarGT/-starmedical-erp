@@ -36,6 +36,13 @@ async function runDbChecks(): Promise<ReadinessCheck[]> {
     branchSatEstablishment?: { count?: () => Promise<number> };
     tenantThemeConfig?: { count?: () => Promise<number> };
     systemFeatureConfig?: { count?: () => Promise<number> };
+    legalEntity?: { count?: () => Promise<number> };
+    tenantNavigationPolicy?: { count?: () => Promise<number> };
+    tenantSecurityPolicy?: { count?: () => Promise<number> };
+    processingServiceConfig?: { count?: () => Promise<number> };
+    tenantBillingPreference?: { count?: () => Promise<number> };
+    billingSeries?: { count?: () => Promise<number> };
+    globalEmailConfig?: { count?: () => Promise<number> };
   };
 
   const checks: Array<{ key: string; tableName: string; delegate?: { count?: () => Promise<number> } }> = [
@@ -47,7 +54,30 @@ async function runDbChecks(): Promise<ReadinessCheck[]> {
       delegate: prismaClient.branchSatEstablishment
     },
     { key: "tenantThemeConfig", tableName: "TenantThemeConfig", delegate: prismaClient.tenantThemeConfig },
-    { key: "systemFeatureConfig", tableName: "SystemFeatureConfig", delegate: prismaClient.systemFeatureConfig }
+    { key: "systemFeatureConfig", tableName: "SystemFeatureConfig", delegate: prismaClient.systemFeatureConfig },
+    { key: "legalEntity", tableName: "LegalEntity", delegate: prismaClient.legalEntity },
+    {
+      key: "tenantNavigationPolicy",
+      tableName: "TenantNavigationPolicy",
+      delegate: prismaClient.tenantNavigationPolicy
+    },
+    {
+      key: "tenantSecurityPolicy",
+      tableName: "TenantSecurityPolicy",
+      delegate: prismaClient.tenantSecurityPolicy
+    },
+    {
+      key: "processingServiceConfig",
+      tableName: "ProcessingServiceConfig",
+      delegate: prismaClient.processingServiceConfig
+    },
+    {
+      key: "tenantBillingPreference",
+      tableName: "TenantBillingPreference",
+      delegate: prismaClient.tenantBillingPreference
+    },
+    { key: "billingSeries", tableName: "BillingSeries", delegate: prismaClient.billingSeries },
+    { key: "globalEmailConfig", tableName: "GlobalEmailConfig", delegate: prismaClient.globalEmailConfig }
   ];
 
   const results = await Promise.all(

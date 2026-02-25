@@ -35,7 +35,7 @@ type TradeUnitRow = TradeUnitBefore & {
 function getTradeUnitDelegate() {
   return (prisma as unknown as {
     tradeUnit?: {
-      findUnique?: (args: unknown) => Promise<TradeUnitBefore | null>;
+      findFirst?: (args: unknown) => Promise<TradeUnitBefore | null>;
       update?: (args: unknown) => Promise<TradeUnitRow>;
       delete?: (args: unknown) => Promise<{ id: string }>;
     };
@@ -75,8 +75,9 @@ export async function PUT(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
   const delegate = getTradeUnitDelegate();
-  if (!delegate?.findUnique || !delegate?.update) {
+  if (!delegate?.findFirst || !delegate?.update) {
     warnDevCentralCompat("config.tradeUnits.update", new Error("Prisma delegate missing: tradeUnit"));
     return dbNotReadyResponse();
   }
@@ -94,8 +95,8 @@ export async function PUT(
       );
     }
 
-    const before = await delegate.findUnique({
-      where: { id: resolved.id },
+    const before = await delegate.findFirst({
+      where: { id: resolved.id, tenantId },
       select: {
         id: true,
         tenantId: true,
@@ -128,15 +129,20 @@ export async function PUT(
       }),
       prisma.legalEntity.findUnique({
         where: { id: nextLegalEntityId },
-        select: { id: true, isActive: true }
+        select: { id: true, isActive: true, tenantId: true }
       })
     ]);
 
     if (!branch) {
       return validation422("Sucursal no encontrada.", [{ path: "branchId", message: "Selecciona una sucursal válida." }]);
     }
+    if ((branch.tenantId || "global") !== tenantId) {
+      return validation422("Sucursal fuera del tenant actual.", [
+        { path: "branchId", message: "La sucursal no pertenece al tenant actual." }
+      ]);
+    }
 
-    if (!legalEntity || !legalEntity.isActive) {
+    if (!legalEntity || !legalEntity.isActive || (legalEntity.tenantId || "global") !== tenantId) {
       return validation422("Entidad legal no encontrada o inactiva.", [
         { path: "legalEntityId", message: "Selecciona una entidad legal activa." }
       ]);
@@ -163,7 +169,7 @@ export async function PUT(
     const updated = await delegate.update({
       where: { id: resolved.id },
       data: {
-        tenantId: branch.tenantId ?? before.tenantId ?? auth.user?.tenantId ?? "global",
+        tenantId,
         name: parsed.data.name,
         registrationNumber:
           typeof parsed.data.registrationNumber === "undefined" ? undefined : parsed.data.registrationNumber,
@@ -218,15 +224,16 @@ export async function PATCH(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
   const delegate = getTradeUnitDelegate();
-  if (!delegate?.findUnique || !delegate?.update) {
+  if (!delegate?.findFirst || !delegate?.update) {
     warnDevCentralCompat("config.tradeUnits.toggle", new Error("Prisma delegate missing: tradeUnit"));
     return dbNotReadyResponse();
   }
 
   try {
-    const before = await delegate.findUnique({
-      where: { id: resolved.id },
+    const before = await delegate.findFirst({
+      where: { id: resolved.id, tenantId },
       select: {
         id: true,
         tenantId: true,
@@ -310,15 +317,16 @@ export async function DELETE(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
   const delegate = getTradeUnitDelegate();
-  if (!delegate?.findUnique || !delegate?.delete) {
+  if (!delegate?.findFirst || !delegate?.delete) {
     warnDevCentralCompat("config.tradeUnits.delete", new Error("Prisma delegate missing: tradeUnit"));
     return dbNotReadyResponse();
   }
 
   try {
-    const before = await delegate.findUnique({
-      where: { id: resolved.id },
+    const before = await delegate.findFirst({
+      where: { id: resolved.id, tenantId },
       select: {
         id: true,
         tenantId: true,

@@ -22,6 +22,11 @@ type LocationRow = {
 
 const LOCATION_LABELS: Record<ClientLocationType, string> = {
   GENERAL: "General",
+  MAIN: "Principal",
+  BRANCH: "Sucursal",
+  OFFICE: "Oficina",
+  PLANT: "Planta",
+  STORE: "Tienda",
   FISCAL: "Fiscal",
   HOME: "Vivienda",
   WORK: "Trabajo",

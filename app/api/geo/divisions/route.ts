@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireAuth } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,10 +32,13 @@ async function resolveCountryId(country: string) {
 }
 
 export async function GET(req: NextRequest) {
+  const auth = requireAuth(req);
+  if (auth.errorResponse) return auth.errorResponse;
+
   const params = req.nextUrl.searchParams;
-  const countryParam = (params.get("country") || "").trim();
+  const countryParam = (params.get("countryId") || params.get("country") || "").trim();
   if (!countryParam) {
-    return NextResponse.json({ ok: false, error: "Parámetro country requerido." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Parámetro countryId requerido." }, { status: 400 });
   }
 
   const levelParam = (params.get("level") || "").trim();
@@ -53,6 +57,11 @@ export async function GET(req: NextRequest) {
 
   const q = (params.get("q") || "").trim();
   const activeOnly = params.get("active") !== "0";
+  const sourceParam = (params.get("source") || "").trim().toLowerCase();
+  const source =
+    sourceParam === "official" || sourceParam === "operational" || sourceParam === "seed_baseline"
+      ? sourceParam
+      : null;
   const limit = parseLimit(params.get("limit"));
 
   const rows = await prisma.geoDivision.findMany({
@@ -61,6 +70,7 @@ export async function GET(req: NextRequest) {
       level,
       ...(parentIdParam !== null ? { parentId } : {}),
       ...(activeOnly ? { isActive: true } : {}),
+      ...(source ? { dataSource: source } : {}),
       ...(q
         ? {
             OR: [
@@ -79,7 +89,8 @@ export async function GET(req: NextRequest) {
       code: true,
       name: true,
       parentId: true,
-      isActive: true
+      isActive: true,
+      dataSource: true
     }
   });
 

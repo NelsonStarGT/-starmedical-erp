@@ -1,29 +1,30 @@
 import {
-  HomeIcon,
-  UsersIcon,
-  UserGroupIcon,
-  BuildingOffice2Icon,
-  Squares2X2Icon,
-  ClipboardDocumentListIcon,
-  CalendarDaysIcon,
-  Cog6ToothIcon,
-  BanknotesIcon,
-  BriefcaseIcon,
-  IdentificationIcon,
-  ChatBubbleOvalLeftEllipsisIcon,
-  ClockIcon,
-  BeakerIcon,
-  BugAntIcon,
-  QueueListIcon,
-  HeartIcon,
-  ShieldCheckIcon
-} from "@heroicons/react/24/outline";
+  Banknote,
+  BriefcaseBusiness,
+  Building2,
+  CalendarDays,
+  ClipboardList,
+  Clock3,
+  FlaskConical,
+  Bug,
+  HeartPulse,
+  Home,
+  IdCard,
+  LayoutGrid,
+  MessageCircleMore,
+  Settings,
+  ShieldCheck,
+  Users,
+  Users2,
+  ListChecks,
+  type LucideIcon
+} from "lucide-react";
 
 export type NavItem = {
   label: string;
   href: string;
   disabled?: boolean;
-  icon?: typeof HomeIcon;
+  icon?: LucideIcon;
   tooltip?: string;
   children?: NavItem[];
   requiresReception?: boolean;
@@ -31,6 +32,8 @@ export type NavItem = {
   requiresMedicalOperations?: boolean;
   requiresMedicalConfig?: boolean;
   requiresPortales?: boolean;
+  requiresConfigOpsView?: boolean;
+  requiresConfigProcessingView?: boolean;
 };
 
 export type NavSection = {
@@ -43,45 +46,68 @@ export const navSections: NavSection[] = [
   {
     sectionLabel: "Comercial",
     items: [
-      { label: "Inicio", href: "/admin", icon: HomeIcon },
+      { label: "Inicio", href: "/admin", icon: Home },
       {
         label: "Clientes",
         href: "/admin/clientes/personas",
-        icon: UserGroupIcon
+        icon: Users2
       },
       {
         label: "Empresas",
         href: "/admin/empresas",
-        icon: BuildingOffice2Icon,
+        icon: Building2,
         children: [
           { label: "Empresas", href: "/admin/empresas" },
           { label: "Instituciones", href: "/admin/empresas/instituciones" },
           { label: "Aseguradoras", href: "/admin/empresas/aseguradoras" }
         ]
       },
-      { label: "CRM", href: "/admin/crm", icon: BriefcaseIcon },
-      { label: "Membresías", href: "/admin/membresias", icon: IdentificationIcon },
-      { label: "Agenda", href: "/admin/agenda", icon: CalendarDaysIcon }
+      { label: "CRM", href: "/admin/crm", icon: BriefcaseBusiness },
+      { label: "Membresías", href: "/admin/membresias", icon: IdCard },
+      { label: "Agenda", href: "/admin/agenda", icon: CalendarDays }
     ]
   },
   {
     sectionLabel: "Administración",
     items: [
-      { label: "Usuarios", href: "/admin/usuarios", icon: UsersIcon },
-      { label: "Recepción", href: "/admin/reception", icon: QueueListIcon, requiresReception: true },
-      { label: "RRHH", href: "/hr", icon: UserGroupIcon },
-      { label: "Inventario", href: "/admin/inventario", icon: Squares2X2Icon },
-      { label: "Finanzas", href: "/admin/finanzas", icon: BanknotesIcon },
-      { label: "Marcaje", href: "/marcaje", icon: ClockIcon },
-      { label: "Facturación", href: "/admin/facturacion", icon: ClipboardDocumentListIcon },
+      { label: "Usuarios", href: "/admin/usuarios", icon: Users },
+      { label: "Recepción", href: "/admin/reception", icon: ListChecks, requiresReception: true },
+      { label: "RRHH", href: "/hr", icon: Users2 },
+      { label: "Inventario", href: "/admin/inventario", icon: LayoutGrid },
+      { label: "Finanzas", href: "/admin/finanzas", icon: Banknote },
+      { label: "Marcaje", href: "/marcaje", icon: Clock3 },
+      { label: "Facturación", href: "/admin/facturacion", icon: ClipboardList },
       {
         label: "Portales",
         href: "/admin/portales",
-        icon: ShieldCheckIcon,
+        icon: ShieldCheck,
         tooltip: "Control center Portal Paciente/Empresa",
         requiresPortales: true
       },
-      { label: "Configuración", href: "/admin/configuracion", icon: Cog6ToothIcon }
+      {
+        label: "Configuración",
+        href: "/admin/configuracion",
+        icon: Settings,
+        children: [
+          { label: "Inicio", href: "/admin/configuracion" },
+          { label: "Tema", href: "/admin/configuracion/tema" },
+          { label: "Navegación", href: "/admin/configuracion/navegacion" },
+          { label: "Patentes", href: "/admin/configuracion/patentes" },
+          { label: "Facturación", href: "/admin/configuracion/facturacion" },
+          { label: "Servicios", href: "/admin/configuracion/servicios" },
+          {
+            label: "Procesamiento",
+            href: "/admin/configuracion/procesamiento",
+            requiresConfigProcessingView: true
+          },
+          { label: "Seguridad", href: "/admin/configuracion/seguridad" },
+          {
+            label: "Operaciones",
+            href: "/admin/configuracion/operaciones",
+            requiresConfigOpsView: true
+          }
+        ]
+      }
     ]
   },
   {
@@ -90,7 +116,7 @@ export const navSections: NavSection[] = [
       {
         label: "Módulo médico",
         href: "/modulo-medico/dashboard",
-        icon: HeartIcon,
+        icon: HeartPulse,
         children: [
           { label: "Dashboard", href: "/modulo-medico/dashboard" },
           { label: "Mis pacientes", href: "/modulo-medico/agenda" },
@@ -100,7 +126,7 @@ export const navSections: NavSection[] = [
           { label: "Configuración", href: "/modulo-medico/configuracion", requiresMedicalConfig: true }
         ]
       },
-      { label: "Encounter (demo)", href: "/modulo-medico/consultaM/demo-open", icon: QueueListIcon }
+      { label: "Encounter (demo)", href: "/modulo-medico/consultaM/demo-open", icon: ListChecks }
     ]
   },
   {
@@ -109,10 +135,10 @@ export const navSections: NavSection[] = [
       {
         label: "Diagnóstico Clínico",
         href: "/diagnostics/orders",
-        icon: BeakerIcon,
+        icon: FlaskConical,
         children: [
           { label: "Órdenes", href: "/diagnostics/orders" },
-          { label: "Health checks", href: "/diagnostics/health-checks", icon: BugAntIcon }
+          { label: "Health checks", href: "/diagnostics/health-checks", icon: Bug }
         ]
       }
     ]
@@ -123,14 +149,14 @@ export const navSections: NavSection[] = [
       {
         label: "WhatsApp",
         href: "/ops/whatsapp",
-        icon: ChatBubbleOvalLeftEllipsisIcon,
+        icon: MessageCircleMore,
         children: [{ label: "Automatizaciones", href: "/ops/whatsapp/automations" }]
       }
     ]
   },
   {
     sectionLabel: "Sistema",
-    items: [{ label: "Automatizaciones", href: "/automations", icon: Cog6ToothIcon }]
+    items: [{ label: "Automatizaciones", href: "/automations", icon: Settings }]
   }
 ];
 
@@ -142,6 +168,8 @@ export function filterNavSections(
     canAccessMedicalOperations?: boolean;
     canAccessMedicalConfig?: boolean;
     canAccessPortales?: boolean;
+    canAccessConfigOps?: boolean;
+    canAccessConfigProcessing?: boolean;
   }
 ) {
   const canAccessReception = options?.canAccessReception ?? false;
@@ -149,6 +177,8 @@ export function filterNavSections(
   const canAccessMedicalOperations = options?.canAccessMedicalOperations ?? false;
   const canAccessMedicalConfig = options?.canAccessMedicalConfig ?? false;
   const canAccessPortales = options?.canAccessPortales ?? false;
+  const canAccessConfigOps = options?.canAccessConfigOps ?? false;
+  const canAccessConfigProcessing = options?.canAccessConfigProcessing ?? false;
 
   function allowItem(item: NavItem) {
     if (item.requiresReception && !canAccessReception) return false;
@@ -156,6 +186,8 @@ export function filterNavSections(
     if (item.requiresMedicalOperations && !canAccessMedicalOperations) return false;
     if (item.requiresMedicalConfig && !canAccessMedicalConfig) return false;
     if (item.requiresPortales && !canAccessPortales) return false;
+    if (item.requiresConfigOpsView && !canAccessConfigOps) return false;
+    if (item.requiresConfigProcessingView && !canAccessConfigProcessing) return false;
     return true;
   }
 

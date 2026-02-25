@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, type SessionUser } from "@/lib/auth";
-import { hasPermission, isAdmin } from "@/lib/rbac";
+import { hasPermission, isAdmin, isOwner } from "@/lib/rbac";
 import { forbidden403 } from "@/lib/config-central/http";
 
 export const CONFIG_CENTRAL_CAPABILITIES = [
@@ -8,11 +8,20 @@ export const CONFIG_CENTRAL_CAPABILITIES = [
   "CONFIG_BRANCH_WRITE",
   "CONFIG_THEME_READ",
   "CONFIG_THEME_WRITE",
+  "CONFIG_NAVIGATION_READ",
+  "CONFIG_NAVIGATION_WRITE",
   "CONFIG_SAT_READ",
   "CONFIG_SAT_WRITE",
+  "CONFIG_BILLING_READ",
+  "CONFIG_BILLING_WRITE",
   "CONFIG_EMAIL_READ",
   "CONFIG_EMAIL_WRITE",
   "CONFIG_EMAIL_SANDBOX_READ",
+  "CONFIG_SERVICES_READ",
+  "CONFIG_SERVICES_WRITE",
+  "CONFIG_SECURITY_READ",
+  "CONFIG_SECURITY_WRITE",
+  "CONFIG_AUDIT_READ",
   "CONFIG_API_READ",
   "CONFIG_API_WRITE",
   "CONFIG_BACKUP_READ",
@@ -26,7 +35,7 @@ export function hasConfigCentralCapability(
   capability: ConfigCentralCapability
 ): boolean {
   if (!user) return false;
-  if (isAdmin(user)) return true;
+  if (isAdmin(user) || isOwner(user)) return true;
   return hasPermission(user, capability);
 }
 

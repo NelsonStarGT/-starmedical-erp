@@ -1,6 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "./lib/constants";
 
+const IS_PROD = process.env.NODE_ENV === "production";
+
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    `script-src 'self' 'unsafe-inline'${IS_PROD ? "" : " 'unsafe-eval'"} blob:`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https: ws: wss:",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'"
+  ].join("; "),
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Resource-Policy": "same-origin"
+} as const;
+
+function withSecurityHeaders(response: NextResponse) {
+  Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
+    response.headers.set(key, value);
+  });
+  if (IS_PROD) {
+    response.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  return response;
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const sessionCookie = request.cookies.get(AUTH_COOKIE_NAME)?.value;
@@ -17,31 +50,31 @@ export function proxy(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     if (pathname === "/medical" || pathname === "/medical/") {
       redirectUrl.pathname = "/modulo-medico/dashboard";
-      return NextResponse.redirect(redirectUrl, 308);
+      return withSecurityHeaders(NextResponse.redirect(redirectUrl, 308));
     }
 
     if (pathname === "/medical/clinica" || pathname === "/medical/clinica/") {
       redirectUrl.pathname = "/modulo-medico/dashboard";
-      return NextResponse.redirect(redirectUrl, 308);
+      return withSecurityHeaders(NextResponse.redirect(redirectUrl, 308));
     }
 
     if (pathname === "/medical/operativo" || pathname === "/medical/operativo/") {
       redirectUrl.pathname = "/modulo-medico/operaciones";
-      return NextResponse.redirect(redirectUrl, 308);
+      return withSecurityHeaders(NextResponse.redirect(redirectUrl, 308));
     }
 
     if (pathname.startsWith("/medical/encounter/")) {
       redirectUrl.pathname = pathname.replace("/medical/encounter/", "/modulo-medico/consultaM/");
-      return NextResponse.redirect(redirectUrl, 308);
+      return withSecurityHeaders(NextResponse.redirect(redirectUrl, 308));
     }
 
     if (pathname === "/medical/encounter") {
       redirectUrl.pathname = "/modulo-medico/consultaM";
-      return NextResponse.redirect(redirectUrl, 308);
+      return withSecurityHeaders(NextResponse.redirect(redirectUrl, 308));
     }
 
     redirectUrl.pathname = pathname.replace("/medical/", "/modulo-medico/");
-    return NextResponse.redirect(redirectUrl, 308);
+    return withSecurityHeaders(NextResponse.redirect(redirectUrl, 308));
   }
 
   const labSecCookie = request.cookies.get("lab-sec")?.value;
@@ -65,12 +98,12 @@ export function proxy(request: NextRequest) {
 
   if ((isAdminRoute || isHrRoute || isDiagnosticsRoute || isLabTestRoute) && !authenticated) {
     const loginUrl = new URL("/login", request.url);
-    return NextResponse.redirect(loginUrl);
+    return withSecurityHeaders(NextResponse.redirect(loginUrl));
   }
 
   if (isLoginRoute && authenticated) {
     const adminUrl = new URL("/admin", request.url);
-    return NextResponse.redirect(adminUrl);
+    return withSecurityHeaders(NextResponse.redirect(adminUrl));
   }
 
   if (isLabTestRoute && authenticated) {
@@ -89,9 +122,9 @@ export function proxy(request: NextRequest) {
       res.cookies.set({ name: AUTH_COOKIE_NAME, value: "", path: "/", maxAge: 0 });
       res.cookies.set({ name: "labtest-verified", value: "", path: "/", maxAge: 0 });
       res.cookies.set({ name: "labtest-last", value: "", path: "/", maxAge: 0 });
-      return res;
+      return withSecurityHeaders(res);
     }
-    const res = NextResponse.next();
+    const res = withSecurityHeaders(NextResponse.next());
     res.cookies.set({
       name: "labtest-last",
       value: now.toString(),
@@ -104,16 +137,26 @@ export function proxy(request: NextRequest) {
     const isAuthPath = pathname.startsWith("/labtest/auth");
     if (requireOtp && !isVerifyPath && !isAuthPath && !verifiedOk) {
       const verifyUrl = new URL("/labtest/verify", request.url);
-      res.cookies.set({ name: "labtest-verified", value: "", path: "/", maxAge: 0 });
-      res.cookies.set({ name: "labtest-last", value: "", path: "/", maxAge: 0 });
-      return NextResponse.redirect(verifyUrl);
+      const redirect = withSecurityHeaders(NextResponse.redirect(verifyUrl));
+      redirect.cookies.set({ name: "labtest-verified", value: "", path: "/", maxAge: 0 });
+      redirect.cookies.set({ name: "labtest-last", value: "", path: "/", maxAge: 0 });
+      return redirect;
     }
     return res;
   }
 
-  return NextResponse.next();
+  return withSecurityHeaders(NextResponse.next());
 }
 
 export const config = {
-  matcher: ["/login", "/medical", "/medical/:path*", "/admin/:path*", "/hr/:path*", "/diagnostics/:path*", "/labtest/:path*"]
+  matcher: [
+    "/login",
+    "/medical",
+    "/medical/:path*",
+    "/admin/:path*",
+    "/hr/:path*",
+    "/diagnostics/:path*",
+    "/labtest/:path*",
+    "/api/:path*"
+  ]
 };

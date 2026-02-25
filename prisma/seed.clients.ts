@@ -1,11 +1,23 @@
 import { ClientCatalogType, ClientProfileType, PrismaClient } from "@prisma/client";
+import { seedGeoCatalogs } from "./seed.geo";
+import { seedPhoneCountryCodes } from "./seed.phone";
 
 const prisma = new PrismaClient();
 
 const REAL_PERSON_DPI = "1234567890101";
 const REAL_PERSON_EMAIL = "maria.real@starmedical.com";
+
 const BASE_DOCUMENT_TYPES = [
+  "PASSPORT",
   "DPI",
+  "NIT",
+  "RFC",
+  "CURP",
+  "DUI",
+  "RTN",
+  "RUC",
+  "CEDULA",
+  "SSN",
   "RTU",
   "Penales",
   "Policiacos",
@@ -15,15 +27,133 @@ const BASE_DOCUMENT_TYPES = [
   "Otros"
 ] as const;
 
+const BASE_MARITAL_STATUS = ["Soltero", "Casado", "Divorciado", "Viudo", "Unión libre"] as const;
+const BASE_ACADEMIC_LEVELS = ["Primaria", "Secundaria", "Técnico", "Universitario", "Maestría", "Doctorado"] as const;
+const BASE_RELATIONSHIP_TYPES = ["Padre", "Madre", "Tutor", "Encargado", "Cónyuge", "Hermano", "Otro"] as const;
+const BASE_LOCATION_TYPES = ["Principal", "Sucursal", "Oficina", "Planta", "Tienda", "Fiscal", "Casa", "Trabajo", "Otro"] as const;
+const BASE_SOCIAL_NETWORKS = ["Facebook", "Instagram", "TikTok", "LinkedIn", "X", "YouTube", "Otra red"] as const;
+const BASE_PERSON_CATEGORIES = ["General", "Paciente", "Particular"] as const;
+const BASE_COMPANY_CATEGORIES = ["PYME", "Corporativo", "Proveedor", "Empresa"] as const;
+const BASE_INSTITUTION_CATEGORIES = [
+  "Colegio",
+  "Universidad",
+  "Hospital",
+  "Laboratorio",
+  "Clínica",
+  "Centro médico",
+  "ONG",
+  "Fundación",
+  "Gobierno",
+  "Iglesia",
+  "Cooperativa",
+  "Asociación",
+  "Institución"
+] as const;
+const BASE_INSTITUTION_TYPES = ["Privada", "Pública", "Internacional"] as const;
+const BASE_PROFESSIONS = ["Médico", "Ingeniero", "Docente", "Abogado", "Contador", "Administrativo"] as const;
+
+const LEGACY_LOCATION_TYPE_TRANSLATIONS: ReadonlyArray<{ legacy: string; es: string }> = [
+  { legacy: "MAIN", es: "Principal" },
+  { legacy: "BRANCH", es: "Sucursal" },
+  { legacy: "OFFICE", es: "Oficina" },
+  { legacy: "PLANT", es: "Planta" },
+  { legacy: "STORE", es: "Tienda" },
+  { legacy: "FISCAL", es: "Fiscal" },
+  { legacy: "HOME", es: "Casa" },
+  { legacy: "WORK", es: "Trabajo" },
+  { legacy: "OTHER", es: "Otro" }
+];
+
+const BASE_ACQUISITION_SOURCES: ReadonlyArray<{
+  name: string;
+  code: string;
+  category: string;
+  sortOrder: number;
+}> = [
+  { name: "Llegada a instalaciones", code: "WALK_IN", category: "DIRECT", sortOrder: 10 },
+  { name: "WhatsApp", code: "WHATSAPP", category: "DIGITAL", sortOrder: 20 },
+  { name: "Redes sociales", code: "SOCIAL_MEDIA", category: "DIGITAL", sortOrder: 30 },
+  { name: "Google Maps", code: "GOOGLE_MAPS", category: "DIGITAL", sortOrder: 40 },
+  { name: "Referido", code: "REFERRED", category: "REFERRAL", sortOrder: 50 },
+  { name: "Empresa", code: "COMPANY", category: "B2B", sortOrder: 60 },
+  { name: "Otro", code: "OTHER", category: "OTHER", sortOrder: 70 }
+];
+
+const SOCIAL_SOURCE_DETAILS: ReadonlyArray<{ code: string; name: string }> = [
+  { code: "FACEBOOK", name: "Facebook" },
+  { code: "INSTAGRAM", name: "Instagram" },
+  { code: "TIKTOK", name: "TikTok" },
+  { code: "LINKEDIN", name: "LinkedIn" },
+  { code: "X", name: "X" },
+  { code: "YOUTUBE", name: "YouTube" },
+  { code: "OTHER_NETWORK", name: "Otra red" }
+];
+
 const DOCUMENT_TYPE_ALIASES: Array<{ legacy: string; canonical: (typeof BASE_DOCUMENT_TYPES)[number] }> = [
   { legacy: "Policíacos", canonical: "Policiacos" },
   { legacy: "Recibo de teléfono", canonical: "Recibo de telefono" },
-  { legacy: "Recibo teléfono", canonical: "Recibo de telefono" }
+  { legacy: "Recibo teléfono", canonical: "Recibo de telefono" },
+  { legacy: "Pasaporte", canonical: "PASSPORT" }
 ];
 
 function assertDevOnly() {
   if (process.env.NODE_ENV === "production") {
     throw new Error("[seed:clients] bloqueado en production.");
+  }
+}
+
+async function ensureCatalogItems(type: ClientCatalogType, items: readonly string[]) {
+  for (const name of items) {
+    await prisma.clientCatalogItem.upsert({
+      where: {
+        type_name: {
+          type,
+          name
+        }
+      },
+      update: {},
+      create: {
+        type,
+        name,
+        isActive: true
+      }
+    });
+  }
+}
+
+async function translateLegacyLocationTypesToSpanish() {
+  for (const item of LEGACY_LOCATION_TYPE_TRANSLATIONS) {
+    const legacy = await prisma.clientCatalogItem.findFirst({
+      where: {
+        type: ClientCatalogType.LOCATION_TYPE,
+        name: item.legacy
+      },
+      select: { id: true }
+    });
+    if (!legacy) continue;
+
+    const esExists = await prisma.clientCatalogItem.findFirst({
+      where: {
+        type: ClientCatalogType.LOCATION_TYPE,
+        name: item.es
+      },
+      select: { id: true }
+    });
+
+    if (esExists) {
+      if (esExists.id !== legacy.id) {
+        await prisma.clientCatalogItem.update({
+          where: { id: legacy.id },
+          data: { isActive: false }
+        });
+      }
+      continue;
+    }
+
+    await prisma.clientCatalogItem.update({
+      where: { id: legacy.id },
+      data: { name: item.es, isActive: true }
+    });
   }
 }
 
@@ -35,9 +165,7 @@ async function ensureClientCatalogDefaults() {
         name: "Activo"
       }
     },
-    update: {
-      isActive: true
-    },
+    update: {},
     create: {
       type: ClientCatalogType.CLIENT_STATUS,
       name: "Activo",
@@ -46,54 +174,90 @@ async function ensureClientCatalogDefaults() {
     }
   });
 
-  for (const name of BASE_DOCUMENT_TYPES) {
+  await ensureCatalogItems(ClientCatalogType.DOCUMENT_TYPE, BASE_DOCUMENT_TYPES);
+  await ensureCatalogItems(ClientCatalogType.MARITAL_STATUS, BASE_MARITAL_STATUS);
+  await ensureCatalogItems(ClientCatalogType.ACADEMIC_LEVEL, BASE_ACADEMIC_LEVELS);
+  await ensureCatalogItems(ClientCatalogType.RELATIONSHIP_TYPE, BASE_RELATIONSHIP_TYPES);
+  await ensureCatalogItems(ClientCatalogType.LOCATION_TYPE, BASE_LOCATION_TYPES);
+  await translateLegacyLocationTypesToSpanish();
+  await ensureCatalogItems(ClientCatalogType.SOCIAL_NETWORK, BASE_SOCIAL_NETWORKS);
+  await ensureCatalogItems(ClientCatalogType.PERSON_CATEGORY, BASE_PERSON_CATEGORIES);
+  await ensureCatalogItems(ClientCatalogType.COMPANY_CATEGORY, BASE_COMPANY_CATEGORIES);
+  await ensureCatalogItems(ClientCatalogType.INSTITUTION_CATEGORY, BASE_INSTITUTION_CATEGORIES);
+  await ensureCatalogItems(ClientCatalogType.INSTITUTION_TYPE, BASE_INSTITUTION_TYPES);
+  await ensureCatalogItems(ClientCatalogType.PERSON_PROFESSION, BASE_PROFESSIONS);
+
+  // Alias legacy detectado: mantener registro original y no mutar configuraciones del admin.
+  for (const { legacy, canonical } of DOCUMENT_TYPE_ALIASES) {
+    const legacyRow = await prisma.clientCatalogItem.findFirst({
+      where: { type: ClientCatalogType.DOCUMENT_TYPE, name: legacy },
+      select: { id: true }
+    });
+    if (!legacyRow) continue;
+
     await prisma.clientCatalogItem.upsert({
       where: {
         type_name: {
           type: ClientCatalogType.DOCUMENT_TYPE,
-          name
+          name: canonical
         }
       },
-      update: {
-        isActive: true
-      },
+      update: {},
       create: {
         type: ClientCatalogType.DOCUMENT_TYPE,
-        name,
+        name: canonical,
+        isActive: true
+      }
+    });
+  }
+}
+
+async function ensureClientAcquisitionDefaults() {
+  for (const source of BASE_ACQUISITION_SOURCES) {
+    const existing = await prisma.clientAcquisitionSource.findFirst({
+      where: {
+        OR: [{ name: source.name }, { code: source.code }]
+      },
+      select: { id: true }
+    });
+
+    if (existing) continue;
+
+    await prisma.clientAcquisitionSource.create({
+      data: {
+        name: source.name,
+        code: source.code,
+        category: source.category,
+        sortOrder: source.sortOrder,
         isActive: true
       }
     });
   }
 
-  for (const { legacy, canonical } of DOCUMENT_TYPE_ALIASES) {
-    const legacyRow = await prisma.clientCatalogItem.findFirst({
+  const socialSource = await prisma.clientAcquisitionSource.findFirst({
+    where: {
+      OR: [{ code: "SOCIAL_MEDIA" }, { name: "Redes sociales" }]
+    },
+    select: { id: true }
+  });
+
+  if (!socialSource) return;
+
+  for (const detail of SOCIAL_SOURCE_DETAILS) {
+    await prisma.clientAcquisitionDetailOption.upsert({
       where: {
-        type: ClientCatalogType.DOCUMENT_TYPE,
-        name: legacy
+        sourceId_code: {
+          sourceId: socialSource.id,
+          code: detail.code
+        }
       },
-      select: { id: true }
-    });
-    if (!legacyRow) continue;
-
-    const canonicalRow = await prisma.clientCatalogItem.findFirst({
-      where: {
-        type: ClientCatalogType.DOCUMENT_TYPE,
-        name: canonical
-      },
-      select: { id: true }
-    });
-
-    if (canonicalRow) {
-      await prisma.clientCatalogItem.update({
-        where: { id: legacyRow.id },
-        data: { isActive: false }
-      });
-      continue;
-    }
-
-    await prisma.clientCatalogItem.update({
-      where: { id: legacyRow.id },
-      data: { name: canonical, isActive: true }
+      update: {},
+      create: {
+        sourceId: socialSource.id,
+        code: detail.code,
+        name: detail.name,
+        isActive: true
+      }
     });
   }
 }
@@ -108,27 +272,6 @@ async function resolveActiveStatusId() {
     select: { id: true }
   });
   return activeStatus?.id ?? null;
-}
-
-async function cleanupDemoPeople() {
-  const demoPeople = await prisma.clientProfile.findMany({
-    where: {
-      type: ClientProfileType.PERSON,
-      deletedAt: null,
-      OR: [{ email: { endsWith: "@starmedical.test", mode: "insensitive" } }, { dpi: { startsWith: "1000000000" } }]
-    },
-    select: { id: true }
-  });
-
-  if (!demoPeople.length) return { cleanedCount: 0 };
-
-  const archivedAt = new Date();
-  await prisma.clientProfile.updateMany({
-    where: { id: { in: demoPeople.map((person) => person.id) } },
-    data: { deletedAt: archivedAt }
-  });
-
-  return { cleanedCount: demoPeople.length };
 }
 
 async function ensureRealPerson(statusId: string | null) {
@@ -189,13 +332,26 @@ async function ensureRealPerson(statusId: string | null) {
 async function main() {
   assertDevOnly();
 
+  await seedPhoneCountryCodes(prisma);
+  await seedGeoCatalogs(prisma);
   await ensureClientCatalogDefaults();
-  const cleanup = await cleanupDemoPeople();
+  await ensureClientAcquisitionDefaults();
   const statusId = await resolveActiveStatusId();
   const realPerson = await ensureRealPerson(statusId);
 
   console.info("[seed:clients] documentTypes=%d", BASE_DOCUMENT_TYPES.length);
-  console.info("[seed:clients] cleanedDemoPersons=%d", cleanup.cleanedCount);
+  console.info("[seed:clients] maritalStatus=%d", BASE_MARITAL_STATUS.length);
+  console.info("[seed:clients] academicLevels=%d", BASE_ACADEMIC_LEVELS.length);
+  console.info("[seed:clients] relationshipTypes=%d", BASE_RELATIONSHIP_TYPES.length);
+  console.info("[seed:clients] locationTypes=%d", BASE_LOCATION_TYPES.length);
+  console.info("[seed:clients] socialNetworks=%d", BASE_SOCIAL_NETWORKS.length);
+  console.info("[seed:clients] personCategories=%d", BASE_PERSON_CATEGORIES.length);
+  console.info("[seed:clients] companyCategories=%d", BASE_COMPANY_CATEGORIES.length);
+  console.info("[seed:clients] institutionCategories=%d", BASE_INSTITUTION_CATEGORIES.length);
+  console.info("[seed:clients] institutionTypes=%d", BASE_INSTITUTION_TYPES.length);
+  console.info("[seed:clients] professions=%d", BASE_PROFESSIONS.length);
+  console.info("[seed:clients] acquisitionSources=%d", BASE_ACQUISITION_SOURCES.length);
+  console.info("[seed:clients] socialSourceDetails=%d", SOCIAL_SOURCE_DETAILS.length);
   console.info("[seed:clients] realPersonMode=%s", realPerson.mode);
   console.info("[seed:clients] realPersonId=%s", realPerson.id);
 }

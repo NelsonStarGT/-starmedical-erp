@@ -148,7 +148,16 @@ export function requirePermission(user: SessionUser | null, permission: string |
 }
 
 export function isAdmin(user: SessionUser | null) {
-  return Boolean(user?.roles?.some((r) => normalizeRoleName(r) === "ADMIN"));
+  return Boolean(
+    user?.roles?.some((r) => {
+      const role = normalizeRoleName(r);
+      return role === "ADMIN" || role === "SUPER_ADMIN";
+    })
+  );
+}
+
+export function isOwner(user: SessionUser | null) {
+  return Boolean(user?.roles?.some((r) => normalizeRoleName(r) === "OWNER"));
 }
 
 export function isSupervisor(user: SessionUser | null) {

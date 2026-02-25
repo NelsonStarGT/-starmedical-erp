@@ -9,6 +9,8 @@ export type GeoCascadeValue = {
   geoAdmin2Id: string;
   geoAdmin3Id: string;
   geoPostalCode: string;
+  geoFreeState?: string;
+  geoFreeCity?: string;
 };
 
 export type GeoCascadeErrors = Partial<Record<keyof GeoCascadeValue, string>>;
@@ -41,7 +43,9 @@ export default function GeoCascadeFieldset({
     departmentId: value.geoAdmin1Id,
     municipalityId: value.geoAdmin2Id,
     admin3Id: value.geoAdmin3Id,
-    postalCode: value.geoPostalCode
+    postalCode: value.geoPostalCode,
+    freeState: value.geoFreeState ?? "",
+    freeCity: value.geoFreeCity ?? ""
   };
 
   const locationErrors: LocationPickerErrors = {
@@ -49,7 +53,9 @@ export default function GeoCascadeFieldset({
     departmentId: errors?.geoAdmin1Id,
     municipalityId: errors?.geoAdmin2Id,
     admin3Id: errors?.geoAdmin3Id,
-    postalCode: errors?.geoPostalCode
+    postalCode: errors?.geoPostalCode,
+    freeState: errors?.geoAdmin1Id,
+    freeCity: errors?.geoAdmin2Id
   };
 
   const requiredSuffix =
@@ -71,7 +77,9 @@ export default function GeoCascadeFieldset({
           geoAdmin1Id: next.departmentId,
           geoAdmin2Id: next.municipalityId,
           geoAdmin3Id: next.admin3Id,
-          geoPostalCode: next.postalCode
+          geoPostalCode: next.postalCode,
+          geoFreeState: next.freeState,
+          geoFreeCity: next.freeCity
         })
       }
     />

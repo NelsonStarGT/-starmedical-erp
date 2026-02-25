@@ -1,19 +1,12 @@
 import { cookies } from "next/headers";
 import { forbidden, redirect } from "next/navigation";
 import { Montserrat, Inter } from "next/font/google";
-import ModuleTabs, { type ModuleTab } from "@/components/layout/ModuleTabs";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
 import { cn } from "@/lib/utils";
 
 const headingFont = Montserrat({ subsets: ["latin"], weight: ["600", "700"], variable: "--font-companies-heading" });
 const bodyFont = Inter({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-companies-body" });
-
-const companyTabs: ModuleTab[] = [
-  { label: "Empresas", href: "/admin/empresas", matchPrefix: "/admin/empresas" },
-  { label: "Instituciones", href: "/admin/empresas/instituciones", matchPrefix: "/admin/empresas/instituciones" },
-  { label: "Aseguradoras", href: "/admin/empresas/aseguradoras", matchPrefix: "/admin/empresas/aseguradoras" }
-];
 
 export default async function EmpresasLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUserFromCookies(cookies());
@@ -28,9 +21,6 @@ export default async function EmpresasLayout({ children }: { children: React.Rea
           Módulo de empresas
         </h1>
         <p className="mt-1 text-sm text-slate-600">Gestión corporativa separada para empresas, instituciones y aseguradoras.</p>
-        <div className="mt-4">
-          <ModuleTabs tabs={companyTabs} variant="diagnostics" />
-        </div>
       </section>
       {children}
     </div>

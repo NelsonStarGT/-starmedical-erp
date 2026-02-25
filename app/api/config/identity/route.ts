@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { requireRole } from "@/lib/api/hr";
 import { readAppIdentityMeta } from "@/lib/home-dashboard/storage";
+import { normalizeTenantId } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -47,25 +48,44 @@ async function resolveThemeLogoUrl(logoUrl?: string | null, logoAssetId?: string
   return null;
 }
 
-async function fetchIdentityPayload() {
+async function fetchIdentityPayload(tenantIdInput: unknown = "global") {
+  const tenantId = normalizeTenantId(tenantIdInput);
   const [settings, appConfig, themeConfig] = await Promise.all([
     ensureHrSettingsIdentity(),
     prisma.appConfig.findFirst({ orderBy: { createdAt: "desc" }, select: { companyName: true, openingHours: true } }),
     (async () => {
       const delegate = (prisma as unknown as {
+        tenantThemePreference?: {
+          findUnique?: (args: {
+            where: { tenantId: string };
+            select: typeof selectThemeIdentity;
+          }) => Promise<{ logoUrl: string | null; logoAssetId: string | null } | null>;
+        };
         tenantThemeConfig?: {
           findUnique?: (args: {
             where: { id: string };
             select: typeof selectThemeIdentity;
           }) => Promise<{ logoUrl: string | null; logoAssetId: string | null } | null>;
         };
-      }).tenantThemeConfig;
-      if (!delegate?.findUnique) return null;
+      });
+
       try {
-        return await delegate.findUnique({
-          where: { id: "global" },
-          select: selectThemeIdentity
-        });
+        if (delegate.tenantThemePreference?.findUnique) {
+          const byTenant = await delegate.tenantThemePreference.findUnique({
+            where: { tenantId },
+            select: selectThemeIdentity
+          });
+          if (byTenant) return byTenant;
+        }
+
+        if (delegate.tenantThemeConfig?.findUnique) {
+          return await delegate.tenantThemeConfig.findUnique({
+            where: { id: "global" },
+            select: selectThemeIdentity
+          });
+        }
+
+        return null;
       } catch {
         return null;
       }
@@ -87,7 +107,7 @@ export async function GET(req: NextRequest) {
   if (auth.errorResponse) return auth.errorResponse;
 
   try {
-    const data = await fetchIdentityPayload();
+    const data = await fetchIdentityPayload(auth.user?.tenantId);
     return NextResponse.json({ ok: true, data });
   } catch (err) {
     console.error("identity config get error", err);
@@ -124,7 +144,7 @@ export async function PATCH(req: NextRequest) {
       create: { id: 1, ...(data as any) }
     });
 
-    const payload = await fetchIdentityPayload();
+    const payload = await fetchIdentityPayload(auth.user?.tenantId);
     return NextResponse.json({ ok: true, data: payload });
   } catch (err) {
     console.error("identity config patch error", err);

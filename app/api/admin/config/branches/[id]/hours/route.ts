@@ -36,12 +36,13 @@ export async function GET(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
   const now = new Date();
 
   try {
     const [branch, rows] = await Promise.all([
-      prisma.branch.findUnique({
-        where: { id: resolved.id },
+      prisma.branch.findFirst({
+        where: { id: resolved.id, tenantId },
         select: { id: true, name: true, code: true, timezone: true, isActive: true }
       }),
       prisma.branchBusinessHours.findMany({
@@ -103,6 +104,7 @@ export async function POST(
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
+  const tenantId = auth.user?.tenantId || "global";
 
   try {
     const body = await req.json().catch(() => null);
@@ -145,8 +147,8 @@ export async function POST(
     }
 
     const created = await prisma.$transaction(async (tx) => {
-      const branch = await tx.branch.findUnique({
-        where: { id: resolved.id },
+      const branch = await tx.branch.findFirst({
+        where: { id: resolved.id, tenantId },
         select: { id: true, name: true }
       });
 

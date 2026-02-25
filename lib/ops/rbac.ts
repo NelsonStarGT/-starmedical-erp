@@ -1,17 +1,11 @@
 import type { SessionUser } from "@/lib/auth";
-import { normalizeRoleName } from "@/lib/rbac";
+import { hasAnyRole } from "@/lib/security/configCapabilities";
+import { canAccessConfigOps } from "@/lib/security/configCapabilities";
 
-const SUPERADMIN_ROLES = new Set(["SUPER_ADMIN", "SUPERADMIN"]);
-const OPS_ALLOWED_ROLES = new Set(["SUPER_ADMIN", "OPS", "SUPERADMIN"]);
-
-function normalizeRoles(user: SessionUser | null | undefined) {
-  return (user?.roles || []).map((role) => normalizeRoleName(role));
-}
+const SUPERADMIN_ROLES = ["SUPER_ADMIN", "SUPERADMIN"] as const;
 
 export function canAccessOpsHealth(user: SessionUser | null | undefined) {
-  if (!user) return false;
-  const roles = normalizeRoles(user);
-  return roles.some((role) => OPS_ALLOWED_ROLES.has(role));
+  return canAccessConfigOps(user);
 }
 
 export function canManageOpsResources(user: SessionUser | null | undefined) {
@@ -23,9 +17,7 @@ export function canAccessOpsObservability(user: SessionUser | null | undefined) 
 }
 
 export function canExecuteOpsCritical(user: SessionUser | null | undefined) {
-  if (!user) return false;
-  const roles = normalizeRoles(user);
-  return roles.some((role) => SUPERADMIN_ROLES.has(role));
+  return hasAnyRole(user, SUPERADMIN_ROLES);
 }
 
 export function canManageOpsSchedulerConfig(user: SessionUser | null | undefined) {

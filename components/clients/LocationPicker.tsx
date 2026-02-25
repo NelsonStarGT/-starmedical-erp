@@ -1,14 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import CountryPicker, { type CountryPickerOption } from "@/components/clients/CountryPicker";
+import GeoSearchSelect, { type GeoSearchOption } from "@/components/clients/GeoSearchSelect";
+import { isGeoAuthErrorLike, mapGeoLoadErrorMessage, sanitizeGeoDivisionDisplayName } from "@/lib/clients/geoUi";
 import { cn } from "@/lib/utils";
-
-type LocationOption = {
-  id: string;
-  code: string;
-  name: string;
-  isActive?: boolean;
-};
 
 type PostalMatch = {
   id: string;
@@ -39,14 +35,45 @@ export type LocationPickerValue = {
   municipalityId: string;
   admin3Id: string;
   postalCode: string;
+  freeState?: string;
+  freeCity?: string;
 };
 
 export type LocationPickerErrors = Partial<Record<keyof LocationPickerValue, string>>;
 
-type ApiResponse = {
+type ApiResponse<T> = {
   ok?: boolean;
-  items?: LocationOption[];
+  items?: T[];
   error?: string;
+};
+
+type GeoRequestError = Error & {
+  isAuth?: boolean;
+};
+
+type CountryApiItem = {
+  id: string;
+  code: string;
+  iso3?: string | null;
+  name: string;
+  isActive: boolean;
+  meta?: {
+    level1Label?: string | null;
+    level2Label?: string | null;
+    level3Label?: string | null;
+    maxLevel?: number | null;
+  } | null;
+};
+
+type DivisionApiItem = {
+  id: string;
+  countryId: string;
+  level: number;
+  code: string;
+  name: string;
+  parentId: string | null;
+  isActive: boolean;
+  dataSource?: "official" | "operational";
 };
 
 type PostalApiResponse = {
@@ -64,45 +91,40 @@ type GeoLabels = {
 };
 
 const DEFAULT_LABELS: GeoLabels = {
-  admin1: "Departamento",
-  admin2: "Municipio",
-  admin3: "Distrito",
+  admin1: "Nivel 1",
+  admin2: "Nivel 2",
+  admin3: "Nivel 3",
   showAdmin3: false
 };
 
-function resolveGeoLabels(countryCode: string): GeoLabels {
-  switch (countryCode) {
-    case "US":
-      return { admin1: "State", admin2: "County", admin3: "City", showAdmin3: false };
-    case "MX":
-      return { admin1: "Estado", admin2: "Municipio/Alcaldía", admin3: "Localidad/Colonia", showAdmin3: false };
-    case "CO":
-      return { admin1: "Departamento", admin2: "Municipio", admin3: "Localidad", showAdmin3: false };
-    case "EC":
-      return { admin1: "Provincia", admin2: "Cantón", admin3: "Parroquia", showAdmin3: false };
-    case "CR":
-      return { admin1: "Provincia", admin2: "Cantón", admin3: "Distrito", showAdmin3: true };
-    case "PA":
-      return { admin1: "Provincia / Comarca", admin2: "Distrito", admin3: "Corregimiento", showAdmin3: true };
-    case "SV":
-      return { admin1: "Departamento", admin2: "Municipio", admin3: "Distrito", showAdmin3: true };
-    case "NI":
-      return { admin1: "Departamento / Región", admin2: "Municipio", admin3: "Distrito", showAdmin3: false };
-    case "HN":
-      return { admin1: "Departamento", admin2: "Municipio", admin3: "Distrito", showAdmin3: false };
-    case "GT":
-      return { admin1: "Departamento", admin2: "Municipio", admin3: "Distrito", showAdmin3: false };
-    default:
-      return DEFAULT_LABELS;
-  }
+function resolveGeoLabels(): GeoLabels {
+  return DEFAULT_LABELS;
 }
 
-function ensureArray(input: unknown): LocationOption[] {
+function normalizePostalCode(value: string) {
+  return value.replace(/\s+/g, "").trim().toUpperCase();
+}
+
+function ensureCountries(input: unknown): CountryApiItem[] {
   if (!Array.isArray(input)) return [];
-  return input.filter((item): item is LocationOption => {
+  return input.filter((item): item is CountryApiItem => {
     if (!item || typeof item !== "object") return false;
-    const value = item as Partial<LocationOption>;
+    const value = item as Partial<CountryApiItem>;
     return typeof value.id === "string" && typeof value.code === "string" && typeof value.name === "string";
+  });
+}
+
+function ensureDivisions(input: unknown): DivisionApiItem[] {
+  if (!Array.isArray(input)) return [];
+  return input.filter((item): item is DivisionApiItem => {
+    if (!item || typeof item !== "object") return false;
+    const value = item as Partial<DivisionApiItem>;
+    return (
+      typeof value.id === "string" &&
+      typeof value.code === "string" &&
+      typeof value.name === "string" &&
+      typeof value.level === "number"
+    );
   });
 }
 
@@ -122,8 +144,32 @@ function ensurePostalArray(input: unknown): PostalMatch[] {
   });
 }
 
-function normalizePostalCode(value: string) {
-  return value.replace(/\s+/g, "").trim().toUpperCase();
+function toCountryOption(item: CountryApiItem): CountryPickerOption {
+  return {
+    id: item.id,
+    code: item.code,
+    iso3: item.iso3 ?? null,
+    name: item.name,
+    isActive: item.isActive
+  };
+}
+
+function toGeoOption(item: DivisionApiItem): GeoSearchOption {
+  return {
+    id: item.id,
+    code: item.code,
+    name: sanitizeGeoDivisionDisplayName(item.name, item.code),
+    isActive: item.isActive
+  };
+}
+
+function buildGeoRequestError(params: {
+  status: number;
+  message?: string;
+  fallbackMessage: string;
+}): GeoRequestError {
+  const isAuth = params.status === 401 || params.status === 403 || isGeoAuthErrorLike(params.message);
+  return Object.assign(new Error(mapGeoLoadErrorMessage(params.message, params.fallbackMessage)), { isAuth });
 }
 
 export default function LocationPicker({
@@ -149,14 +195,15 @@ export default function LocationPicker({
   const [isLoadingAdmin3, setIsLoadingAdmin3] = useState(false);
   const [isLoadingPostal, setIsLoadingPostal] = useState(false);
 
-  const [countries, setCountries] = useState<LocationOption[]>([]);
-  const [departments, setDepartments] = useState<LocationOption[]>([]);
-  const [municipalities, setMunicipalities] = useState<LocationOption[]>([]);
-  const [admin3Options, setAdmin3Options] = useState<LocationOption[]>([]);
+  const [countries, setCountries] = useState<CountryApiItem[]>([]);
+  const [departments, setDepartments] = useState<DivisionApiItem[]>([]);
+  const [municipalities, setMunicipalities] = useState<DivisionApiItem[]>([]);
+  const [admin3Options, setAdmin3Options] = useState<DivisionApiItem[]>([]);
   const [postalInput, setPostalInput] = useState("");
   const [postalMatches, setPostalMatches] = useState<PostalMatch[]>([]);
 
   const [error, setError] = useState<string | null>(null);
+  const [hasDivisionCatalog, setHasDivisionCatalog] = useState(true);
 
   const skipPostalLookupRef = useRef(false);
   const skipReverseLookupRef = useRef(false);
@@ -167,26 +214,57 @@ export default function LocationPicker({
     () => countries.find((country) => country.id === value.countryId) ?? null,
     [countries, value.countryId]
   );
-  const selectedCountryCode = (selectedCountry?.code || "").toUpperCase();
-  const labels = useMemo(() => resolveGeoLabels(selectedCountryCode), [selectedCountryCode]);
+
+  const labels = useMemo(() => {
+    const fallback = resolveGeoLabels();
+    const meta = selectedCountry?.meta;
+    if (!meta) return fallback;
+
+    const level1 = (meta.level1Label || "").trim() || fallback.admin1;
+    const level2 = (meta.level2Label || "").trim() || fallback.admin2;
+    const level3 = (meta.level3Label || "").trim() || fallback.admin3;
+    const maxLevel = Number.isFinite(meta.maxLevel) ? Number(meta.maxLevel) : fallback.showAdmin3 ? 3 : 2;
+
+    return {
+      admin1: level1,
+      admin2: level2,
+      admin3: level3,
+      showAdmin3: maxLevel >= 3
+    } satisfies GeoLabels;
+  }, [selectedCountry]);
+
   const showAdmin3 = labels.showAdmin3 || admin3Options.length > 0 || Boolean(value.admin3Id);
 
-  const computedSubtitle = subtitle || `Selecciona País → ${labels.admin1} → ${labels.admin2}${showAdmin3 ? ` → ${labels.admin3}` : ""}`;
+  const computedSubtitle =
+    subtitle ||
+    (hasDivisionCatalog
+      ? `Selecciona País → ${labels.admin1} → ${labels.admin2}${showAdmin3 ? ` → ${labels.admin3}` : ""}`
+      : "País sin catálogo oficial: se habilita Estado/Provincia y Ciudad en texto libre.");
 
-  const applyPostalMatch = useCallback((match: PostalMatch) => {
-    skipReverseLookupRef.current = true;
+  const applyPostalMatch = useCallback(
+    (match: PostalMatch) => {
+      skipReverseLookupRef.current = true;
 
-    onChange({
-      countryId: match.country.id || value.countryId,
-      departmentId: match.admin1Id ?? match.admin1?.id ?? "",
-      municipalityId: match.admin2Id ?? match.admin2?.id ?? "",
-      admin3Id: match.admin3Id ?? match.admin3?.id ?? "",
-      postalCode: match.postalCode
-    });
+      const nextCountryId = match.country.id || value.countryId;
+      const nextDepartmentId = match.admin1Id ?? match.admin1?.id ?? "";
+      const nextMunicipalityId = match.admin2Id ?? match.admin2?.id ?? "";
+      const nextAdmin3Id = match.admin3Id ?? match.admin3?.id ?? "";
 
-    setPostalMatches([]);
-    setError(null);
-  }, [onChange, value.countryId]);
+      onChange({
+        countryId: nextCountryId,
+        departmentId: hasDivisionCatalog ? nextDepartmentId : "",
+        municipalityId: hasDivisionCatalog ? nextMunicipalityId : "",
+        admin3Id: hasDivisionCatalog ? nextAdmin3Id : "",
+        postalCode: match.postalCode,
+        freeState: hasDivisionCatalog ? value.freeState ?? "" : (match.admin1?.name ?? value.freeState ?? ""),
+        freeCity: hasDivisionCatalog ? value.freeCity ?? "" : (match.admin2?.name ?? value.freeCity ?? "")
+      });
+
+      setPostalMatches([]);
+      setError(null);
+    },
+    [hasDivisionCatalog, onChange, value.countryId, value.freeCity, value.freeState]
+  );
 
   useEffect(() => {
     setPostalInput(value.postalCode || "");
@@ -198,18 +276,22 @@ export default function LocationPicker({
     async function loadCountries() {
       setIsLoadingCountries(true);
       try {
-        const res = await fetch("/api/geo/countries?active=1&limit=300", { cache: "no-store" });
-        const json = (await res.json().catch(() => ({}))) as ApiResponse;
+        const res = await fetch("/api/geo/countries?active=1&limit=350", { cache: "no-store" });
+        const json = (await res.json().catch(() => ({}))) as ApiResponse<CountryApiItem>;
         if (!res.ok || json.ok === false) {
-          throw new Error(json.error || "No se pudo cargar países.");
+          throw buildGeoRequestError({
+            status: res.status,
+            message: json.error,
+            fallbackMessage: "No se pudo cargar paises."
+          });
         }
         if (cancelled) return;
-        setCountries(ensureArray(json.items));
+        setCountries(ensureCountries(json.items));
         setError(null);
       } catch (err) {
         if (cancelled) return;
         setCountries([]);
-        setError((err as Error)?.message || "No se pudo cargar países.");
+        setError(mapGeoLoadErrorMessage((err as Error)?.message, "No se pudo cargar paises."));
       } finally {
         if (!cancelled) setIsLoadingCountries(false);
       }
@@ -229,7 +311,7 @@ export default function LocationPicker({
       setMunicipalities([]);
       setAdmin3Options([]);
       setPostalMatches([]);
-      setPostalInput("");
+      setHasDivisionCatalog(true);
       return;
     }
 
@@ -238,21 +320,30 @@ export default function LocationPicker({
       try {
         const query = new URLSearchParams({
           country: value.countryId,
+          level: "1",
           active: "1",
-          limit: "300"
+          limit: "600"
         });
-        const res = await fetch(`/api/geo/departments?${query.toString()}`, { cache: "no-store" });
-        const json = (await res.json().catch(() => ({}))) as ApiResponse;
+        const res = await fetch(`/api/geo/divisions?${query.toString()}`, { cache: "no-store" });
+        const json = (await res.json().catch(() => ({}))) as ApiResponse<DivisionApiItem>;
         if (!res.ok || json.ok === false) {
-          throw new Error(json.error || "No se pudieron cargar departamentos.");
+          throw buildGeoRequestError({
+            status: res.status,
+            message: json.error,
+            fallbackMessage: "No se pudieron cargar divisiones de primer nivel."
+          });
         }
         if (cancelled) return;
-        setDepartments(ensureArray(json.items));
+        const items = ensureDivisions(json.items);
+        setDepartments(items);
+        setHasDivisionCatalog(items.length > 0);
         setError(null);
       } catch (err) {
         if (cancelled) return;
+        const geoError = err as GeoRequestError;
         setDepartments([]);
-        setError((err as Error)?.message || "No se pudieron cargar departamentos.");
+        setHasDivisionCatalog(!geoError.isAuth ? false : true);
+        setError(mapGeoLoadErrorMessage(geoError.message, "No se pudieron cargar divisiones de primer nivel."));
       } finally {
         if (!cancelled) setIsLoadingDepartments(false);
       }
@@ -267,7 +358,7 @@ export default function LocationPicker({
   useEffect(() => {
     let cancelled = false;
 
-    if (!value.departmentId) {
+    if (!hasDivisionCatalog || !value.departmentId) {
       setMunicipalities([]);
       setAdmin3Options([]);
       return;
@@ -277,22 +368,28 @@ export default function LocationPicker({
       setIsLoadingMunicipalities(true);
       try {
         const query = new URLSearchParams({
-          departmentId: value.departmentId,
+          country: value.countryId,
+          level: "2",
+          parentId: value.departmentId,
           active: "1",
-          limit: "600"
+          limit: "700"
         });
-        const res = await fetch(`/api/geo/municipalities?${query.toString()}`, { cache: "no-store" });
-        const json = (await res.json().catch(() => ({}))) as ApiResponse;
+        const res = await fetch(`/api/geo/divisions?${query.toString()}`, { cache: "no-store" });
+        const json = (await res.json().catch(() => ({}))) as ApiResponse<DivisionApiItem>;
         if (!res.ok || json.ok === false) {
-          throw new Error(json.error || "No se pudieron cargar municipios.");
+          throw buildGeoRequestError({
+            status: res.status,
+            message: json.error,
+            fallbackMessage: "No se pudieron cargar divisiones de segundo nivel."
+          });
         }
         if (cancelled) return;
-        setMunicipalities(ensureArray(json.items));
+        setMunicipalities(ensureDivisions(json.items));
         setError(null);
       } catch (err) {
         if (cancelled) return;
         setMunicipalities([]);
-        setError((err as Error)?.message || "No se pudieron cargar municipios.");
+        setError(mapGeoLoadErrorMessage((err as Error)?.message, "No se pudieron cargar divisiones de segundo nivel."));
       } finally {
         if (!cancelled) setIsLoadingMunicipalities(false);
       }
@@ -302,12 +399,12 @@ export default function LocationPicker({
     return () => {
       cancelled = true;
     };
-  }, [value.departmentId]);
+  }, [hasDivisionCatalog, value.countryId, value.departmentId]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!value.municipalityId) {
+    if (!hasDivisionCatalog || !value.municipalityId) {
       setAdmin3Options([]);
       return;
     }
@@ -316,22 +413,28 @@ export default function LocationPicker({
       setIsLoadingAdmin3(true);
       try {
         const query = new URLSearchParams({
-          municipalityId: value.municipalityId,
+          country: value.countryId,
+          level: "3",
+          parentId: value.municipalityId,
           active: "1",
-          limit: "800"
+          limit: "700"
         });
-        const res = await fetch(`/api/geo/admin3?${query.toString()}`, { cache: "no-store" });
-        const json = (await res.json().catch(() => ({}))) as ApiResponse;
+        const res = await fetch(`/api/geo/divisions?${query.toString()}`, { cache: "no-store" });
+        const json = (await res.json().catch(() => ({}))) as ApiResponse<DivisionApiItem>;
         if (!res.ok || json.ok === false) {
-          throw new Error(json.error || "No se pudieron cargar divisiones de tercer nivel.");
+          throw buildGeoRequestError({
+            status: res.status,
+            message: json.error,
+            fallbackMessage: "No se pudieron cargar divisiones de tercer nivel."
+          });
         }
         if (cancelled) return;
-        setAdmin3Options(ensureArray(json.items));
+        setAdmin3Options(ensureDivisions(json.items));
         setError(null);
       } catch (err) {
         if (cancelled) return;
         setAdmin3Options([]);
-        setError((err as Error)?.message || "No se pudieron cargar divisiones de tercer nivel.");
+        setError(mapGeoLoadErrorMessage((err as Error)?.message, "No se pudieron cargar divisiones de tercer nivel."));
       } finally {
         if (!cancelled) setIsLoadingAdmin3(false);
       }
@@ -341,7 +444,7 @@ export default function LocationPicker({
     return () => {
       cancelled = true;
     };
-  }, [value.municipalityId]);
+  }, [hasDivisionCatalog, value.countryId, value.municipalityId]);
 
   useEffect(() => {
     if (skipPostalLookupRef.current) {
@@ -353,7 +456,9 @@ export default function LocationPicker({
     const normalizedPostal = normalizePostalCode(postalInput);
 
     if (!value.countryId || normalizedPostal.length < 3) {
-      setPostalMatches((prev) => (normalizedPostal.length ? prev : []));
+      if (!normalizedPostal.length) {
+        setPostalMatches([]);
+      }
       return;
     }
 
@@ -368,7 +473,11 @@ export default function LocationPicker({
         const res = await fetch(`/api/geo/postal?${query.toString()}`, { cache: "no-store" });
         const json = (await res.json().catch(() => ({}))) as PostalApiResponse;
         if (!res.ok || json.ok === false) {
-          throw new Error(json.error || "No se pudo buscar el código postal.");
+          throw buildGeoRequestError({
+            status: res.status,
+            message: json.error,
+            fallbackMessage: "No se pudo buscar el codigo postal."
+          });
         }
         if (cancelled) return;
 
@@ -385,7 +494,7 @@ export default function LocationPicker({
       } catch (err) {
         if (cancelled) return;
         setPostalMatches([]);
-        setError((err as Error)?.message || "No se pudo buscar el código postal.");
+        setError(mapGeoLoadErrorMessage((err as Error)?.message, "No se pudo buscar el codigo postal."));
       } finally {
         if (!cancelled) setIsLoadingPostal(false);
       }
@@ -403,15 +512,12 @@ export default function LocationPicker({
       return;
     }
 
+    if (!hasDivisionCatalog) return;
+
     let cancelled = false;
 
-    if (!value.countryId) {
-      return;
-    }
-
-    if (!value.departmentId && !value.municipalityId && !value.admin3Id) {
-      return;
-    }
+    if (!value.countryId) return;
+    if (!value.departmentId && !value.municipalityId && !value.admin3Id) return;
 
     const timeout = setTimeout(async () => {
       try {
@@ -426,7 +532,11 @@ export default function LocationPicker({
         const res = await fetch(`/api/geo/postal?${query.toString()}`, { cache: "no-store" });
         const json = (await res.json().catch(() => ({}))) as PostalApiResponse;
         if (!res.ok || json.ok === false) {
-          throw new Error(json.error || "No se pudo resolver código postal para la ubicación.");
+          throw buildGeoRequestError({
+            status: res.status,
+            message: json.error,
+            fallbackMessage: "No se pudo resolver codigo postal para la ubicacion."
+          });
         }
         if (cancelled) return;
 
@@ -439,7 +549,9 @@ export default function LocationPicker({
             departmentId: value.departmentId,
             municipalityId: value.municipalityId,
             admin3Id: value.admin3Id,
-            postalCode: items[0].postalCode
+            postalCode: items[0].postalCode,
+            freeState: value.freeState ?? "",
+            freeCity: value.freeCity ?? ""
           });
           setPostalMatches([]);
           return;
@@ -454,9 +566,7 @@ export default function LocationPicker({
           setPostalMatches([]);
         }
       } catch {
-        if (!cancelled) {
-          setPostalMatches([]);
-        }
+        if (!cancelled) setPostalMatches([]);
       }
     }, 250);
 
@@ -464,30 +574,34 @@ export default function LocationPicker({
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [onChange, value.countryId, value.departmentId, value.municipalityId, value.admin3Id]);
+  }, [
+    hasDivisionCatalog,
+    onChange,
+    value.admin3Id,
+    value.countryId,
+    value.departmentId,
+    value.freeCity,
+    value.freeState,
+    value.municipalityId
+  ]);
 
-  const countryPlaceholder = useMemo(() => {
-    if (isLoadingCountries) return "Cargando países...";
-    return "Selecciona país";
-  }, [isLoadingCountries]);
+  const postalHintWithoutCountry = Boolean(!value.countryId && postalInput.trim().length > 0);
 
-  const departmentPlaceholder = useMemo(() => {
-    if (!value.countryId) return "Selecciona país primero";
-    if (isLoadingDepartments) return `Cargando ${labels.admin1.toLowerCase()}...`;
-    return `Selecciona ${labels.admin1.toLowerCase()}`;
-  }, [isLoadingDepartments, labels.admin1, value.countryId]);
-
-  const municipalityPlaceholder = useMemo(() => {
-    if (!value.departmentId) return `Selecciona ${labels.admin1.toLowerCase()} primero`;
-    if (isLoadingMunicipalities) return `Cargando ${labels.admin2.toLowerCase()}...`;
-    return `Selecciona ${labels.admin2.toLowerCase()}`;
-  }, [isLoadingMunicipalities, labels.admin1, labels.admin2, value.departmentId]);
-
-  const admin3Placeholder = useMemo(() => {
-    if (!value.municipalityId) return `Selecciona ${labels.admin2.toLowerCase()} primero`;
-    if (isLoadingAdmin3) return `Cargando ${labels.admin3.toLowerCase()}...`;
-    return `Selecciona ${labels.admin3.toLowerCase()}`;
-  }, [isLoadingAdmin3, labels.admin2, labels.admin3, value.municipalityId]);
+  const countryOptions = useMemo(() => countries.map(toCountryOption), [countries]);
+  const departmentOptions = useMemo(() => departments.map(toGeoOption), [departments]);
+  const municipalityOptions = useMemo(() => municipalities.map(toGeoOption), [municipalities]);
+  const admin3SearchOptions = useMemo(() => admin3Options.map(toGeoOption), [admin3Options]);
+  const postalMatchOptions = useMemo<GeoSearchOption[]>(
+    () =>
+      postalMatches.map((match) => ({
+        id: match.id,
+        code: match.postalCode,
+        name: `${match.postalCode}${match.label ? ` · ${match.label}` : ""}${
+          match.isOperational || match.dataSource === "operational" ? " · Operativo" : ""
+        }`
+      })),
+    [postalMatches]
+  );
 
   return (
     <section className={cn("space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-4", className)}>
@@ -509,179 +623,208 @@ export default function LocationPicker({
                 departmentId: value.departmentId,
                 municipalityId: value.municipalityId,
                 admin3Id: value.admin3Id,
-                postalCode: nextPostal
+                postalCode: nextPostal,
+                freeState: value.freeState ?? "",
+                freeCity: value.freeCity ?? ""
               });
             }}
-            placeholder={value.countryId ? "Ej. 05011" : "Selecciona país primero"}
-            disabled={isDisabled || !value.countryId}
+            placeholder={value.countryId ? "Ej. 05011" : "Puedes escribir CP; selecciona país para resolver"}
+            disabled={isDisabled}
             className={cn(
               "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
               errors?.postalCode && "border-rose-300 focus:border-rose-300 focus:ring-rose-200",
-              (isDisabled || !value.countryId) && "cursor-not-allowed bg-slate-100 text-slate-400"
+              isDisabled && "cursor-not-allowed bg-slate-100 text-slate-400"
             )}
           />
           {isLoadingPostal ? <p className="text-xs text-slate-500">Buscando código postal...</p> : null}
+          {postalHintWithoutCountry ? (
+            <p className="text-xs text-amber-700">Selecciona un país para resolver el código postal automáticamente.</p>
+          ) : null}
           {errors?.postalCode ? <p className="text-xs text-rose-700">{errors.postalCode}</p> : null}
         </div>
 
         {postalMatches.length > 1 ? (
           <div className="space-y-1">
-            <p className="text-xs font-semibold text-slate-500">Coincidencias de código postal</p>
-            <select
+            <GeoSearchSelect
+              label="Coincidencias de código postal"
               value=""
-              onChange={(event) => {
-                const match = postalMatches.find((item) => item.id === event.target.value);
+              options={postalMatchOptions}
+              placeholder="Selecciona una coincidencia"
+              disabled={isDisabled}
+              onChange={(selectedId) => {
+                const match = postalMatches.find((item) => item.id === selectedId);
                 if (!match) return;
                 skipPostalLookupRef.current = true;
                 setPostalInput(match.postalCode);
                 applyPostalMatch(match);
               }}
-              disabled={isDisabled}
-              className={cn(
-                "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
-                isDisabled && "cursor-not-allowed bg-slate-100 text-slate-400"
-              )}
-            >
-              <option value="">Selecciona una coincidencia</option>
-              {postalMatches.map((match) => (
-                <option key={match.id} value={match.id}>
-                  {match.postalCode}
-                  {match.label ? ` · ${match.label}` : ""}
-                  {match.isOperational || match.dataSource === "operational" ? " · Operativo" : ""}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         ) : (
           <div className="hidden md:block" />
         )}
       </div>
 
-      <div className={cn("grid gap-3", showAdmin3 ? "md:grid-cols-4" : "md:grid-cols-3")}>
-        <div className="space-y-1">
-          <p className="text-xs font-semibold text-slate-500">País</p>
-          <select
-            value={value.countryId}
-            onChange={(event) => {
-              setPostalInput("");
-              setPostalMatches([]);
-              onChange({
-                countryId: event.target.value,
-                departmentId: "",
-                municipalityId: "",
-                admin3Id: "",
-                postalCode: ""
-              });
-            }}
-            disabled={isDisabled || isLoadingCountries}
-            className={cn(
-              "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
-              (isDisabled || isLoadingCountries) && "cursor-not-allowed bg-slate-100 text-slate-400",
-              errors?.countryId && "border-rose-300 focus:border-rose-300 focus:ring-rose-200"
-            )}
-          >
-            <option value="">{countryPlaceholder}</option>
-            {countries.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-          {errors?.countryId ? <p className="text-xs text-rose-700">{errors.countryId}</p> : null}
-        </div>
+      <div className={cn("grid gap-3", hasDivisionCatalog ? (showAdmin3 ? "md:grid-cols-4" : "md:grid-cols-3") : "md:grid-cols-3")}>
+        <CountryPicker
+          value={value.countryId}
+          options={countryOptions}
+          onChange={(countryId) => {
+            setPostalMatches([]);
+            onChange({
+              countryId,
+              departmentId: "",
+              municipalityId: "",
+              admin3Id: "",
+              postalCode: "",
+              freeState: "",
+              freeCity: ""
+            });
+          }}
+          disabled={isDisabled || isLoadingCountries}
+          placeholder={isLoadingCountries ? "Cargando países..." : "Selecciona país"}
+          error={errors?.countryId}
+          label="País"
+        />
 
-        <div className="space-y-1">
-          <p className="text-xs font-semibold text-slate-500">{labels.admin1}</p>
-          <select
-            value={value.departmentId}
-            onChange={(event) =>
-              onChange({
-                countryId: value.countryId,
-                departmentId: event.target.value,
-                municipalityId: "",
-                admin3Id: "",
-                postalCode: value.postalCode
-              })
-            }
-            disabled={isDisabled || !value.countryId || isLoadingDepartments}
-            className={cn(
-              "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
-              (isDisabled || !value.countryId || isLoadingDepartments) && "cursor-not-allowed bg-slate-100 text-slate-400",
-              errors?.departmentId && "border-rose-300 focus:border-rose-300 focus:ring-rose-200"
-            )}
-          >
-            <option value="">{departmentPlaceholder}</option>
-            {departments.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-          {errors?.departmentId ? <p className="text-xs text-rose-700">{errors.departmentId}</p> : null}
-        </div>
+        {hasDivisionCatalog ? (
+          <>
+            <GeoSearchSelect
+              label={labels.admin1}
+              value={value.departmentId}
+              options={departmentOptions}
+              onChange={(departmentId) =>
+                onChange({
+                  countryId: value.countryId,
+                  departmentId,
+                  municipalityId: "",
+                  admin3Id: "",
+                  postalCode: value.postalCode,
+                  freeState: value.freeState ?? "",
+                  freeCity: value.freeCity ?? ""
+                })
+              }
+              disabled={isDisabled || !value.countryId || isLoadingDepartments}
+              placeholder={!value.countryId ? "Selecciona país primero" : isLoadingDepartments ? "Cargando..." : `Selecciona ${labels.admin1.toLowerCase()}`}
+              error={errors?.departmentId}
+            />
 
-        <div className="space-y-1">
-          <p className="text-xs font-semibold text-slate-500">{labels.admin2}</p>
-          <select
-            value={value.municipalityId}
-            onChange={(event) =>
-              onChange({
-                countryId: value.countryId,
-                departmentId: value.departmentId,
-                municipalityId: event.target.value,
-                admin3Id: "",
-                postalCode: value.postalCode
-              })
-            }
-            disabled={isDisabled || !value.departmentId || isLoadingMunicipalities}
-            className={cn(
-              "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
-              (isDisabled || !value.departmentId || isLoadingMunicipalities) && "cursor-not-allowed bg-slate-100 text-slate-400",
-              errors?.municipalityId && "border-rose-300 focus:border-rose-300 focus:ring-rose-200"
-            )}
-          >
-            <option value="">{municipalityPlaceholder}</option>
-            {municipalities.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-          {errors?.municipalityId ? <p className="text-xs text-rose-700">{errors.municipalityId}</p> : null}
-        </div>
-
-        {showAdmin3 ? (
-          <div className="space-y-1">
-            <p className="text-xs font-semibold text-slate-500">{labels.admin3}</p>
-            <select
-              value={value.admin3Id}
-              onChange={(event) =>
+            <GeoSearchSelect
+              label={labels.admin2}
+              value={value.municipalityId}
+              options={municipalityOptions}
+              onChange={(municipalityId) =>
                 onChange({
                   countryId: value.countryId,
                   departmentId: value.departmentId,
-                  municipalityId: value.municipalityId,
-                  admin3Id: event.target.value,
-                  postalCode: value.postalCode
+                  municipalityId,
+                  admin3Id: "",
+                  postalCode: value.postalCode,
+                  freeState: value.freeState ?? "",
+                  freeCity: value.freeCity ?? ""
                 })
               }
-              disabled={isDisabled || !value.municipalityId || isLoadingAdmin3}
-              className={cn(
-                "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
-                (isDisabled || !value.municipalityId || isLoadingAdmin3) && "cursor-not-allowed bg-slate-100 text-slate-400",
-                errors?.admin3Id && "border-rose-300 focus:border-rose-300 focus:ring-rose-200"
-              )}
-            >
-              <option value="">{admin3Placeholder}</option>
-              {admin3Options.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-            {errors?.admin3Id ? <p className="text-xs text-rose-700">{errors.admin3Id}</p> : null}
-          </div>
-        ) : null}
+              disabled={isDisabled || !value.departmentId || isLoadingMunicipalities}
+              placeholder={
+                !value.departmentId
+                  ? `Selecciona ${labels.admin1.toLowerCase()} primero`
+                  : isLoadingMunicipalities
+                    ? "Cargando..."
+                    : `Selecciona ${labels.admin2.toLowerCase()}`
+              }
+              error={errors?.municipalityId}
+            />
+
+            {showAdmin3 ? (
+              <GeoSearchSelect
+                label={labels.admin3}
+                value={value.admin3Id}
+                options={admin3SearchOptions}
+                onChange={(admin3Id) =>
+                  onChange({
+                    countryId: value.countryId,
+                    departmentId: value.departmentId,
+                    municipalityId: value.municipalityId,
+                    admin3Id,
+                    postalCode: value.postalCode,
+                    freeState: value.freeState ?? "",
+                    freeCity: value.freeCity ?? ""
+                  })
+                }
+                disabled={isDisabled || !value.municipalityId || isLoadingAdmin3}
+                placeholder={
+                  !value.municipalityId
+                    ? `Selecciona ${labels.admin2.toLowerCase()} primero`
+                    : isLoadingAdmin3
+                      ? "Cargando..."
+                      : `Selecciona ${labels.admin3.toLowerCase()}`
+                }
+                error={errors?.admin3Id}
+              />
+            ) : null}
+          </>
+        ) : (
+          <>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-slate-500">Estado / Provincia (texto)</p>
+              <input
+                value={value.freeState ?? ""}
+                onChange={(event) =>
+                  onChange({
+                    countryId: value.countryId,
+                    departmentId: "",
+                    municipalityId: "",
+                    admin3Id: "",
+                    postalCode: value.postalCode,
+                    freeState: event.target.value,
+                    freeCity: value.freeCity ?? ""
+                  })
+                }
+                disabled={isDisabled}
+                placeholder="Ej. California, Cundinamarca, Alajuela"
+                className={cn(
+                  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
+                  errors?.freeState && "border-rose-300 focus:border-rose-300 focus:ring-rose-200",
+                  isDisabled && "cursor-not-allowed bg-slate-100 text-slate-400"
+                )}
+              />
+              {errors?.freeState ? <p className="text-xs text-rose-700">{errors.freeState}</p> : null}
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-slate-500">Ciudad / Municipio (texto)</p>
+              <input
+                value={value.freeCity ?? ""}
+                onChange={(event) =>
+                  onChange({
+                    countryId: value.countryId,
+                    departmentId: "",
+                    municipalityId: "",
+                    admin3Id: "",
+                    postalCode: value.postalCode,
+                    freeState: value.freeState ?? "",
+                    freeCity: event.target.value
+                  })
+                }
+                disabled={isDisabled}
+                placeholder="Ej. Los Ángeles, Quito, San José"
+                className={cn(
+                  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
+                  errors?.freeCity && "border-rose-300 focus:border-rose-300 focus:ring-rose-200",
+                  isDisabled && "cursor-not-allowed bg-slate-100 text-slate-400"
+                )}
+              />
+              {errors?.freeCity ? <p className="text-xs text-rose-700">{errors.freeCity}</p> : null}
+            </div>
+
+            <div className="hidden md:block" />
+          </>
+        )}
       </div>
+
+      {!hasDivisionCatalog ? (
+        <p className="text-xs text-slate-500">Este país no tiene catálogo geográfico cargado. Se registrará ubicación operativa en texto libre.</p>
+      ) : null}
 
       {error ? <p className="text-xs text-rose-700">{error}</p> : null}
     </section>

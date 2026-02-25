@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowRightCircle, CheckCircle2, FileText, HandCoins, ShieldAlert } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
@@ -20,6 +20,22 @@ type Props = {
   requiresSupervisor?: boolean;
   canRunSupervisorActions?: boolean;
   compact?: boolean;
+};
+
+type LegalEntityOption = {
+  id: string;
+  legalName: string;
+  isActive: boolean;
+};
+
+type BillingSeriesOption = {
+  id: string;
+  legalEntityId: string;
+  name: string;
+  prefix: string;
+  nextNumber: number;
+  isDefault: boolean;
+  isActive: boolean;
 };
 
 const triggerStyles: Record<QuickPayIntent, string> = {
@@ -71,6 +87,12 @@ export default function QuickPayPanel({
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [legalEntities, setLegalEntities] = useState<LegalEntityOption[]>([]);
+  const [seriesOptions, setSeriesOptions] = useState<BillingSeriesOption[]>([]);
+  const [selectedLegalEntityId, setSelectedLegalEntityId] = useState("");
+  const [selectedSeriesId, setSelectedSeriesId] = useState("");
+  const [loadingEmitOptions, setLoadingEmitOptions] = useState(false);
+  const [lastIssuedSerial, setLastIssuedSerial] = useState<string | null>(null);
 
   const icon = useMemo(() => {
     if (intent === "COBRAR") return <HandCoins className="h-4 w-4" />;
@@ -90,12 +112,101 @@ export default function QuickPayPanel({
     setSubmitted(false);
     setError(null);
     setIsSubmitting(false);
+    setSelectedSeriesId("");
+    setLastIssuedSerial(null);
   }
 
   function onClose() {
     setOpen(false);
     resetState();
   }
+
+  useEffect(() => {
+    if (!open || intent !== "EMITIR_DOC") return;
+
+    let cancelled = false;
+
+    async function loadEmitOptions() {
+      setLoadingEmitOptions(true);
+      setError(null);
+      try {
+        const [legalRes, prefRes] = await Promise.all([
+          fetch("/api/admin/config/legal-entities?includeInactive=0", { cache: "no-store" }),
+          fetch("/api/admin/config/billing/preference", { cache: "no-store" })
+        ]);
+
+        const legalJson = await legalRes.json().catch(() => ({}));
+        const prefJson = await prefRes.json().catch(() => ({}));
+
+        if (!legalRes.ok || legalJson?.ok === false) {
+          throw new Error(legalJson?.error || "No se pudieron cargar las patentes.");
+        }
+
+        const legalRows = (Array.isArray(legalJson?.data) ? legalJson.data : []) as LegalEntityOption[];
+        const activeLegals = legalRows.filter((row) => row.isActive);
+        const defaultLegal =
+          (prefJson?.data?.defaultLegalEntityId as string | undefined) || activeLegals[0]?.id || "";
+
+        if (cancelled) return;
+        setLegalEntities(activeLegals);
+        setSelectedLegalEntityId((current) => current || defaultLegal);
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || "No se pudo cargar configuración de emisión.");
+      } finally {
+        if (!cancelled) setLoadingEmitOptions(false);
+      }
+    }
+
+    void loadEmitOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, intent]);
+
+  useEffect(() => {
+    if (intent !== "EMITIR_DOC") return;
+    if (!selectedLegalEntityId) {
+      setSeriesOptions([]);
+      setSelectedSeriesId("");
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadSeries() {
+      setLoadingEmitOptions(true);
+      setError(null);
+      try {
+        const response = await fetch(
+          `/api/admin/config/billing/series?legalEntityId=${encodeURIComponent(selectedLegalEntityId)}&includeInactive=0`,
+          { cache: "no-store" }
+        );
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok || json?.ok === false) {
+          throw new Error(json?.error || "No se pudieron cargar series de facturación.");
+        }
+
+        const rows = (Array.isArray(json?.data) ? json.data : []) as BillingSeriesOption[];
+        const activeRows = rows.filter((row) => row.isActive);
+        const defaultSeries = activeRows.find((row) => row.isDefault)?.id || activeRows[0]?.id || "";
+
+        if (cancelled) return;
+        setSeriesOptions(activeRows);
+        setSelectedSeriesId((current) => current || defaultSeries);
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || "No se pudieron cargar series de facturación.");
+      } finally {
+        if (!cancelled) setLoadingEmitOptions(false);
+      }
+    }
+
+    void loadSeries();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [intent, selectedLegalEntityId]);
 
   function validate() {
     if (blockedByRole) {
@@ -108,6 +219,12 @@ export default function QuickPayPanel({
 
     if (intent === "EMITIR_DOC") {
       if (balanceAmount > 0) return "No se puede emitir con saldo pendiente.";
+      if (legalEntities.length > 1 && !selectedLegalEntityId) {
+        return "Debes seleccionar la patente para emitir la factura.";
+      }
+      if (!selectedSeriesId) {
+        return "Debes seleccionar una serie activa de facturación.";
+      }
       return null;
     }
 
@@ -160,6 +277,11 @@ export default function QuickPayPanel({
         payload.creditDueDate = creditDueDate || undefined;
       }
 
+      if (intent === "EMITIR_DOC") {
+        payload.legalEntityId = selectedLegalEntityId || undefined;
+        payload.billingSeriesId = selectedSeriesId || undefined;
+      }
+
       const response = await fetch(`/api/facturacion/expedientes/${caseId}/quick-action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -171,6 +293,13 @@ export default function QuickPayPanel({
         throw new Error(json?.error || "No se pudo completar la acción");
       }
 
+      const serialPrefix = json?.data?.invoice?.serialPrefix as string | undefined;
+      const serialNumber = json?.data?.invoice?.serialNumber as number | undefined;
+      if (serialPrefix && typeof serialNumber === "number") {
+        setLastIssuedSerial(`${serialPrefix}-${serialNumber}`);
+      } else {
+        setLastIssuedSerial(null);
+      }
       setSubmitted(true);
       router.refresh();
     } catch (err: any) {
@@ -245,6 +374,11 @@ export default function QuickPayPanel({
                   <p>
                     {intentTitle[intent]} guardado correctamente. Monto: <span className="font-semibold">{formatBillingMoney(amount || 0)}</span>
                   </p>
+                  {lastIssuedSerial ? (
+                    <p className="mt-1">
+                      Correlativo emitido: <span className="font-semibold">{lastIssuedSerial}</span>
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -316,8 +450,50 @@ export default function QuickPayPanel({
               ) : null}
             </div>
           ) : (
-            <div className="rounded-lg border border-[#4aadf5]/30 bg-[#4aadf5]/10 p-3 text-sm text-[#2e75ba]">
-              La emisión requiere saldo en cero y serie fiscal configurada para la sede activa.
+            <div className="space-y-3 rounded-lg border border-[#4aadf5]/30 bg-[#4aadf5]/10 p-3 text-sm text-[#2e75ba]">
+              <p>La emisión requiere saldo en cero y una serie activa por patente.</p>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
+                  Patente
+                  <select
+                    value={selectedLegalEntityId}
+                    onChange={(event) => {
+                      setSelectedLegalEntityId(event.target.value);
+                      setSelectedSeriesId("");
+                    }}
+                    disabled={loadingEmitOptions || legalEntities.length === 0}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/20"
+                  >
+                    <option value="">Selecciona patente</option>
+                    {legalEntities.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.legalName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
+                  Serie
+                  <select
+                    value={selectedSeriesId}
+                    onChange={(event) => setSelectedSeriesId(event.target.value)}
+                    disabled={loadingEmitOptions || !selectedLegalEntityId || seriesOptions.length === 0}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/20"
+                  >
+                    <option value="">Selecciona serie</option>
+                    {seriesOptions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.prefix} · {item.name} · sig. {item.nextNumber}
+                        {item.isDefault ? " (default)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              {loadingEmitOptions ? <p className="text-xs text-slate-500">Cargando patentes y series...</p> : null}
             </div>
           )}
 

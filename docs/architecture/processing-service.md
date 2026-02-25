@@ -38,6 +38,27 @@ Aislar cargas pesadas (Excel/PDF/Images/DOCX) fuera del ERP principal para reduc
 ## Multi-tenant
 - Cada job y path incluye `tenantId` normalizado.
 - El ERP define `tenantId` y `actorId` al encolar.
+- Los endpoints internos de consulta/artefactos (`/jobs`, `/jobs/:id`, retry/cancel) exigen `tenantId` y rechazan scope cruzado.
+
+## Panel Admin ERP
+- Ruta UI: `/admin/configuracion/procesamiento`.
+- Tabs: actividad, artefactos, plantillas, politicas/limites, almacenamiento, salud/metricas y auditoria.
+- BFF interno (RBAC + tenant derivado de sesion):
+  - `GET /api/admin/processing/jobs`
+  - `GET /api/admin/processing/jobs/:id`
+  - `POST /api/admin/processing/jobs/:id/retry`
+  - `POST /api/admin/processing/jobs/:id/cancel`
+  - `GET /api/admin/processing/artifacts`
+  - `GET /api/admin/processing/health`
+  - `GET|PUT /api/admin/processing/config` (TenantProcessingConfig)
+
+## Configuracion por tenant
+- Modelo: `TenantProcessingConfig`.
+- Campos principales:
+  - `enabled`, `storageProvider`, `bucket`, `prefix`
+  - `retentionDaysByJobType`, `maxUploadMB`, `maxRowsExcel`, `maxPagesPdf`
+  - `timeoutMs`, `maxConcurrency`, `allowedJobTypes`, `notifyOnFailure`
+- Solo editable con capacidades `CONFIG_SERVICES_WRITE`.
 
 ## Runtime y despliegue
 - Local: Redis + MinIO + processing-service por red interna Docker.

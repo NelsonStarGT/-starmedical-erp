@@ -180,13 +180,17 @@ async function enqueueJob(input: {
     throw new Error(created.error || "processing_service_enqueue_failed");
   }
 
-  return { jobId, runtimeConfig };
+  return { jobId, runtimeConfig, tenantId };
 }
 
-async function getJob(runtimeConfig: ProcessingServiceRuntimeConfig, jobId: string): Promise<ProcessingJob> {
+async function getJob(
+  runtimeConfig: ProcessingServiceRuntimeConfig,
+  jobId: string,
+  tenantId: string
+): Promise<ProcessingJob> {
   const response = await requestProcessingService(runtimeConfig, {
     method: "GET",
-    path: `/jobs/${encodeURIComponent(jobId)}`
+    path: `/jobs/${encodeURIComponent(jobId)}?tenantId=${encodeURIComponent(tenantId)}`
   });
 
   if (!response.ok) {
@@ -200,13 +204,18 @@ async function getJob(runtimeConfig: ProcessingServiceRuntimeConfig, jobId: stri
   return job;
 }
 
-async function waitJob(runtimeConfig: ProcessingServiceRuntimeConfig, jobId: string, options?: WaitOptions) {
+async function waitJob(
+  runtimeConfig: ProcessingServiceRuntimeConfig,
+  jobId: string,
+  tenantId: string,
+  options?: WaitOptions
+) {
   const pollEveryMs = Math.max(150, Number(options?.pollEveryMs || 300));
   const timeoutMs = Math.max(2_000, Number(options?.timeoutMs || 20_000));
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const job = await getJob(runtimeConfig, jobId);
+    const job = await getJob(runtimeConfig, jobId, tenantId);
     if (job.status === "succeeded") return job;
     if (job.status === "failed" || job.status === "canceled") {
       throw new Error(job.error?.message || `processing_service_job_${job.status}`);
@@ -217,10 +226,14 @@ async function waitJob(runtimeConfig: ProcessingServiceRuntimeConfig, jobId: str
   throw new Error("processing_service_job_timeout");
 }
 
-async function getArtifacts(runtimeConfig: ProcessingServiceRuntimeConfig, jobId: string): Promise<JobArtifact[]> {
+async function getArtifacts(
+  runtimeConfig: ProcessingServiceRuntimeConfig,
+  jobId: string,
+  tenantId: string
+): Promise<JobArtifact[]> {
   const response = await requestProcessingService(runtimeConfig, {
     method: "GET",
-    path: `/jobs/${encodeURIComponent(jobId)}/artifacts`
+    path: `/jobs/${encodeURIComponent(jobId)}/artifacts?tenantId=${encodeURIComponent(tenantId)}`
   });
 
   if (!response.ok) {
@@ -254,7 +267,7 @@ export async function exportExcelViaProcessingService(input: {
   limits?: ExcelLimits;
   wait?: WaitOptions;
 }) {
-  const { jobId, runtimeConfig } = await enqueueJob({
+  const { jobId, runtimeConfig, tenantId } = await enqueueJob({
     context: input.context,
     jobType: "excel_export",
     params: {
@@ -264,8 +277,8 @@ export async function exportExcelViaProcessingService(input: {
     limits: input.limits
   });
 
-  await waitJob(runtimeConfig, jobId, input.wait);
-  const artifacts = await getArtifacts(runtimeConfig, jobId);
+  await waitJob(runtimeConfig, jobId, tenantId, input.wait);
+  const artifacts = await getArtifacts(runtimeConfig, jobId, tenantId);
   const artifact =
     artifacts.find((item) => item.mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") || artifacts[0];
 
@@ -287,7 +300,7 @@ export async function importExcelViaProcessingService(input: {
   limits?: ExcelLimits;
   wait?: WaitOptions;
 }) {
-  const { jobId, runtimeConfig } = await enqueueJob({
+  const { jobId, runtimeConfig, tenantId } = await enqueueJob({
     context: input.context,
     jobType: "excel_import",
     params: {
@@ -297,8 +310,8 @@ export async function importExcelViaProcessingService(input: {
     limits: input.limits
   });
 
-  const job = await waitJob(runtimeConfig, jobId, input.wait);
-  const artifacts = await getArtifacts(runtimeConfig, jobId);
+  const job = await waitJob(runtimeConfig, jobId, tenantId, input.wait);
+  const artifacts = await getArtifacts(runtimeConfig, jobId, tenantId);
   const jsonArtifact =
     artifacts.find(
       (item) =>

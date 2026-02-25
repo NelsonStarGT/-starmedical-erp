@@ -17,9 +17,17 @@ import { getBillingQuickActionsAvailability } from "@/lib/billing/operational";
 import { selectBillingProfileByPriority } from "@/lib/billing/profileSelection";
 import { applyBillingQuickAction, getBillingCaseById, type BillingQuickActionType } from "@/lib/billing/service";
 import { getEffectiveScope } from "@/lib/branch/effectiveScope";
-import { isCentralConfigCompatError, warnDevCentralCompat } from "@/lib/config-central";
+import { requiresLegalEntitySelection } from "@/lib/facturacion/legal-entity-policy";
+import {
+  allocateBillingSeriesCorrelativo,
+  getTenantBillingPreference,
+  isCentralConfigCompatError,
+  listBillingSeries,
+  warnDevCentralCompat
+} from "@/lib/config-central";
 import { prisma } from "@/lib/prisma";
 import { getSystemFeatureConfig, isFlagEnabledFromSnapshot } from "@/lib/system-flags/service";
+import { normalizeTenantId } from "@/lib/tenant";
 
 type Params = {
   params: Promise<{ id: string }>;
@@ -31,6 +39,8 @@ const payloadSchema = z.object({
   paymentMethod: z.enum(["EFECTIVO", "TARJETA", "TRANSFERENCIA"]).optional(),
   reference: z.string().trim().max(120).optional(),
   creditDueDate: z.string().optional(),
+  legalEntityId: z.string().trim().min(1).optional(),
+  billingSeriesId: z.string().trim().min(1).optional(),
   confirm: z.boolean().optional()
 });
 
@@ -78,6 +88,7 @@ type BillingCaseBranch = {
 async function resolveBillingCaseBranch(params: {
   siteId: string;
   siteName: string;
+  tenantId: string;
 }): Promise<BillingCaseBranch | null> {
   const normalizedSiteId = normalizeIdentifier(params.siteId);
   const normalizedSiteName = normalizeIdentifier(params.siteName);
@@ -85,11 +96,16 @@ async function resolveBillingCaseBranch(params: {
 
   return prisma.branch.findFirst({
     where: {
-      OR: [
-        normalizedSiteId ? { id: normalizedSiteId } : undefined,
-        normalizedSiteId ? { code: normalizedSiteId } : undefined,
-        normalizedSiteName ? { name: normalizedSiteName } : undefined
-      ].filter(Boolean) as Prisma.BranchWhereInput[]
+      OR: [{ tenantId: params.tenantId }, { tenantId: null }],
+      AND: [
+        {
+          OR: [
+            normalizedSiteId ? { id: normalizedSiteId } : undefined,
+            normalizedSiteId ? { code: normalizedSiteId } : undefined,
+            normalizedSiteName ? { name: normalizedSiteName } : undefined
+          ].filter(Boolean) as Prisma.BranchWhereInput[]
+        }
+      ]
     },
     select: {
       id: true,
@@ -220,27 +236,34 @@ async function selectActiveBillingProfileForBranch(branchId: string): Promise<Bi
 
 async function resolveLegalEntityId(
   user: NonNullable<ReturnType<typeof requireAuth>["user"]>,
+  tenantId: string,
   preferredLegalEntityId?: string | null
 ) {
   const preferredId = normalizeIdentifier(preferredLegalEntityId);
   if (preferredId) {
-    const preferred = await prisma.legalEntity.findUnique({
-      where: { id: preferredId },
+    const preferred = await prisma.legalEntity.findFirst({
+      where: { id: preferredId, tenantId, isActive: true },
       select: { id: true, isActive: true }
     });
     if (preferred?.isActive) return preferred.id;
   }
 
   if (user.legalEntityId) {
-    const existing = await prisma.legalEntity.findUnique({ where: { id: user.legalEntityId } });
+    const existing = await prisma.legalEntity.findFirst({
+      where: { id: user.legalEntityId, tenantId, isActive: true }
+    });
     if (existing) return existing.id;
   }
 
-  const firstActive = await prisma.legalEntity.findFirst({ where: { isActive: true }, orderBy: { createdAt: "asc" } });
+  const firstActive = await prisma.legalEntity.findFirst({
+    where: { tenantId, isActive: true },
+    orderBy: { createdAt: "asc" }
+  });
   if (firstActive) return firstActive.id;
 
   const created = await prisma.legalEntity.create({
     data: {
+      tenantId,
       name: "StarMedical Operación",
       comercialName: "StarMedical",
       email: user.email || null,
@@ -248,6 +271,96 @@ async function resolveLegalEntityId(
     }
   });
   return created.id;
+}
+
+async function resolveBillingSeriesForInvoice(input: {
+  tenantId: string;
+  caseBranchId: string | null;
+  requestedSeriesId: string | null;
+  requestedLegalEntityId: string | null;
+  profileLegalEntityId: string | null;
+  userLegalEntityId: string | null;
+  user: NonNullable<ReturnType<typeof requireAuth>["user"]>;
+}) {
+  const activeLegalEntities = await prisma.legalEntity.findMany({
+    where: { tenantId: input.tenantId, isActive: true },
+    select: { id: true, name: true },
+    orderBy: [{ createdAt: "asc" }]
+  });
+
+  if (activeLegalEntities.length === 0) {
+    throw new Error("No hay patentes activas para facturación.");
+  }
+
+  if (
+    requiresLegalEntitySelection({
+      activeLegalEntitiesCount: activeLegalEntities.length,
+      requestedLegalEntityId: input.requestedLegalEntityId,
+      profileLegalEntityId: input.profileLegalEntityId
+    })
+  ) {
+    throw new Error("Debes seleccionar una patente para emitir factura.");
+  }
+
+  const tenantPreference = await getTenantBillingPreference(input.tenantId).catch(() => null);
+  const branchDefaults = (tenantPreference?.branchDefaults || {}) as Record<string, string | null>;
+  const preferredFromBranch =
+    input.caseBranchId && typeof branchDefaults[input.caseBranchId] === "string"
+      ? normalizeIdentifier(branchDefaults[input.caseBranchId])
+      : null;
+
+  const legalEntityId = await resolveLegalEntityId(
+    input.user,
+    input.tenantId,
+    input.requestedLegalEntityId ||
+      input.profileLegalEntityId ||
+      preferredFromBranch ||
+      tenantPreference?.defaultLegalEntityId ||
+      input.userLegalEntityId ||
+      null
+  );
+
+  if (input.requestedSeriesId) {
+    const requested = await prisma.billingSeries.findFirst({
+      where: {
+        id: input.requestedSeriesId,
+        tenantId: input.tenantId,
+        legalEntityId,
+        isActive: true
+      }
+    });
+    if (!requested) {
+      throw new Error("La serie de facturación seleccionada no es válida para la patente.");
+    }
+    return requested;
+  }
+
+  const [branchScoped, tenantScoped] = await Promise.all([
+    input.caseBranchId
+      ? listBillingSeries({
+          tenantId: input.tenantId,
+          legalEntityId,
+          branchId: input.caseBranchId,
+          includeInactive: false
+        })
+      : Promise.resolve([]),
+    listBillingSeries({
+      tenantId: input.tenantId,
+      legalEntityId,
+      includeInactive: false
+    })
+  ]);
+
+  const merged = [...branchScoped, ...tenantScoped].filter((row, index, arr) => {
+    return arr.findIndex((candidate) => candidate.id === row.id) === index;
+  });
+  const selected = merged.find((row) => row.isDefault) || merged[0] || null;
+
+  if (!selected) {
+    throw new Error("No hay series activas para la patente seleccionada.");
+  }
+
+  return selected;
 }
 
 async function resolvePartyId(params: {
@@ -535,6 +648,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     user,
     cookieStore: req.cookies
   });
+  const tenantId = normalizeTenantId(scope.tenantId || user.tenantId);
   if (!scope.branchId || !scope.activeBranch) {
     return NextResponse.json({ error: "No hay sede activa autorizada para facturación." }, { status: 403 });
   }
@@ -553,7 +667,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const caseBranch = await resolveBillingCaseBranch({
     siteId: caseRecord.siteId,
-    siteName: caseRecord.siteName
+    siteName: caseRecord.siteName,
+    tenantId
   });
   const selectedBilling = caseBranch
     ? await selectActiveBillingProfileForBranch(caseBranch.id).catch((error) => {
@@ -605,13 +720,22 @@ export async function POST(req: NextRequest, { params }: Params) {
     systemConfig.strictMode || isFlagEnabledFromSnapshot(systemConfig, "sat.requireActiveSeries");
 
   if (action === "EMITIR_DOC") {
-    if (caseBranch && shouldRequireActiveSatSeries && !selectedBilling.profile) {
+    const hasTenantBillingSeries =
+      (await prisma.billingSeries.count({
+        where: {
+          tenantId,
+          isActive: true,
+          ...(caseBranch?.id ? { OR: [{ branchId: caseBranch.id }, { branchId: null }] } : {})
+        }
+      }).catch(() => 0)) > 0;
+
+    if (caseBranch && shouldRequireActiveSatSeries && !selectedBilling.profile && !hasTenantBillingSeries) {
       return NextResponse.json(
         { error: "No hay perfil fiscal activo para esta sucursal. Configura SAT/FEL antes de emitir." },
         { status: 422 }
       );
     }
-    if (caseBranch && shouldRequireActiveSatSeries && !selectedBilling.series) {
+    if (caseBranch && shouldRequireActiveSatSeries && !selectedBilling.series && !hasTenantBillingSeries) {
       return NextResponse.json(
         { error: "No hay serie FEL activa para el perfil fiscal seleccionado." },
         { status: 422 }
@@ -640,7 +764,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   try {
-    const legalEntityId = await resolveLegalEntityId(user, selectedBilling.profile?.legalEntityId ?? null);
+    let legalEntityId = await resolveLegalEntityId(user, tenantId, selectedBilling.profile?.legalEntityId ?? null);
+    let invoiceIssued: { id: string; legalEntityId: string; billingSeriesId: string; serialPrefix: string; serialNumber: number } | null = null;
 
     const beforeSnapshot = {
       status: caseRecord.status,
@@ -676,6 +801,56 @@ export async function POST(req: NextRequest, { params }: Params) {
       actorName: user.name || user.email || "Operador",
       legalEntityId
     });
+
+    if (action === "EMITIR_DOC") {
+      const series = await resolveBillingSeriesForInvoice({
+        tenantId,
+        caseBranchId: caseBranch?.id ?? null,
+        requestedSeriesId: normalizeIdentifier(data.billingSeriesId) ?? null,
+        requestedLegalEntityId: normalizeIdentifier(data.legalEntityId) ?? null,
+        profileLegalEntityId: selectedBilling.profile?.legalEntityId ?? null,
+        userLegalEntityId: user.legalEntityId ?? null,
+        user
+      });
+
+      legalEntityId = series.legalEntityId;
+      const allocation = await allocateBillingSeriesCorrelativo({
+        tenantId,
+        seriesId: series.id
+      });
+
+      const createdInvoice = await prisma.invoice.create({
+        data: {
+          tenantId,
+          caseId: id,
+          caseNumber: caseRecord.caseNumber,
+          legalEntityId: allocation.legalEntityId,
+          billingSeriesId: allocation.seriesId,
+          serialPrefix: allocation.prefix,
+          serialNumber: allocation.serialNumber,
+          totalAmount: new Prisma.Decimal(updated.after.totalAmount),
+          paidAmount: new Prisma.Decimal(updated.after.paidAmount),
+          status: "EMITIDA",
+          issuedByUserId: user.id,
+          metadata: {
+            action,
+            caseStatus: updated.after.status,
+            source: "billing.quick-action",
+            caseBranchId: caseBranch?.id ?? null,
+            selectedBillingProfileId: selectedBilling.profile?.id ?? null
+          }
+        },
+        select: {
+          id: true,
+          legalEntityId: true,
+          billingSeriesId: true,
+          serialPrefix: true,
+          serialNumber: true
+        }
+      });
+
+      invoiceIssued = createdInvoice;
+    }
 
     if (selectedBilling.profile) {
       await auditLog({
@@ -731,10 +906,14 @@ export async function POST(req: NextRequest, { params }: Params) {
         paymentMethod: data.paymentMethod || null,
         reference: data.reference || null,
         amount: data.amount || null,
-        tenantId: scope.tenantId,
+        tenantId,
         branchId: scope.branchId,
         billingProfileId: selectedBilling.profile?.id ?? null,
         felSeriesId: selectedBilling.series?.id ?? null,
+        invoiceId: invoiceIssued?.id ?? null,
+        legalEntityId,
+        billingSeriesId: invoiceIssued?.billingSeriesId ?? null,
+        serialNumber: invoiceIssued?.serialNumber ?? null,
         persistence
       }
     });
@@ -747,7 +926,8 @@ export async function POST(req: NextRequest, { params }: Params) {
         totalAmount: updated.after.totalAmount,
         paidAmount: updated.after.paidAmount,
         balanceAmount: updated.after.balanceAmount,
-        persistence
+        persistence,
+        invoice: invoiceIssued
       }
     });
   } catch (err: any) {

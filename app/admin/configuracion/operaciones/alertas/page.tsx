@@ -1,8 +1,9 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import ConfigAccessDeniedCard from "@/components/configuracion/ConfigAccessDeniedCard";
 import { getSessionUserFromCookies } from "@/lib/auth";
-import { canAccessOpsHealth } from "@/lib/ops/rbac";
 import OpsAlertsPanel from "@/components/configuracion/OpsAlertsPanel";
+import { canAccessConfigOps } from "@/lib/security/configCapabilities";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,12 +12,12 @@ export default async function OpsAlertasPage() {
   const user = await getSessionUserFromCookies(cookies());
   if (!user) redirect("/login");
 
-  if (!canAccessOpsHealth(user)) {
+  if (!canAccessConfigOps(user)) {
     return (
-      <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-        No autorizado. Esta vista requiere rol <span className="font-semibold">SUPER_ADMIN</span> u{" "}
-        <span className="font-semibold">OPS</span>.
-      </div>
+      <ConfigAccessDeniedCard
+        sectionLabel="Operaciones · Historial y alertas"
+        requirementLabel="rol SUPER_ADMIN u OPS"
+      />
     );
   }
 
