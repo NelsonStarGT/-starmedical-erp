@@ -8,6 +8,7 @@ export type CountryPickerOption = {
   id: string;
   code: string;
   iso3?: string | null;
+  callingCode?: string | null;
   name: string;
   isActive?: boolean;
 };
@@ -80,8 +81,10 @@ export default function CountryPicker({
     return sortedOptions.filter((item) => {
       const iso2 = item.code.toLowerCase();
       const iso3 = (item.iso3 ?? "").toLowerCase();
+      const callingCode = (item.callingCode ?? "").toLowerCase().replace(/^\+/, "");
       const name = item.name.toLowerCase();
-      return name.includes(q) || iso2.includes(q) || iso3.includes(q);
+      const normalizedQuery = q.replace(/^\+/, "");
+      return name.includes(q) || iso2.includes(q) || iso3.includes(q) || callingCode.includes(normalizedQuery);
     });
   }, [query, sortedOptions]);
 
@@ -120,7 +123,10 @@ export default function CountryPicker({
           <span className="inline-flex min-w-0 items-center gap-2 text-slate-700">
             <span>{iso2ToFlag(selected.code)}</span>
             <span className="truncate font-semibold">{selected.name}</span>
-            <span className="text-xs text-slate-500">{selected.code.toUpperCase()}</span>
+            <span className="text-xs text-slate-500">
+              {selected.code.toUpperCase()}
+              {selected.callingCode ? ` · +${selected.callingCode}` : ""}
+            </span>
           </span>
         ) : (
           <span className="text-slate-400">{placeholder}</span>
@@ -160,7 +166,10 @@ export default function CountryPicker({
                   <span>{iso2ToFlag(item.code)}</span>
                   <span className="truncate font-semibold">{item.name}</span>
                 </span>
-                <span className="text-xs text-slate-500">{item.code.toUpperCase()}</span>
+                <span className="text-xs text-slate-500">
+                  {item.code.toUpperCase()}
+                  {item.callingCode ? ` · +${item.callingCode}` : ""}
+                </span>
               </button>
             ))}
             {!filtered.length ? <p className="px-2 py-3 text-xs text-slate-500">Sin resultados.</p> : null}

@@ -16,6 +16,7 @@ import NavigationPolicyPanel from "@/components/configuracion/NavigationPolicyPa
 import SecurityPolicyPanel from "@/components/configuracion/SecurityPolicyPanel";
 import ServicesProcessingPanel from "@/components/configuracion/ServicesProcessingPanel";
 import TenantBasePanel from "@/components/configuracion/TenantBasePanel";
+import TenantDateTimeConfigPanel from "@/components/configuracion/TenantDateTimeConfigPanel";
 import { cn } from "@/lib/utils";
 
 type RootTab = "inicio" | "operacion" | "avanzado";
@@ -127,7 +128,12 @@ function sectionDomId(target: ConfiguracionAdvancedTabTarget) {
 function renderAdvancedSection(target: ConfiguracionAdvancedTabTarget) {
   switch (target) {
     case "empresa":
-      return <TenantBasePanel />;
+      return (
+        <div className="space-y-4">
+          <TenantBasePanel />
+          <TenantDateTimeConfigPanel />
+        </div>
+      );
     case "sucursales":
       return <CentralBranchesConfigPanel />;
     case "tema":

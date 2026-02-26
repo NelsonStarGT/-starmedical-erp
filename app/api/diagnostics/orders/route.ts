@@ -6,6 +6,9 @@ import { auditLog } from "@/lib/audit";
 import { createDiagnosticOrderSchema } from "@/lib/diagnostics/schemas";
 import { serializeDiagnosticOrder } from "@/lib/diagnostics/service";
 import { attachClinicalSummary } from "@/lib/server/diagnosticsClinical.service";
+import { getTenantDateTimeConfig } from "@/lib/datetime/config";
+import { parseDate, parseIsoDateString } from "@/lib/datetime/parse";
+import { buildRange } from "@/lib/datetime/range";
 
 export const runtime = "nodejs";
 
@@ -17,6 +20,8 @@ export async function GET(req: NextRequest) {
   const statusParam = searchParams.get("status");
   const adminStatusParam = searchParams.get("adminStatus");
   const q = searchParams.get("q") || undefined;
+  const rawDateFrom = (searchParams.get("dateFrom") || "").trim();
+  const rawDateTo = (searchParams.get("dateTo") || "").trim();
 
   let status: DiagnosticOrderStatus | undefined;
   if (statusParam) {
@@ -47,6 +52,28 @@ export async function GET(req: NextRequest) {
       { items: { some: { catalogItem: { name: { contains: q, mode: "insensitive" } } } } },
       { items: { some: { catalogItem: { code: { contains: q, mode: "insensitive" } } } } }
     ];
+  }
+
+  const tenantDateTime = await getTenantDateTimeConfig(auth.user?.tenantId);
+  const parseInputDate = (raw: string) => {
+    if (!raw) return null;
+    const isoDate = parseIsoDateString(raw);
+    if (isoDate) return isoDate;
+    const formattedDate = parseDate(raw, tenantDateTime.dateFormat);
+    if (formattedDate) return formattedDate;
+    const fallback = new Date(raw);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+  };
+  const range = buildRange({
+    from: parseInputDate(rawDateFrom),
+    to: parseInputDate(rawDateTo),
+    timeZone: tenantDateTime.timezone
+  });
+  if (range.from || range.to) {
+    where.orderedAt = {
+      ...(range.from ? { gte: range.from } : {}),
+      ...(range.to ? { lte: range.to } : {})
+    };
   }
 
   const orders = await prisma.diagnosticOrder.findMany({

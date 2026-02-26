@@ -1,5 +1,6 @@
 "use client";
 
+import { DateRangeField } from "@/components/ui/DateRangeField";
 import { cn } from "@/lib/utils";
 import type { AdminDiagnosticFiltersState, DiagnosticAcceptance, DiagnosticOrderStatus, DiagnosticOrderType } from "./types";
 
@@ -81,6 +82,12 @@ export default function AdminDiagnosticFilters({
           </select>
         </div>
       </div>
+
+      <DateRangeField
+        value={{ from: value.dateFrom, to: value.dateTo }}
+        onChange={(range) => set({ dateFrom: range.from, dateTo: range.to })}
+        labels={{ from: "Desde", to: "Hasta" }}
+      />
 
       <div className="rounded-xl border border-slate-200 bg-diagnostics-background px-4 py-3 text-xs text-slate-600">
         TODO: conectar filtros con proyección de flags sanitizados por cita/visita (sin exponer valores clínicos a administrativo).

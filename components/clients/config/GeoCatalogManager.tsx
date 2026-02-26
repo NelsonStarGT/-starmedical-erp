@@ -9,6 +9,7 @@ import {
   actionListGeoExplorerCountries,
   actionSetGeoDivisionActive
 } from "@/app/admin/clientes/actions";
+import CountryPicker from "@/components/clients/CountryPicker";
 import { cn } from "@/lib/utils";
 
 type GeoDivisionItem = {
@@ -66,7 +67,11 @@ type ImportSummary = {
 const COUNTRY_PAGE_SIZE = 14;
 const DIVISION_PAGE_SIZE = 20;
 
-export default function GeoCatalogManager() {
+export default function GeoCatalogManager({
+  countryFirstMode = false
+}: {
+  countryFirstMode?: boolean;
+} = {}) {
   const [isPending, startTransition] = useTransition();
 
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +102,7 @@ export default function GeoCatalogManager() {
   const [newSource, setNewSource] = useState<"official" | "operational">("operational");
 
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [auditWorldMode, setAuditWorldMode] = useState(!countryFirstMode);
 
   useEffect(() => {
     startTransition(async () => {
@@ -340,113 +346,165 @@ export default function GeoCatalogManager() {
         <p className="mt-1 text-sm text-slate-600">Consola table-first para administrar cobertura geográfica e importaciones por país.</p>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-5">
-        <FilterSelect
-          label="Estado"
-          value={statusFilter}
-          onChange={(value) => setStatusFilter(value as FilterStatus)}
-          options={[
-            { value: "all", label: "Todos" },
-            { value: "active", label: "Solo activos" },
-            { value: "inactive", label: "Solo inactivos" }
-          ]}
-        />
-        <FilterSelect
-          label="Cobertura"
-          value={coverageFilter}
-          onChange={(value) => setCoverageFilter(value as FilterCoverage)}
-          options={[
-            { value: "all", label: "Todos" },
-            { value: "empty", label: "Sin Admin1" },
-            { value: "with", label: "Con Admin1" }
-          ]}
-        />
-        <FilterSelect
-          label="Origen"
-          value={sourceFilter}
-          onChange={(value) => setSourceFilter(value as FilterSource)}
-          options={[
-            { value: "all", label: "Official + Operational" },
-            { value: "official", label: "Solo official" },
-            { value: "operational", label: "Solo operational" }
-          ]}
-        />
-        <div className="md:col-span-2 space-y-1">
-          <span className="text-xs font-semibold text-slate-500">Buscar país</span>
-          <input
-            value={countryQuery}
-            onChange={(event) => setCountryQuery(event.target.value)}
-            placeholder="Nombre o ISO"
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25"
+      {countryFirstMode ? (
+        <div className="grid gap-3 rounded-xl border border-slate-200 bg-[#f8fafc] p-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+          <CountryPicker
+            label="País para administrar"
+            value={selectedCountryId}
+            onChange={(nextCountryId) => {
+              setSelectedCountryId(nextCountryId);
+              setParentFilterId("");
+              setDivisionPage(1);
+            }}
+            options={countries.map((item) => ({
+              id: item.id,
+              code: item.code,
+              iso3: item.iso3 ?? null,
+              name: item.name,
+              callingCode: item.callingCode ?? null,
+              isActive: item.isActive
+            }))}
+            disabled={isPending || countries.length === 0}
+            className="min-w-0"
           />
+          <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={auditWorldMode}
+              onChange={(event) => setAuditWorldMode(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-[#4aa59c] focus:ring-[#4aa59c]"
+            />
+            Auditoría mundial
+          </label>
         </div>
-      </div>
+      ) : null}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200">
-        <table className="min-w-full text-sm">
-          <thead className="bg-[#f8fafc] text-[#2e75ba]">
-            <tr>
-              <th className="px-3 py-2 text-left font-semibold">País</th>
-              <th className="px-3 py-2 text-left font-semibold">ISO</th>
-              <th className="px-3 py-2 text-left font-semibold">Prefijo</th>
-              <th className="px-3 py-2 text-left font-semibold">Labels</th>
-              <th className="px-3 py-2 text-left font-semibold">Estado</th>
-              <th className="px-3 py-2 text-left font-semibold">Admin1</th>
-              <th className="px-3 py-2 text-left font-semibold">Official</th>
-              <th className="px-3 py-2 text-left font-semibold">Operational</th>
-              <th className="px-3 py-2 text-right font-semibold">Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleCountries.map((item, index) => (
-              <tr
-                key={item.id}
-                className={cn(index % 2 ? "bg-slate-50/60" : "bg-white", selectedCountryId === item.id && "bg-[#4aadf5]/10")}
-              >
-                <td className="px-3 py-2 font-semibold text-slate-800">{item.name}</td>
-                <td className="px-3 py-2 text-slate-600">{item.code}</td>
-                <td className="px-3 py-2 text-slate-600">{item.callingCode || "—"}</td>
-                <td className="px-3 py-2 text-xs text-slate-600">
-                  {(item.admin1Label || "Admin1") + " / " + (item.admin2Label || "Admin2")}
-                  {item.adminMaxLevel && item.adminMaxLevel >= 3 ? ` / ${item.admin3Label || "Admin3"}` : ""}
-                </td>
-                <td className="px-3 py-2">{item.isActive ? "Activo" : "Inactivo"}</td>
-                <td className="px-3 py-2">{item.level1Count}</td>
-                <td className="px-3 py-2">{item.officialCount}</td>
-                <td className="px-3 py-2">{item.operationalCount}</td>
-                <td className="px-3 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCountryId(item.id);
-                      setParentFilterId("");
-                      setDivisionPage(1);
-                    }}
-                    disabled={isPending}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:cursor-not-allowed disabled:opacity-60"
+      {countryFirstMode ? (
+        <details className="rounded-xl border border-[#dce7f5] bg-[#f8fafc] px-3 py-2 text-xs text-slate-600">
+          <summary className="cursor-pointer select-none font-semibold text-[#2e75ba]">Glosario Admin levels</summary>
+          <p className="mt-2">
+            <span className="font-semibold text-slate-700">Admin1:</span> división principal (departamentos, estados o provincias).
+          </p>
+          <p>
+            <span className="font-semibold text-slate-700">Admin2:</span> división secundaria (municipios, condados o cantones).
+          </p>
+          <p>
+            <span className="font-semibold text-slate-700">Admin3:</span> división terciaria opcional para cobertura más granular.
+          </p>
+        </details>
+      ) : null}
+
+      {!countryFirstMode || auditWorldMode ? (
+        <>
+          <div className="grid gap-3 md:grid-cols-5">
+            <FilterSelect
+              label="Estado"
+              value={statusFilter}
+              onChange={(value) => setStatusFilter(value as FilterStatus)}
+              options={[
+                { value: "all", label: "Todos" },
+                { value: "active", label: "Solo activos" },
+                { value: "inactive", label: "Solo inactivos" }
+              ]}
+            />
+            <FilterSelect
+              label="Cobertura"
+              value={coverageFilter}
+              onChange={(value) => setCoverageFilter(value as FilterCoverage)}
+              options={[
+                { value: "all", label: "Todos" },
+                { value: "empty", label: "Sin Admin1" },
+                { value: "with", label: "Con Admin1" }
+              ]}
+            />
+            <FilterSelect
+              label="Origen"
+              value={sourceFilter}
+              onChange={(value) => setSourceFilter(value as FilterSource)}
+              options={[
+                { value: "all", label: "Official + Operational" },
+                { value: "official", label: "Solo official" },
+                { value: "operational", label: "Solo operational" }
+              ]}
+            />
+            <div className="space-y-1 md:col-span-2">
+              <span className="text-xs font-semibold text-slate-500">Buscar país</span>
+              <input
+                value={countryQuery}
+                onChange={(event) => setCountryQuery(event.target.value)}
+                placeholder="Nombre o ISO"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25"
+              />
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <table className="min-w-full text-sm">
+              <thead className="bg-[#f8fafc] text-[#2e75ba]">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold">País</th>
+                  <th className="px-3 py-2 text-left font-semibold">ISO</th>
+                  <th className="px-3 py-2 text-left font-semibold">Prefijo</th>
+                  <th className="px-3 py-2 text-left font-semibold">Labels</th>
+                  <th className="px-3 py-2 text-left font-semibold">Estado</th>
+                  <th className="px-3 py-2 text-left font-semibold">Admin1</th>
+                  <th className="px-3 py-2 text-left font-semibold">Official</th>
+                  <th className="px-3 py-2 text-left font-semibold">Operational</th>
+                  <th className="px-3 py-2 text-right font-semibold">Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleCountries.map((item, index) => (
+                  <tr
+                    key={item.id}
+                    className={cn(index % 2 ? "bg-slate-50/60" : "bg-white", selectedCountryId === item.id && "bg-[#4aadf5]/10")}
                   >
-                    {selectedCountryId === item.id ? "Seleccionado" : "Seleccionar"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {!visibleCountries.length ? (
-              <tr>
-                <td colSpan={9} className="px-3 py-4 text-center text-xs text-slate-500">
-                  Sin países para los filtros actuales.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+                    <td className="px-3 py-2 font-semibold text-slate-800">{item.name}</td>
+                    <td className="px-3 py-2 text-slate-600">{item.code}</td>
+                    <td className="px-3 py-2 text-slate-600">{item.callingCode || "—"}</td>
+                    <td className="px-3 py-2 text-xs text-slate-600">
+                      {(item.admin1Label || "Admin1") + " / " + (item.admin2Label || "Admin2")}
+                      {item.adminMaxLevel && item.adminMaxLevel >= 3 ? ` / ${item.admin3Label || "Admin3"}` : ""}
+                    </td>
+                    <td className="px-3 py-2">{item.isActive ? "Activo" : "Inactivo"}</td>
+                    <td className="px-3 py-2">{item.level1Count}</td>
+                    <td className="px-3 py-2">{item.officialCount}</td>
+                    <td className="px-3 py-2">{item.operationalCount}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCountryId(item.id);
+                          setParentFilterId("");
+                          setDivisionPage(1);
+                        }}
+                        disabled={isPending}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {selectedCountryId === item.id ? "Seleccionado" : "Seleccionar"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!visibleCountries.length ? (
+                  <tr>
+                    <td colSpan={9} className="px-3 py-4 text-center text-xs text-slate-500">
+                      Sin países para los filtros actuales.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
 
-      <Pagination
-        page={countryPage}
-        pageCount={countryPageCount}
-        onPrev={() => setCountryPage((prev) => Math.max(1, prev - 1))}
-        onNext={() => setCountryPage((prev) => Math.min(countryPageCount, prev + 1))}
-      />
+          <Pagination
+            page={countryPage}
+            pageCount={countryPageCount}
+            onPrev={() => setCountryPage((prev) => Math.max(1, prev - 1))}
+            onNext={() => setCountryPage((prev) => Math.min(countryPageCount, prev + 1))}
+          />
+        </>
+      ) : null}
 
       <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-4">
         <div className="grid gap-3 md:grid-cols-4">

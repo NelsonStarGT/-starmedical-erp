@@ -1,6 +1,7 @@
 "use client";
 
 import { FilterBar } from "@/components/ui/FilterBar";
+import { DateField } from "@/components/ui/DateField";
 import { cn } from "@/lib/utils";
 import type { AgendaFiltersState, AgendaPriority, AgendaStatus, TriageStatus } from "./types";
 
@@ -87,15 +88,13 @@ export default function AgendaFilters({
       }
     >
       <div className="flex flex-wrap items-end gap-2">
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Fecha</label>
-          <input
-            type="date"
-            value={value.date}
-            onChange={(e) => onChange({ ...value, date: e.target.value })}
-            className={fieldClasses()}
-          />
-        </div>
+        <DateField
+          value={value.date}
+          onChange={(date) => onChange({ ...value, date })}
+          label="Fecha"
+          className="min-w-[170px]"
+          inputClassName={fieldClasses()}
+        />
 
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Estado</label>

@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { CLIENT_TYPE_LABELS } from "@/lib/clients/constants";
+import { formatDateForClients } from "@/lib/clients/dateFormat";
+import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
 import { safeGetClientRulesConfig } from "@/lib/clients/rulesConfig";
 import {
   buildClientProfileSelect,
@@ -31,6 +33,7 @@ import ClientNotesPanel from "@/components/clients/portal/ClientNotesPanel";
 import ClientActivityTimelinePanel from "@/components/clients/portal/ClientActivityTimelinePanel";
 import { ClientArchiveAction } from "@/components/clients/ClientArchiveAction";
 import ClientIdentityCard from "@/components/clients/ClientIdentityCard";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 type SearchParams = { tab?: string | string[] };
 
@@ -455,6 +458,7 @@ export default async function ClientePortalPage({
   });
   const isIncomplete = healthScore < 100;
   const currentUser = await getSessionUserFromCookies(cookies());
+  const dateFormat = await getClientsDateFormat(tenantIdFromUser(currentUser));
   const docPermissions = getClientDocumentPermissions(currentUser);
   const referralSummary = await (async () => {
     try {
@@ -684,7 +688,7 @@ export default async function ClientePortalPage({
                 </h1>
                 <p className="text-sm text-slate-600">
                   {client.status?.name ? `Estado: ${client.status.name}` : "Sin estado"} · Creado{" "}
-                  {client.createdAt.toLocaleDateString()}
+                  {formatDateForClients(client.createdAt, dateFormat)}
                 </p>
               </div>
             </div>

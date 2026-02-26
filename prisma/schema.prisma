@@ -1063,101 +1063,101 @@ model CrmLead {
 }
 
 model ClientProfile {
-  id                   String                @id @default(cuid())
-  type                 ClientProfileType
-  companyName          String?
-  tradeName            String?
-  firstName            String?
-  middleName           String?
-  thirdName            String?
-  lastName             String?
-  secondLastName       String?
-  thirdLastName        String?
-  sex                  PatientSex?
-  birthDate            DateTime?
-  bloodType            ClientBloodType?
-  professionCatalogId  String?
-  address              String?
-  city                 String?
-  department           String?
-  country              String?
-  nit                  String?               @unique
-  dpi                  String?               @unique
-  email                String?
-  phone                String?
-  phoneE164            String?               @db.VarChar(20)
-  photoAssetId         String?
-  photoUrl             String?
-  statusId             String?
-  sectorId             String?
-  institutionTypeId    String?
-  relationTypeId       String?
-  companyCategoryId    String?
-  institutionCategoryId String?
-  personCategoryId     String?
-  serviceSegments      ClientServiceSegment[] @default([PARTICULAR])
-  paymentTermId        String?
-  acquisitionSourceId  String?
-  acquisitionDetailOptionId String?
-  acquisitionOtherNote String?               @db.VarChar(150)
-  institutionIsPublic  Boolean?
-  institutionIsPayer   Boolean               @default(false)
-  institutionIsGroupOrganizer Boolean        @default(false)
-  institutionIsSponsor Boolean               @default(false)
-  insurerCutoffMode    InsurerBillingCutoffMode?
-  insurerCutoffDay     Int?
-  insurerBillingType   InsurerBillingType?
-  insurerDiscountRules Json?
-  insurerManualRulePriority Boolean          @default(false)
-  partyId              String?
-  deletedAt            DateTime?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  accounts             CrmAccount[]
-  contacts             CrmContact[]
-  leads                CrmLead[]
-  clientDocuments      ClientDocument[]
-  clientLocations      ClientLocation[]
-  clientContacts       ClientContact[]
-  linkedAsContact      ClientContact[]       @relation("ClientContactLinkedPerson")
-  companyRecord        Company?              @relation("CompanyClientProfile")
-  companyContacts      CompanyContact[]      @relation("CompanyContactPersonClient")
-  clientNotes          ClientNote[]
-  auditEvents          ClientAuditEvent[]
-  portalOtpChallenges  PortalOtpChallenge[]
-  portalSessions       PortalSession[]
-  portalAuditLogs      PortalAuditLog[]
-  affiliationsAsPerson ClientAffiliation[]   @relation("ClientAffiliationPerson")
-  affiliationsAsEntity ClientAffiliation[]   @relation("ClientAffiliationEntity")
-  affiliationsAsPayer  ClientAffiliation[]   @relation("ClientAffiliationPayer")
-  referralsMade        ClientReferral[]      @relation("ClientReferralReferrer")
-  referralsReceived    ClientReferral[]      @relation("ClientReferralReferred")
-  demographicData      ClientDemographicData? @relation("ClientDemographicProfile")
-  guardianRelationsAsMinor ClientGuardianRelation[] @relation("GuardianMinor")
-  guardianRelationsAsGuardian ClientGuardianRelation[] @relation("GuardianGuardian")
-  responsibleForDemographics ClientDemographicData[] @relation("ClientDemographicResponsible")
-  clientIdentifiers    ClientIdentifier[]
-  clientPhones         ClientPhone[]
-  clientEmails         ClientEmail[]
-  photoAsset           FileAsset?            @relation("ClientProfilePhotoAsset", fields: [photoAssetId], references: [id])
-  MembershipContract                 MembershipContract[]
-  MembershipDependent                MembershipDependent[]
+  id                                  String                                @id @default(cuid())
+  type                                ClientProfileType
+  companyName                         String?
+  tradeName                           String?
+  firstName                           String?
+  middleName                          String?
+  thirdName                           String?
+  lastName                            String?
+  secondLastName                      String?
+  thirdLastName                       String?
+  sex                                 PatientSex?
+  birthDate                           DateTime?
+  bloodType                           ClientBloodType?
+  professionCatalogId                 String?
+  address                             String?
+  city                                String?
+  department                          String?
+  country                             String?
+  nit                                 String?                               @unique
+  dpi                                 String?                               @unique
+  email                               String?
+  phone                               String?
+  phoneE164                           String?                               @db.VarChar(20)
+  photoAssetId                        String?
+  photoUrl                            String?
+  statusId                            String?
+  sectorId                            String?
+  institutionTypeId                   String?
+  relationTypeId                      String?
+  companyCategoryId                   String?
+  institutionCategoryId               String?
+  personCategoryId                    String?
+  serviceSegments                     ClientServiceSegment[]                @default([PARTICULAR])
+  paymentTermId                       String?
+  acquisitionSourceId                 String?
+  acquisitionDetailOptionId           String?
+  acquisitionOtherNote                String?                               @db.VarChar(150)
+  institutionIsPublic                 Boolean?
+  institutionIsPayer                  Boolean                               @default(false)
+  institutionIsGroupOrganizer         Boolean                               @default(false)
+  institutionIsSponsor                Boolean                               @default(false)
+  insurerCutoffMode                   InsurerBillingCutoffMode?
+  insurerCutoffDay                    Int?
+  insurerBillingType                  InsurerBillingType?
+  insurerDiscountRules                Json?
+  insurerManualRulePriority           Boolean                               @default(false)
+  partyId                             String?
+  deletedAt                           DateTime?
+  createdAt                           DateTime                              @default(now())
+  updatedAt                           DateTime                              @updatedAt
+  accounts                            CrmAccount[]
+  contacts                            CrmContact[]
+  leads                               CrmLead[]
+  clientDocuments                     ClientDocument[]
+  clientLocations                     ClientLocation[]
+  clientContacts                      ClientContact[]
+  linkedAsContact                     ClientContact[]                       @relation("ClientContactLinkedPerson")
+  companyRecord                       Company?                              @relation("CompanyClientProfile")
+  companyContacts                     CompanyContact[]                      @relation("CompanyContactPersonClient")
+  clientNotes                         ClientNote[]
+  auditEvents                         ClientAuditEvent[]
+  portalOtpChallenges                 PortalOtpChallenge[]
+  portalSessions                      PortalSession[]
+  portalAuditLogs                     PortalAuditLog[]
+  affiliationsAsPerson                ClientAffiliation[]                   @relation("ClientAffiliationPerson")
+  affiliationsAsEntity                ClientAffiliation[]                   @relation("ClientAffiliationEntity")
+  affiliationsAsPayer                 ClientAffiliation[]                   @relation("ClientAffiliationPayer")
+  referralsMade                       ClientReferral[]                      @relation("ClientReferralReferrer")
+  referralsReceived                   ClientReferral[]                      @relation("ClientReferralReferred")
+  demographicData                     ClientDemographicData?                @relation("ClientDemographicProfile")
+  guardianRelationsAsMinor            ClientGuardianRelation[]              @relation("GuardianMinor")
+  guardianRelationsAsGuardian         ClientGuardianRelation[]              @relation("GuardianGuardian")
+  responsibleForDemographics          ClientDemographicData[]               @relation("ClientDemographicResponsible")
+  clientIdentifiers                   ClientIdentifier[]
+  clientPhones                        ClientPhone[]
+  clientEmails                        ClientEmail[]
+  photoAsset                          FileAsset?                            @relation("ClientProfilePhotoAsset", fields: [photoAssetId], references: [id])
+  MembershipContract                  MembershipContract[]
+  MembershipDependent                 MembershipDependent[]
   MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
-  diagnosticOrders     DiagnosticOrder[]
-  labTestOrders        LabTestOrder[]        @relation("LabTestOrderPatient")
-  visits               Visit[]
-  status               ClientCatalogItem?    @relation("ClientStatus", fields: [statusId], references: [id])
-  sector               ClientCatalogItem?    @relation("ClientSector", fields: [sectorId], references: [id])
-  institutionType      ClientCatalogItem?    @relation("ClientInstitutionType", fields: [institutionTypeId], references: [id])
-  relationType         ClientCatalogItem?    @relation("ClientRelationType", fields: [relationTypeId], references: [id])
-  acquisitionSource    ClientAcquisitionSource? @relation(fields: [acquisitionSourceId], references: [id], onDelete: SetNull)
-  acquisitionDetailOption ClientAcquisitionDetailOption? @relation("ClientProfileAcquisitionDetail", fields: [acquisitionDetailOptionId], references: [id], onDelete: SetNull)
-  professionCatalog    ClientCatalogItem?    @relation("ClientPersonProfession", fields: [professionCatalogId], references: [id])
-  companyCategory      ClientCatalogItem?    @relation("ClientCompanyCategory", fields: [companyCategoryId], references: [id])
-  institutionCategory  ClientCatalogItem?    @relation("ClientInstitutionCategory", fields: [institutionCategoryId], references: [id])
-  personCategory       ClientCatalogItem?    @relation("ClientPersonCategory", fields: [personCategoryId], references: [id])
-  paymentTerm          ClientCatalogItem?    @relation("ClientPaymentTerm", fields: [paymentTermId], references: [id])
-  party                Party?                @relation("ClientProfileParty", fields: [partyId], references: [id], onDelete: SetNull)
+  diagnosticOrders                    DiagnosticOrder[]
+  labTestOrders                       LabTestOrder[]                        @relation("LabTestOrderPatient")
+  visits                              Visit[]
+  status                              ClientCatalogItem?                    @relation("ClientStatus", fields: [statusId], references: [id])
+  sector                              ClientCatalogItem?                    @relation("ClientSector", fields: [sectorId], references: [id])
+  institutionType                     ClientCatalogItem?                    @relation("ClientInstitutionType", fields: [institutionTypeId], references: [id])
+  relationType                        ClientCatalogItem?                    @relation("ClientRelationType", fields: [relationTypeId], references: [id])
+  acquisitionSource                   ClientAcquisitionSource?              @relation(fields: [acquisitionSourceId], references: [id], onDelete: SetNull)
+  acquisitionDetailOption             ClientAcquisitionDetailOption?        @relation("ClientProfileAcquisitionDetail", fields: [acquisitionDetailOptionId], references: [id], onDelete: SetNull)
+  professionCatalog                   ClientCatalogItem?                    @relation("ClientPersonProfession", fields: [professionCatalogId], references: [id])
+  companyCategory                     ClientCatalogItem?                    @relation("ClientCompanyCategory", fields: [companyCategoryId], references: [id])
+  institutionCategory                 ClientCatalogItem?                    @relation("ClientInstitutionCategory", fields: [institutionCategoryId], references: [id])
+  personCategory                      ClientCatalogItem?                    @relation("ClientPersonCategory", fields: [personCategoryId], references: [id])
+  paymentTerm                         ClientCatalogItem?                    @relation("ClientPaymentTerm", fields: [paymentTermId], references: [id])
+  party                               Party?                                @relation("ClientProfileParty", fields: [partyId], references: [id], onDelete: SetNull)
 
   @@index([email, phone])
   @@index([phoneE164])
@@ -1194,31 +1194,98 @@ model ClientAffiliation {
 }
 
 model ClientCatalogItem {
-  id                       String                       @id @default(cuid())
-  type                     ClientCatalogType
-  name                     String
-  description              String?
-  isActive                 Boolean                      @default(true)
-  createdAt                DateTime                     @default(now())
-  updatedAt                DateTime                     @updatedAt
-  clientsByStatus          ClientProfile[]              @relation("ClientStatus")
-  clientsBySector          ClientProfile[]              @relation("ClientSector")
-  clientsByInstitutionType ClientProfile[]              @relation("ClientInstitutionType")
-  clientsByRelationType    ClientProfile[]              @relation("ClientRelationType")
-  clientsByPersonCategory  ClientProfile[]              @relation("ClientPersonCategory")
-  clientsByCompanyCategory ClientProfile[]              @relation("ClientCompanyCategory")
-  clientsByInstitutionCategory ClientProfile[]          @relation("ClientInstitutionCategory")
-  clientsByProfession      ClientProfile[]              @relation("ClientPersonProfession")
-  clientsByPaymentTerm     ClientProfile[]              @relation("ClientPaymentTerm")
-  clientDemographicsByMaritalStatus ClientDemographicData[] @relation("ClientDemographicMaritalStatus")
-  clientDemographicsByAcademicLevel ClientDemographicData[] @relation("ClientDemographicAcademicLevel")
-  guardianRelationshipTypes ClientGuardianRelation[]    @relation("ClientGuardianRelationshipType")
-  clientIdentifiersByDocumentType ClientIdentifier[]    @relation("ClientIdentifierDocumentType")
-  clientDocuments          ClientDocument[]             @relation("ClientDocumentType")
-  requiredDocumentRules    ClientRequiredDocumentRule[]
+  id                                String                       @id @default(cuid())
+  type                              ClientCatalogType
+  name                              String
+  description                       String?
+  isActive                          Boolean                      @default(true)
+  createdAt                         DateTime                     @default(now())
+  updatedAt                         DateTime                     @updatedAt
+  clientsByStatus                   ClientProfile[]              @relation("ClientStatus")
+  clientsBySector                   ClientProfile[]              @relation("ClientSector")
+  clientsByInstitutionType          ClientProfile[]              @relation("ClientInstitutionType")
+  clientsByRelationType             ClientProfile[]              @relation("ClientRelationType")
+  clientsByPersonCategory           ClientProfile[]              @relation("ClientPersonCategory")
+  clientsByCompanyCategory          ClientProfile[]              @relation("ClientCompanyCategory")
+  clientsByInstitutionCategory      ClientProfile[]              @relation("ClientInstitutionCategory")
+  clientsByProfession               ClientProfile[]              @relation("ClientPersonProfession")
+  clientsByPaymentTerm              ClientProfile[]              @relation("ClientPaymentTerm")
+  clientDemographicsByMaritalStatus ClientDemographicData[]      @relation("ClientDemographicMaritalStatus")
+  clientDemographicsByAcademicLevel ClientDemographicData[]      @relation("ClientDemographicAcademicLevel")
+  guardianRelationshipTypes         ClientGuardianRelation[]     @relation("ClientGuardianRelationshipType")
+  clientIdentifiersByDocumentType   ClientIdentifier[]           @relation("ClientIdentifierDocumentType")
+  clientDocuments                   ClientDocument[]             @relation("ClientDocumentType")
+  requiredDocumentRules             ClientRequiredDocumentRule[]
 
   @@unique([type, name])
   @@index([type, isActive])
+}
+
+model ClientContactDepartmentDirectory {
+  id            String                            @id @default(cuid())
+  tenantId      String
+  code          String
+  name          String
+  description   String?
+  sortOrder     Int                               @default(100)
+  isActive      Boolean                           @default(true)
+  createdAt     DateTime                          @default(now())
+  updatedAt     DateTime                          @updatedAt
+  jobTitleLinks ClientContactDepartmentJobTitle[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive, sortOrder, name])
+}
+
+model ClientContactJobTitleDirectory {
+  id              String                            @id @default(cuid())
+  tenantId        String
+  code            String
+  name            String
+  description     String?
+  sortOrder       Int                               @default(100)
+  isActive        Boolean                           @default(true)
+  createdAt       DateTime                          @default(now())
+  updatedAt       DateTime                          @updatedAt
+  departmentLinks ClientContactDepartmentJobTitle[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive, sortOrder, name])
+}
+
+model ClientPbxCategoryDirectory {
+  id          String   @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  description String?
+  sortOrder   Int      @default(100)
+  isActive    Boolean  @default(true)
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive, sortOrder, name])
+}
+
+model ClientContactDepartmentJobTitle {
+  id           String                           @id @default(cuid())
+  tenantId     String
+  departmentId String
+  jobTitleId   String
+  isActive     Boolean                          @default(true)
+  createdAt    DateTime                         @default(now())
+  updatedAt    DateTime                         @updatedAt
+  department   ClientContactDepartmentDirectory @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  jobTitle     ClientContactJobTitleDirectory   @relation(fields: [jobTitleId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, departmentId, jobTitleId])
+  @@index([tenantId, departmentId, isActive])
+  @@index([tenantId, jobTitleId, isActive])
 }
 
 model ClientDocument {
@@ -1462,27 +1529,28 @@ model CompanyDocument {
 }
 
 model GeoCountry {
-  id                 String            @id @default(cuid())
-  iso2               String            @unique
-  iso3               String?           @unique
-  name               String
-  callingCode        String?           @db.VarChar(10)
-  admin1Label        String?
-  admin2Label        String?
-  admin3Label        String?
-  adminMaxLevel      Int?
-  isActive           Boolean           @default(true)
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  meta               GeoCountryMeta?
-  divisions          GeoDivision[]
-  admin1             GeoAdmin1[]
-  postalCodes        GeoPostalCode[]
-  demographicsBirthCountry ClientDemographicData[] @relation("ClientDemographicBirthCountry")
+  id                           String                  @id @default(cuid())
+  iso2                         String                  @unique
+  iso3                         String?                 @unique
+  name                         String
+  callingCode                  String?                 @db.VarChar(10)
+  admin1Label                  String?
+  admin2Label                  String?
+  admin3Label                  String?
+  adminMaxLevel                Int?
+  isActive                     Boolean                 @default(true)
+  createdAt                    DateTime                @default(now())
+  updatedAt                    DateTime                @updatedAt
+  meta                         GeoCountryMeta?
+  divisions                    GeoDivision[]
+  admin1                       GeoAdmin1[]
+  postalCodes                  GeoPostalCode[]
+  demographicsBirthCountry     ClientDemographicData[] @relation("ClientDemographicBirthCountry")
   demographicsResidenceCountry ClientDemographicData[] @relation("ClientDemographicResidenceCountry")
-  locationsByCountry ClientLocation[]  @relation("ClientLocationCountry")
-  clientIdentifiers  ClientIdentifier[] @relation("ClientIdentifierCountry")
-  companyLocations   CompanyLocation[] @relation("CompanyLocationCountry")
+  locationsByCountry           ClientLocation[]        @relation("ClientLocationCountry")
+  clientIdentifiers            ClientIdentifier[]      @relation("ClientIdentifierCountry")
+  companyLocations             CompanyLocation[]       @relation("CompanyLocationCountry")
+  tenantClientsConfigOperating TenantClientsConfig[]   @relation("TenantClientsOperatingCountry")
 
   @@index([name])
   @@index([isActive])
@@ -1504,7 +1572,7 @@ model GeoCountryMeta {
 }
 
 model GeoDivision {
-  id                String          @id @default(cuid())
+  id                String                @id @default(cuid())
   countryId         String
   level             Int
   code              String
@@ -1515,12 +1583,12 @@ model GeoDivision {
   legacyGeoAdmin2Id String?
   legacyGeoAdmin3Id String?
   dataSource        GeoDivisionDataSource @default(official)
-  isActive          Boolean         @default(true)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  country           GeoCountry      @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  parent            GeoDivision?    @relation("GeoDivisionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children          GeoDivision[]   @relation("GeoDivisionHierarchy")
+  isActive          Boolean               @default(true)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  country           GeoCountry            @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  parent            GeoDivision?          @relation("GeoDivisionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children          GeoDivision[]         @relation("GeoDivisionHierarchy")
   postalCodes       GeoPostalCode[]
 
   @@unique([countryId, level, code, parentId])
@@ -1662,30 +1730,30 @@ model ClientLocation {
 }
 
 model ClientAcquisitionSource {
-  id           String                          @id @default(cuid())
-  name         String                          @unique
-  code         String?                         @unique
-  category     String?
-  isActive     Boolean                         @default(true)
-  sortOrder    Int                             @default(0)
-  createdAt    DateTime                        @default(now())
-  updatedAt    DateTime                        @updatedAt
-  details      ClientAcquisitionDetailOption[]
-  clients      ClientProfile[]
+  id        String                          @id @default(cuid())
+  name      String                          @unique
+  code      String?                         @unique
+  category  String?
+  isActive  Boolean                         @default(true)
+  sortOrder Int                             @default(0)
+  createdAt DateTime                        @default(now())
+  updatedAt DateTime                        @updatedAt
+  details   ClientAcquisitionDetailOption[]
+  clients   ClientProfile[]
 
   @@index([isActive, sortOrder, name])
 }
 
 model ClientAcquisitionDetailOption {
-  id         String                  @id @default(cuid())
-  sourceId   String
-  code       String
-  name       String
-  isActive   Boolean                 @default(true)
-  createdAt  DateTime                @default(now())
-  updatedAt  DateTime                @updatedAt
-  source     ClientAcquisitionSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  clients    ClientProfile[]         @relation("ClientProfileAcquisitionDetail")
+  id        String                  @id @default(cuid())
+  sourceId  String
+  code      String
+  name      String
+  isActive  Boolean                 @default(true)
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
+  source    ClientAcquisitionSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  clients   ClientProfile[]         @relation("ClientProfileAcquisitionDetail")
 
   @@unique([sourceId, code])
   @@index([sourceId, isActive, name])
@@ -1705,23 +1773,23 @@ model ClientReferral {
 }
 
 model ClientDemographicData {
-  id                 String             @id @default(cuid())
-  clientId           String             @unique
-  maritalStatusId    String?
-  academicLevelId    String?
-  responsibleClientId String?
-  birthCountryId     String?
-  birthCity          String?
-  residenceCountryId String?
-  residenceSameAsBirth Boolean          @default(false)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  client             ClientProfile      @relation("ClientDemographicProfile", fields: [clientId], references: [id], onDelete: Cascade)
-  maritalStatus      ClientCatalogItem? @relation("ClientDemographicMaritalStatus", fields: [maritalStatusId], references: [id], onDelete: SetNull)
-  academicLevel      ClientCatalogItem? @relation("ClientDemographicAcademicLevel", fields: [academicLevelId], references: [id], onDelete: SetNull)
-  responsibleClient  ClientProfile?     @relation("ClientDemographicResponsible", fields: [responsibleClientId], references: [id], onDelete: SetNull)
-  birthCountry       GeoCountry?        @relation("ClientDemographicBirthCountry", fields: [birthCountryId], references: [id], onDelete: SetNull)
-  residenceCountry   GeoCountry?        @relation("ClientDemographicResidenceCountry", fields: [residenceCountryId], references: [id], onDelete: SetNull)
+  id                   String             @id @default(cuid())
+  clientId             String             @unique
+  maritalStatusId      String?
+  academicLevelId      String?
+  responsibleClientId  String?
+  birthCountryId       String?
+  birthCity            String?
+  residenceCountryId   String?
+  residenceSameAsBirth Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  client               ClientProfile      @relation("ClientDemographicProfile", fields: [clientId], references: [id], onDelete: Cascade)
+  maritalStatus        ClientCatalogItem? @relation("ClientDemographicMaritalStatus", fields: [maritalStatusId], references: [id], onDelete: SetNull)
+  academicLevel        ClientCatalogItem? @relation("ClientDemographicAcademicLevel", fields: [academicLevelId], references: [id], onDelete: SetNull)
+  responsibleClient    ClientProfile?     @relation("ClientDemographicResponsible", fields: [responsibleClientId], references: [id], onDelete: SetNull)
+  birthCountry         GeoCountry?        @relation("ClientDemographicBirthCountry", fields: [birthCountryId], references: [id], onDelete: SetNull)
+  residenceCountry     GeoCountry?        @relation("ClientDemographicResidenceCountry", fields: [residenceCountryId], references: [id], onDelete: SetNull)
 
   @@index([maritalStatusId])
   @@index([academicLevelId])
@@ -1773,20 +1841,20 @@ model ClientIdentifier {
 }
 
 model ClientPhone {
-  id          String        @id @default(cuid())
-  clientId    String
-  category    ClientPhoneCategory @default(PRIMARY)
+  id           String                  @id @default(cuid())
+  clientId     String
+  category     ClientPhoneCategory     @default(PRIMARY)
   relationType ClientPhoneRelationType @default(TITULAR)
-  countryCode String
-  number      String
-  e164        String?       @db.VarChar(20)
-  canCall     Boolean       @default(true)
-  canWhatsapp Boolean       @default(false)
-  isPrimary   Boolean       @default(false)
-  isActive    Boolean       @default(true)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  client      ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  countryCode  String
+  number       String
+  e164         String?                 @db.VarChar(20)
+  canCall      Boolean                 @default(true)
+  canWhatsapp  Boolean                 @default(false)
+  isPrimary    Boolean                 @default(false)
+  isActive     Boolean                 @default(true)
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  client       ClientProfile           @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@unique([clientId, countryCode, number])
   @@index([clientId, isPrimary, isActive])
@@ -3628,33 +3696,33 @@ model MembershipConfig {
 }
 
 model MembershipContract {
-  id                  String                     @id @default(cuid())
-  code                String                     @unique @default(dbgenerated("concat('MBR-', lpad((nextval('membership_contract_code_seq'::regclass))::text, 6, '0'::text))"))
-  ownerType           MembershipOwnerType
-  ownerId             String?
-  planId              String
-  status              MembershipStatus           @default(PENDIENTE)
-  startAt             DateTime
-  endAt               DateTime?
-  nextRenewAt         DateTime?
-  billingFrequency    MembershipBillingFrequency @default(MONTHLY)
-  priceLockedMonthly  Decimal?                   @db.Decimal(12, 2)
-  priceLockedAnnual   Decimal?                   @db.Decimal(12, 2)
-  balance             Decimal                    @default(0) @db.Decimal(14, 2)
-  channel             String?
-  assignedBranchId    String?
-  allowDependents     Boolean                    @default(true)
-  lastInvoiceId       String?
-  createdAt           DateTime                   @default(now())
-  updatedAt           DateTime
-  Branch              Branch?                    @relation(fields: [assignedBranchId], references: [id])
-  ClientProfile       ClientProfile?             @relation(fields: [ownerId], references: [id])
-  MembershipPlan      MembershipPlan             @relation(fields: [planId], references: [id])
-  MembershipDependent MembershipDependent[]
-  MembershipException MembershipException[]
-  MembershipPayment   MembershipPayment[]
+  id                                  String                                @id @default(cuid())
+  code                                String                                @unique @default(dbgenerated("concat('MBR-', lpad((nextval('membership_contract_code_seq'::regclass))::text, 6, '0'::text))"))
+  ownerType                           MembershipOwnerType
+  ownerId                             String?
+  planId                              String
+  status                              MembershipStatus                      @default(PENDIENTE)
+  startAt                             DateTime
+  endAt                               DateTime?
+  nextRenewAt                         DateTime?
+  billingFrequency                    MembershipBillingFrequency            @default(MONTHLY)
+  priceLockedMonthly                  Decimal?                              @db.Decimal(12, 2)
+  priceLockedAnnual                   Decimal?                              @db.Decimal(12, 2)
+  balance                             Decimal                               @default(0) @db.Decimal(14, 2)
+  channel                             String?
+  assignedBranchId                    String?
+  allowDependents                     Boolean                               @default(true)
+  lastInvoiceId                       String?
+  createdAt                           DateTime                              @default(now())
+  updatedAt                           DateTime
+  Branch                              Branch?                               @relation(fields: [assignedBranchId], references: [id])
+  ClientProfile                       ClientProfile?                        @relation(fields: [ownerId], references: [id])
+  MembershipPlan                      MembershipPlan                        @relation(fields: [planId], references: [id])
+  MembershipDependent                 MembershipDependent[]
+  MembershipException                 MembershipException[]
+  MembershipPayment                   MembershipPayment[]
   MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
-  MembershipUsage     MembershipUsage[]
+  MembershipUsage                     MembershipUsage[]
 
   @@index([lastInvoiceId])
   @@index([nextRenewAt])
@@ -3713,24 +3781,24 @@ model MembershipPayment {
 }
 
 model MembershipPlan {
-  id                 String               @id @default(cuid())
-  slug               String               @unique
-  name               String
-  type               MembershipPlanType
-  segment            MembershipPlanSegment @default(B2C)
-  categoryId         String?
-  imageUrl           String?
-  active             Boolean              @default(true)
-  description        String?
-  priceMonthly       Decimal              @db.Decimal(12, 2)
-  priceAnnual        Decimal              @db.Decimal(12, 2)
-  currency           String               @default("GTQ")
-  maxDependents      Int?
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime
-  MembershipBenefit  MembershipBenefit[]
-  MembershipPlanCategory MembershipPlanCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  MembershipContract MembershipContract[]
+  id                                  String                                @id @default(cuid())
+  slug                                String                                @unique
+  name                                String
+  type                                MembershipPlanType
+  segment                             MembershipPlanSegment                 @default(B2C)
+  categoryId                          String?
+  imageUrl                            String?
+  active                              Boolean                               @default(true)
+  description                         String?
+  priceMonthly                        Decimal                               @db.Decimal(12, 2)
+  priceAnnual                         Decimal                               @db.Decimal(12, 2)
+  currency                            String                                @default("GTQ")
+  maxDependents                       Int?
+  createdAt                           DateTime                              @default(now())
+  updatedAt                           DateTime
+  MembershipBenefit                   MembershipBenefit[]
+  MembershipPlanCategory              MembershipPlanCategory?               @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  MembershipContract                  MembershipContract[]
   MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
 
   @@index([categoryId])
@@ -3739,14 +3807,14 @@ model MembershipPlan {
 }
 
 model MembershipPlanCategory {
-  id                 String                              @id @default(cuid())
-  name               String
-  segment            MembershipPlanSegment
-  isActive           Boolean                             @default(true)
-  sortOrder          Int                                 @default(0)
-  createdAt          DateTime                            @default(now())
-  updatedAt          DateTime                            @default(now())
-  MembershipPlan     MembershipPlan[]
+  id                                  String                                @id @default(cuid())
+  name                                String
+  segment                             MembershipPlanSegment
+  isActive                            Boolean                               @default(true)
+  sortOrder                           Int                                   @default(0)
+  createdAt                           DateTime                              @default(now())
+  updatedAt                           DateTime                              @default(now())
+  MembershipPlan                      MembershipPlan[]
   MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
 
   @@unique([name, segment])
@@ -3754,24 +3822,24 @@ model MembershipPlanCategory {
 }
 
 model MembershipPublicSubscriptionRequest {
-  id                 String                 @id @default(cuid())
-  idempotencyKey     String                 @unique
-  channel            String                 @default("WEB")
-  planId             String
-  segment            MembershipPlanSegment
-  categoryId         String?
-  clientProfileId    String?
-  contractId         String?
-  invoiceId          String?
-  status             String                 @default("CREATED")
-  requestPayload     Json
-  responsePayload    Json?
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @default(now())
-  MembershipPlan     MembershipPlan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  id                     String                  @id @default(cuid())
+  idempotencyKey         String                  @unique
+  channel                String                  @default("WEB")
+  planId                 String
+  segment                MembershipPlanSegment
+  categoryId             String?
+  clientProfileId        String?
+  contractId             String?
+  invoiceId              String?
+  status                 String                  @default("CREATED")
+  requestPayload         Json
+  responsePayload        Json?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @default(now())
+  MembershipPlan         MembershipPlan          @relation(fields: [planId], references: [id], onDelete: Cascade)
   MembershipPlanCategory MembershipPlanCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  ClientProfile      ClientProfile?         @relation(fields: [clientProfileId], references: [id], onDelete: SetNull)
-  MembershipContract MembershipContract?    @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  ClientProfile          ClientProfile?          @relation(fields: [clientProfileId], references: [id], onDelete: SetNull)
+  MembershipContract     MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
 
   @@index([clientProfileId])
   @@index([contractId])
@@ -4678,6 +4746,36 @@ model TenantThemePreference {
   @@index([updatedAt])
 }
 
+model TenantClientsConfig {
+  id                             String            @id @default(cuid())
+  tenantId                       String            @unique
+  clientsDateFormat              ClientsDateFormat @default(DMY)
+  isOperatingCountryPinned       Boolean           @default(false)
+  operatingCountryId             String?
+  operatingCountryDefaultsScopes Json?
+  updatedByUserId                String?
+  createdAt                      DateTime          @default(now())
+  updatedAt                      DateTime          @updatedAt
+  operatingCountry               GeoCountry?       @relation("TenantClientsOperatingCountry", fields: [operatingCountryId], references: [id], onDelete: SetNull)
+
+  @@index([updatedAt])
+  @@index([operatingCountryId])
+}
+
+model TenantDateTimeConfig {
+  id              String             @id @default(cuid())
+  tenantId        String             @unique
+  dateFormat      ClientsDateFormat  @default(DMY)
+  timeFormat      TenantTimeFormat   @default(H24)
+  timezone        String             @default("America/Guatemala")
+  weekStartsOn    TenantWeekStartsOn @default(MON)
+  updatedByUserId String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([updatedAt])
+}
+
 model TenantNavigationPolicy {
   id                      String   @id @default(cuid())
   tenantId                String   @unique
@@ -4827,17 +4925,17 @@ model SystemFeatureConfig {
 
 // Global email configuration (DreamHost SMTP) // LAB EMAIL CONFIG
 model GlobalEmailConfig {
-  id              String   @id @default("global")
-  smtpHost        String
-  smtpPort        Int
-  smtpSecure      Boolean  @default(true)
-  smtpUser        String
-  smtpPasswordEnc String
-  fromName        String
-  fromEmail       String
+  id                      String   @id @default("global")
+  smtpHost                String
+  smtpPort                Int
+  smtpSecure              Boolean  @default(true)
+  smtpUser                String
+  smtpPasswordEnc         String
+  fromName                String
+  fromEmail               String
   deliverabilityChecklist Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 }
 
 model EmailSandboxConfig {
@@ -5571,6 +5669,22 @@ enum ClientServiceSegment {
   COMPANY
   INSTITUTION
   INSURER
+}
+
+enum ClientsDateFormat {
+  DMY
+  MDY
+  YMD
+}
+
+enum TenantTimeFormat {
+  H12
+  H24
+}
+
+enum TenantWeekStartsOn {
+  MON
+  SUN
 }
 
 enum ClientAffiliationStatus {

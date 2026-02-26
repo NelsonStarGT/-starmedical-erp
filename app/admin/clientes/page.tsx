@@ -1,9 +1,14 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { ClientProfileType } from "@prisma/client";
 import { ArrowRight, Building2, FileBarChart2, UserPlus } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { getSessionUserFromCookies } from "@/lib/auth";
 import { getClientsHomeKpis } from "@/lib/clients/dashboard.service";
 import { getClientCompletenessScore } from "@/lib/clients/completeness";
+import { formatDateForClients } from "@/lib/clients/dateFormat";
+import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 function startOfDay(date: Date) {
   const d = new Date(date);
@@ -37,6 +42,8 @@ function displayName(row: {
 }
 
 export default async function ClientesDashboardPage() {
+  const currentUser = await getSessionUserFromCookies(cookies());
+  const dateFormat = await getClientsDateFormat(tenantIdFromUser(currentUser));
   const now = new Date();
   const todayStart = startOfDay(now);
   const since7 = subDays(now, 7);
@@ -268,7 +275,7 @@ export default async function ClientesDashboardPage() {
               ) : (
                 recentRows.map((row, index) => (
                   <tr key={row.id} className={index % 2 ? "bg-slate-50/60" : "bg-white"}>
-                    <td className="px-3 py-2">{row.createdAt.toLocaleDateString()}</td>
+                    <td className="px-3 py-2">{formatDateForClients(row.createdAt, dateFormat)}</td>
                     <td className="px-3 py-2 font-semibold text-slate-900">{displayName(row) || "Cliente"}</td>
                     <td className="px-3 py-2">{row.type}</td>
                     <td className="px-3 py-2">{[row.city, row.country].filter(Boolean).join(", ") || "—"}</td>

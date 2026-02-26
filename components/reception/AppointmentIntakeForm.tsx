@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { CalendarPlus, CheckCircle2, Search, UserPlus } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import { DateField } from "@/components/ui/DateField";
+import { DateTimeField } from "@/components/ui/DateTimeField";
 import { cn } from "@/lib/utils";
 import { useReceptionBranch } from "@/app/admin/reception/BranchContext";
 import {
@@ -418,33 +420,16 @@ export default function AppointmentIntakeForm({
                   />
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-500">Fecha *</label>
-                    <input
-                      type="date"
-                      value={date}
-                      onChange={(e) => {
-                        setDate(e.target.value);
-                        setArrivedToday(false);
-                      }}
-                      className={fieldClasses(isPending)}
-                      disabled={isPending}
-                      aria-label="Fecha de cita"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-500">Hora *</label>
-                    <input
-                      type="time"
-                      value={time}
-                      onChange={(e) => setTime(e.target.value)}
-                      className={fieldClasses(isPending)}
-                      disabled={isPending}
-                      aria-label="Hora de cita"
-                    />
-                  </div>
-                </div>
+                <DateTimeField
+                  value={{ date, time }}
+                  onChange={(next) => {
+                    if (next.date !== date) setArrivedToday(false);
+                    setDate(next.date);
+                    setTime(next.time);
+                  }}
+                  labels={{ date: "Fecha *", time: "Hora *" }}
+                  disabled={isPending}
+                />
 
                 <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                   <input
@@ -590,16 +575,14 @@ export default function AppointmentIntakeForm({
               <option value="F">Femenino</option>
             </select>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-500">Fecha nacimiento</label>
-            <input
-              type="date"
-              value={newPatient.birthDate}
-              onChange={(e) => setNewPatient((prev) => ({ ...prev, birthDate: e.target.value }))}
-              className={fieldClasses(isPending)}
-              disabled={isPending}
-            />
-          </div>
+          <DateField
+            value={newPatient.birthDate}
+            onChange={(birthDate) => setNewPatient((prev) => ({ ...prev, birthDate }))}
+            label="Fecha nacimiento"
+            className="space-y-1"
+            disabled={isPending}
+            maxDate={todayKey()}
+          />
           <div className="space-y-1 md:col-span-2">
             <label className="text-xs font-semibold text-slate-500">NIT</label>
             <input

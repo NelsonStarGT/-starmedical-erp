@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ClientLocationType } from "@prisma/client";
-import { buildPersonLocationDrafts } from "@/lib/clients/personLocation";
+import { buildBirthPlaceLabel, buildPersonLocationDrafts } from "@/lib/clients/personLocation";
 
 test("crea ubicación HOME principal con dirección de vivienda en addressLine1", () => {
   const result = buildPersonLocationDrafts({
@@ -45,4 +45,28 @@ test("crea ubicación WORK cuando existe contexto laboral aunque no haya direcci
   assert.equal(result[1]?.type, ClientLocationType.WORK);
   assert.equal(result[1]?.address, "Guatemala, Guatemala, Guatemala");
   assert.equal(result[1]?.addressLine1, null);
+});
+
+test("buildBirthPlaceLabel combina ciudad/poblado con municipio/departamento/país", () => {
+  const result = buildBirthPlaceLabel({
+    cityOrTown: "Aldea El Carmen",
+    geoAdmin2Name: "Palín",
+    geoAdmin1Name: "Escuintla",
+    geoCountryName: "Guatemala"
+  });
+
+  assert.equal(result, "Aldea El Carmen, Palín, Escuintla, Guatemala");
+});
+
+test("buildBirthPlaceLabel evita duplicados y retorna null cuando no hay datos", () => {
+  const duplicated = buildBirthPlaceLabel({
+    cityOrTown: "Palín",
+    geoAdmin2Name: "Palín",
+    geoFreeState: "Escuintla",
+    geoCountryName: "Guatemala"
+  });
+  assert.equal(duplicated, "Palín, Escuintla, Guatemala");
+
+  const empty = buildBirthPlaceLabel({});
+  assert.equal(empty, null);
 });

@@ -6,6 +6,7 @@ import { ArrowUpRight, Search, Ticket, Users } from "lucide-react";
 import { AreaPills } from "@/components/reception/AreaPills";
 import { ActionButton } from "@/components/reception/ActionButtons";
 import VitalsWizardModal from "@/components/reception/VitalsWizardModal";
+import { DateField } from "@/components/ui/DateField";
 import { PRIORITY_LABELS, VISIT_PRIORITIES, type ReceptionArea, type ReceptionPriority } from "@/lib/reception/constants";
 import {
   actionCreateAdmission,
@@ -315,11 +316,12 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
                   <option value="M">Masculino</option>
                   <option value="F">Femenino</option>
                 </select>
-                <input
-                  type="date"
+                <DateField
                   value={newPatient.birthDate}
-                  onChange={(e) => setNewPatient((prev) => ({ ...prev, birthDate: e.target.value }))}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  onChange={(birthDate) => setNewPatient((prev) => ({ ...prev, birthDate }))}
+                  className="space-y-0"
+                  maxDate={new Date().toISOString().slice(0, 10)}
+                  inputClassName="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
                 />
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2 md:col-span-2">
                   <input

@@ -23,6 +23,7 @@ export default function GeoCascadeFieldset({
   className,
   title = "Ubicación",
   subtitle = "Selecciona País → Departamento → Municipio",
+  showPostalCode = true,
   requireCountry,
   requireAdmin1,
   requireAdmin2
@@ -34,6 +35,7 @@ export default function GeoCascadeFieldset({
   className?: string;
   title?: string;
   subtitle?: string;
+  showPostalCode?: boolean;
   requireCountry?: boolean;
   requireAdmin1?: boolean;
   requireAdmin2?: boolean;
@@ -71,6 +73,7 @@ export default function GeoCascadeFieldset({
       disabled={disabled}
       title={title}
       subtitle={`${subtitle}${requiredSuffix}`}
+      showPostalCode={showPostalCode}
       onChange={(next) =>
         onChange({
           geoCountryId: next.countryId,

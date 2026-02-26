@@ -41,7 +41,9 @@ export default function MedicalDiagnosticoPage() {
     query: "",
     type: "all",
     acceptance: "all",
-    status: "all"
+    status: "all",
+    dateFrom: "",
+    dateTo: ""
   }));
 
   useEffect(() => {
@@ -171,6 +173,8 @@ export default function MedicalDiagnosticoPage() {
         if (filters.type !== "all" && row.type !== filters.type) return false;
         if (filters.acceptance !== "all" && row.acceptance !== filters.acceptance) return false;
         if (filters.status !== "all" && row.status !== filters.status) return false;
+        if (filters.dateFrom && row.date < filters.dateFrom) return false;
+        if (filters.dateTo && row.date > filters.dateTo) return false;
         if (!q) return true;
         const haystack = [
           row.patient.firstName,

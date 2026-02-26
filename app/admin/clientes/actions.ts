@@ -6,6 +6,10 @@ import {
   ClientAffiliationPayerType,
   ClientAffiliationStatus,
   ClientCatalogType,
+  CompanyContactChannel,
+  CompanyContactRole,
+  CompanyKind,
+  CompanyStatus,
   ClientEmailCategory,
   ClientDocumentApprovalStatus,
   ClientLocationType,
@@ -40,17 +44,84 @@ import { isValidEmail } from "@/lib/utils";
 import { dpiSchema } from "@/lib/validation/identity";
 import { logClientAudit, logClientAuditTx } from "@/lib/clients/audit.service";
 import { resolveClientBloodType } from "@/lib/clients/bloodType";
-import { buildPersonLocationDrafts } from "@/lib/clients/personLocation";
+import { buildBirthPlaceLabel, buildPersonLocationDrafts } from "@/lib/clients/personLocation";
 import { parseOptionalBirthDate } from "@/lib/clients/personValidation";
+import { normalizeClientsDateFormat } from "@/lib/clients/dateFormat";
+import { updateTenantClientsDateFormat } from "@/lib/clients/dateFormatConfig";
+import { updateOperatingCountryDefaults } from "@/lib/clients/operatingCountryDefaults.server";
+import { getCallingCodeOptions } from "@/lib/clients/callingCodeOptions.server";
+import { getClientContactDirectories } from "@/lib/clients/contactDirectories.server";
+import {
+  normalizeContactDirectoryCode,
+  resolveMissingDepartmentDefaults,
+  resolveMissingJobTitleDefaults,
+  resolveMissingPbxCategoryDefaults,
+  resolveUniqueContactDirectoryCode
+} from "@/lib/clients/contactDirectories";
+import {
+  canDeprecateClientsConfigEntry,
+  CLIENTS_CONFIG_DEPRECATED_COOKIE,
+  CLIENTS_CONFIG_REGISTRY,
+  parseClientsConfigDeprecatedCookie,
+  serializeClientsConfigDeprecatedCookie
+} from "@/lib/clients/clientsConfigRegistry";
+import { COMPANY_CONTACT_DEPARTMENTS } from "@/lib/catalogs/departments";
+import { COMPANY_CONTACT_JOB_TITLES } from "@/lib/catalogs/jobTitles";
+import { COMPANY_PBX_CATEGORY_SEED } from "@/lib/catalogs/pbxCategories";
+import { getClientCatalogDefaultsByType } from "@/lib/catalogs/clientCatalogDefaults";
 import {
   assertStrictLocalPhoneValue,
   buildE164,
   normalizeCallingCode,
   sanitizeLocalNumber
 } from "@/lib/clients/phoneValidation";
+import {
+  collectLegacyPbxExtensions,
+  hasAtLeastOneCompanyChannel,
+  inferEmailCategoryFromLabel,
+  inferPhoneCategoryFromLabel,
+  normalizeCompanyGeneralChannels,
+  normalizeCompanyPersonContacts,
+  validateCompanyContactPeopleDrafts,
+  validateCompanyGeneralChannelDrafts,
+  validateCompanyContactPeople,
+  validateCompanyGeneralChannels,
+  validateEconomicActivityOtherNote,
+  type CompanyGeneralChannelInput,
+  type CompanyPersonContactInput,
+  type NormalizedCompanyGeneralChannel,
+  type NormalizedCompanyPersonContact
+} from "@/lib/clients/companyProfile";
+import {
+  ECONOMIC_ACTIVITY_BY_ID,
+  ECONOMIC_ACTIVITY_OTHER_ID,
+  isEconomicActivityId,
+  resolveEconomicActivitySelection
+} from "@/lib/catalogs/economicActivities";
+import { isCompanyEmployeeRangeId } from "@/lib/catalogs/companyEmployeeRanges";
+import { isCompanyLegalFormId, requiresCompanyLegalFormOther } from "@/lib/catalogs/legalForms";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 const CLIENT_PHOTO_MAX_SIZE_BYTES = 3 * 1024 * 1024;
 const CLIENT_PHOTO_ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
+const CLIENT_ACQUISITION_SOURCE_DEFAULTS = [
+  { name: "Llegada a instalaciones", code: "WALK_IN", category: "DIRECT", sortOrder: 10 },
+  { name: "WhatsApp", code: "WHATSAPP", category: "DIGITAL", sortOrder: 20 },
+  { name: "Redes sociales", code: "SOCIAL_MEDIA", category: "DIGITAL", sortOrder: 30 },
+  { name: "Google Maps", code: "GOOGLE_MAPS", category: "DIGITAL", sortOrder: 40 },
+  { name: "Referido", code: "REFERRED", category: "REFERRAL", sortOrder: 50 },
+  { name: "Empresa", code: "COMPANY", category: "B2B", sortOrder: 60 },
+  { name: "Otro", code: "OTHER", category: "OTHER", sortOrder: 70 }
+] as const;
+const CLIENT_ACQUISITION_SOCIAL_DETAILS_DEFAULTS = [
+  { code: "FACEBOOK", name: "Facebook" },
+  { code: "INSTAGRAM", name: "Instagram" },
+  { code: "TIKTOK", name: "TikTok" },
+  { code: "LINKEDIN", name: "LinkedIn" },
+  { code: "X", name: "X" },
+  { code: "YOUTUBE", name: "YouTube" },
+  { code: "OTHER_NETWORK", name: "Otra red" }
+] as const;
 
 async function requireAuthenticatedUser(): Promise<SessionUser> {
   const user = await getSessionUserFromCookies(cookies());
@@ -115,6 +186,86 @@ function normalizeSourceToken(value: string | null | undefined) {
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function normalizeDirectorySortOrder(value?: number | null) {
+  const raw = Number.isFinite(value) ? Number(value) : 100;
+  return Math.min(9999, Math.max(0, Math.floor(raw)));
+}
+
+type ClientContactDirectoryDepartmentDelegate = {
+  findMany: (args: unknown) => Promise<Array<{ id: string; tenantId: string; code: string; name: string; description: string | null; sortOrder: number; isActive: boolean }>>;
+  findUnique: (args: unknown) => Promise<{ id: string; tenantId: string; isActive: boolean; name: string; code: string; description: string | null; sortOrder: number } | null>;
+  create: (args: unknown) => Promise<{ id: string }>;
+  update: (args: unknown) => Promise<{ id: string }>;
+};
+
+type ClientContactDirectoryJobTitleDelegate = {
+  findMany: (args: unknown) => Promise<Array<{ id: string; tenantId: string; code: string; name: string; description: string | null; sortOrder: number; isActive: boolean }>>;
+  findUnique: (args: unknown) => Promise<{ id: string; tenantId: string; isActive: boolean; name: string; code: string; description: string | null; sortOrder: number } | null>;
+  create: (args: unknown) => Promise<{ id: string }>;
+  update: (args: unknown) => Promise<{ id: string }>;
+};
+
+type ClientPbxCategoryDirectoryDelegate = {
+  findMany: (args: unknown) => Promise<Array<{ id: string; tenantId: string; code: string; name: string; description: string | null; sortOrder: number; isActive: boolean }>>;
+  findUnique: (args: unknown) => Promise<{ id: string; tenantId: string; isActive: boolean; name: string; code: string; description: string | null; sortOrder: number } | null>;
+  create: (args: unknown) => Promise<{ id: string }>;
+  update: (args: unknown) => Promise<{ id: string }>;
+};
+
+type ClientContactDirectoryCorrelationDelegate = {
+  findMany: (args: unknown) => Promise<Array<{ id: string; jobTitleId: string; isActive: boolean }>>;
+  upsert: (args: unknown) => Promise<{ id: string }>;
+  updateMany: (args: unknown) => Promise<{ count: number }>;
+};
+
+function getClientContactDirectoryDepartmentDelegateOrThrow() {
+  const delegate = (prisma as unknown as {
+    clientContactDepartmentDirectory?: Partial<ClientContactDirectoryDepartmentDelegate>;
+  }).clientContactDepartmentDirectory;
+
+  if (!delegate?.findMany || !delegate.findUnique || !delegate.create || !delegate.update) {
+    throw new Error("Directorios de contacto no disponibles. Ejecuta migraciones pendientes.");
+  }
+
+  return delegate as ClientContactDirectoryDepartmentDelegate;
+}
+
+function getClientContactDirectoryJobTitleDelegateOrThrow() {
+  const delegate = (prisma as unknown as {
+    clientContactJobTitleDirectory?: Partial<ClientContactDirectoryJobTitleDelegate>;
+  }).clientContactJobTitleDirectory;
+
+  if (!delegate?.findMany || !delegate.findUnique || !delegate.create || !delegate.update) {
+    throw new Error("Directorios de contacto no disponibles. Ejecuta migraciones pendientes.");
+  }
+
+  return delegate as ClientContactDirectoryJobTitleDelegate;
+}
+
+function getClientPbxCategoryDirectoryDelegateOrThrow() {
+  const delegate = (prisma as unknown as {
+    clientPbxCategoryDirectory?: Partial<ClientPbxCategoryDirectoryDelegate>;
+  }).clientPbxCategoryDirectory;
+
+  if (!delegate?.findMany || !delegate.findUnique || !delegate.create || !delegate.update) {
+    throw new Error("Categorías PBX no disponibles. Ejecuta migraciones pendientes.");
+  }
+
+  return delegate as ClientPbxCategoryDirectoryDelegate;
+}
+
+function getClientContactDirectoryCorrelationDelegateOrThrow() {
+  const delegate = (prisma as unknown as {
+    clientContactDepartmentJobTitle?: Partial<ClientContactDirectoryCorrelationDelegate>;
+  }).clientContactDepartmentJobTitle;
+
+  if (!delegate?.findMany || !delegate.upsert || !delegate.updateMany) {
+    throw new Error("Matriz Área↔Cargo no disponible. Ejecuta migraciones pendientes.");
+  }
+
+  return delegate as ClientContactDirectoryCorrelationDelegate;
 }
 
 function parseOptionalDate(value?: string | null) {
@@ -671,6 +822,343 @@ async function createClientContactChannelsSafe(
     phone: primaryPhone?.number ?? input.fallbackPhone ?? null,
     countryIso2: primaryPhone?.countryCode ?? input.fallbackCountryIso2
   });
+}
+
+function mapCompanyGeneralChannelsToLegacy(input: {
+  channels: NormalizedCompanyGeneralChannel[];
+}) {
+  const phoneChannels: ClientPhoneChannelInput[] = [];
+  const emailChannels: ClientEmailChannelInput[] = [];
+
+  for (const channel of input.channels) {
+    if (channel.kind === "EMAIL") {
+      emailChannels.push({
+        category: inferEmailCategoryFromLabel(channel.label),
+        value: channel.value,
+        isPrimary: channel.isPrimary,
+        isActive: true
+      });
+      continue;
+    }
+
+    phoneChannels.push({
+      category: inferPhoneCategoryFromLabel(channel.label, channel.kind),
+      relationType: "TITULAR",
+      value: channel.value,
+      countryIso2: channel.countryIso2 ?? undefined,
+      canCall: channel.kind !== "WHATSAPP",
+      canWhatsapp: channel.kind === "WHATSAPP",
+      isPrimary: channel.isPrimary,
+      isActive: true
+    });
+  }
+
+  return { phoneChannels, emailChannels };
+}
+
+function formatPhoneWithExtension(number: string, extension?: string | null) {
+  const ext = normalizeOptional(extension);
+  return ext ? `${number} ext ${ext}` : number;
+}
+
+function inferCompanyContactRoleValue(input: { department: string; role: string }): CompanyContactRole {
+  const token = normalizeSourceToken(`${input.department} ${input.role}`);
+  if (token.includes("LEGAL") || token.includes("JURID")) return CompanyContactRole.LEGAL_REPRESENTATIVE;
+  if (token.includes("FACTUR") || token.includes("FINANZ")) return CompanyContactRole.BILLING;
+  if (token.includes("RRHH") || token.includes("RECURSOS_HUMANOS") || token.includes("HUMAN")) {
+    return CompanyContactRole.HUMAN_RESOURCES;
+  }
+  if (token.includes("SALUD_OCUPACIONAL") || token.includes("OCUPACIONAL")) return CompanyContactRole.OCCUPATIONAL_HEALTH;
+  if (token.includes("COMPRAS") || token.includes("PROCURE") || token.includes("ADQUISIC")) return CompanyContactRole.PROCUREMENT;
+  return CompanyContactRole.ADMINISTRATIVE;
+}
+
+function inferCompanyPreferredChannel(input: {
+  primaryPhone: { isWhatsApp: boolean } | null;
+  primaryEmail: { value: string } | null;
+}): CompanyContactChannel | null {
+  if (input.primaryEmail && !input.primaryPhone) return CompanyContactChannel.EMAIL;
+  if (input.primaryPhone?.isWhatsApp) return CompanyContactChannel.WHATSAPP;
+  if (input.primaryPhone) return CompanyContactChannel.PHONE;
+  if (input.primaryEmail) return CompanyContactChannel.EMAIL;
+  return null;
+}
+
+function buildLegacyCompanyPersonRole(input: { department: string; role: string }) {
+  const parts = [input.department, input.role].filter((part) => part.trim().length > 0);
+  return parts.join(" · ") || "Contacto";
+}
+
+function pickFirstPersonPhone(people: NormalizedCompanyPersonContact[]) {
+  for (const person of people) {
+    const phone = person.phones.find((row) => row.isPrimary) ?? person.phones[0];
+    if (phone) return phone;
+  }
+  return null;
+}
+
+function pickFirstPersonEmail(people: NormalizedCompanyPersonContact[]) {
+  for (const person of people) {
+    const email = person.emails.find((row) => row.isPrimary) ?? person.emails[0];
+    if (email) return email;
+  }
+  return null;
+}
+
+async function safeCreateCompanyCoreWithContacts(
+  tx: Prisma.TransactionClient,
+  input: {
+    tenantId: string;
+    clientProfileId: string;
+    legalName: string;
+    tradeName: string | null;
+    taxId: string | null;
+    billingEmail: string | null;
+    billingPhone: string | null;
+    companySizeRange: string | null;
+    legalFormId: string | null;
+    legalFormOther: string | null;
+    activityPrimaryId: string | null;
+    activitySecondaryIds: string[];
+    legacyPbxExtensionNotes?: string[];
+    generalChannels: NormalizedCompanyGeneralChannel[];
+    contactPeople: NormalizedCompanyPersonContact[];
+  }
+) {
+  if (!input.contactPeople.length && !input.generalChannels.length) return { companyId: null as string | null };
+
+  try {
+    const companyMetadata: Prisma.InputJsonValue = {
+      source: "clients.company.new-form.v2",
+      companySizeRange: input.companySizeRange,
+      legalForm: input.legalFormId,
+      legalFormOther: input.legalFormOther,
+      economicActivityPrimaryId: input.activityPrimaryId,
+      economicActivitySecondaryIds: input.activitySecondaryIds,
+      legacyPbxExtensionNotes: input.legacyPbxExtensionNotes ?? [],
+      generalChannels: input.generalChannels.map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        ownerType: row.ownerType,
+        ownerPersonId: row.ownerPersonId,
+        labelPreset: row.labelPreset,
+        pbxAreaPreset: row.pbxAreaPreset,
+        pbxAreaOther: row.pbxAreaOther,
+        isPbx: row.kind === "PHONE" && row.labelPreset === "pbx",
+        label: row.label,
+        value: row.value,
+        countryCode: row.countryCode,
+        countryIso2: row.countryIso2,
+        extension: row.extension,
+        isPrimary: row.isPrimary
+      }))
+    };
+
+    const company = await tx.company.upsert({
+      where: { clientProfileId: input.clientProfileId },
+      update: {
+        legalName: input.legalName,
+        tradeName: input.tradeName,
+        taxId: input.taxId,
+        billingEmail: input.billingEmail,
+        billingPhone: input.billingPhone,
+        metadata: companyMetadata
+      },
+      create: {
+        tenantId: input.tenantId,
+        clientProfileId: input.clientProfileId,
+        kind: CompanyKind.COMPANY,
+        status: CompanyStatus.ACTIVE,
+        legalName: input.legalName,
+        tradeName: input.tradeName,
+        taxId: input.taxId,
+        billingEmail: input.billingEmail,
+        billingPhone: input.billingPhone,
+        metadata: companyMetadata
+      },
+      select: { id: true }
+    });
+
+    if (input.contactPeople.length) {
+      await tx.companyContact.createMany({
+        data: input.contactPeople.map((person, index) => {
+          const primaryPhone = person.phones.find((row) => row.isPrimary) ?? person.phones[0] ?? null;
+          const primaryEmail = person.emails.find((row) => row.isPrimary) ?? person.emails[0] ?? null;
+          const metadata: Prisma.InputJsonValue = {
+            source: "clients.company.new-form.v2",
+            employmentStatus: person.employmentStatus,
+            departmentId: person.departmentId,
+            departmentOther: person.departmentOther,
+            jobTitleId: person.jobTitleId,
+            jobTitleOther: person.jobTitleOther,
+            linkedUserId: person.linkedUserId,
+            linkedUserName: person.linkedUserName,
+            linkedUserEmail: person.linkedUserEmail,
+            phones: person.phones.map((row) => ({
+              mode: row.mode,
+              phoneType: row.phoneType,
+              label: row.label,
+              value: row.value,
+              pbxChannelId: row.pbxChannelId,
+              countryCode: row.countryCode,
+              countryIso2: row.countryIso2,
+              canCall: row.canCall,
+              canWhatsApp: row.canWhatsApp,
+              canSms: row.canSms,
+              extension: row.extension,
+              isWhatsApp: row.isWhatsApp,
+              isPrimary: row.isPrimary
+            })),
+            emails: person.emails.map((row) => ({
+              label: row.label,
+              value: row.value,
+              isPrimary: row.isPrimary
+            }))
+          };
+
+          return {
+            tenantId: input.tenantId,
+            companyId: company.id,
+            role: inferCompanyContactRoleValue({ department: person.department, role: person.role }),
+            firstName: person.firstName,
+            lastName: person.lastName || null,
+            jobTitle: person.role || null,
+            department: person.department || null,
+            email: primaryEmail?.value ?? null,
+            phone: primaryPhone?.value ?? null,
+            phoneExtension: primaryPhone?.extension ?? null,
+            preferredChannel: inferCompanyPreferredChannel({
+              primaryPhone,
+              primaryEmail
+            }),
+            isPrimary: index === 0,
+            notes: person.notes,
+            metadata
+          };
+        })
+      });
+    }
+
+    return { companyId: company.id };
+  } catch (error) {
+    if (isPrismaMissingTableError(error) || isPrismaSchemaMismatchError(error)) {
+      warnDevClientsCompat("clients.actions.createCompany.companyCore", error);
+      return { companyId: null as string | null };
+    }
+    throw error;
+  }
+}
+
+async function ensureEconomicActivityCatalogItem(
+  tx: Prisma.TransactionClient,
+  canonicalActivityId: string
+): Promise<{ id: string; name: string; canonicalId: string }> {
+  const definition = ECONOMIC_ACTIVITY_BY_ID.get(canonicalActivityId);
+  if (!definition) throw new Error("Actividad económica inválida.");
+
+  const existingById = await tx.clientCatalogItem.findUnique({
+    where: { id: canonicalActivityId },
+    select: { id: true, type: true, name: true, isActive: true }
+  });
+  if (existingById) {
+    if (existingById.type !== ClientCatalogType.SECTOR) {
+      throw new Error("Actividad económica inválida.");
+    }
+    if (existingById.name !== definition.label || !existingById.isActive) {
+      await tx.clientCatalogItem.update({
+        where: { id: existingById.id },
+        data: {
+          name: definition.label,
+          isActive: true
+        }
+      });
+    }
+    return { id: existingById.id, name: definition.label, canonicalId: definition.id };
+  }
+
+  const existingByName = await tx.clientCatalogItem.findFirst({
+    where: {
+      type: ClientCatalogType.SECTOR,
+      name: definition.label
+    },
+    select: { id: true }
+  });
+  if (existingByName) {
+    if (existingByName.id === canonicalActivityId) {
+      return { id: existingByName.id, name: definition.label, canonicalId: definition.id };
+    }
+
+    try {
+      const migrated = await tx.clientCatalogItem.update({
+        where: { id: existingByName.id },
+        data: { id: canonicalActivityId, isActive: true }
+      });
+      return { id: migrated.id, name: definition.label, canonicalId: definition.id };
+    } catch (error) {
+      warnDevClientsCompat("clients.actions.createCompany.economicActivity.id_migration", error);
+      return { id: existingByName.id, name: definition.label, canonicalId: definition.id };
+    }
+  }
+
+  const created = await tx.clientCatalogItem.create({
+    data: {
+      id: definition.id,
+      type: ClientCatalogType.SECTOR,
+      name: definition.label,
+      isActive: true
+    },
+    select: { id: true, name: true }
+  });
+  return { id: created.id, name: created.name, canonicalId: definition.id };
+}
+
+async function resolveEconomicActivityCatalogSelection(
+  tx: Prisma.TransactionClient,
+  input: {
+    rawSelection: string | null;
+    otherNote: string | null;
+  }
+) {
+  const initialResolved = resolveEconomicActivitySelection(input.rawSelection);
+  let resolvedId = initialResolved.id;
+  let fallbackLegacyText = initialResolved.legacyText;
+
+  if (input.rawSelection && !isEconomicActivityId(input.rawSelection) && initialResolved.id === ECONOMIC_ACTIVITY_OTHER_ID) {
+    const legacyCatalogRow = await tx.clientCatalogItem.findFirst({
+      where: {
+        id: input.rawSelection,
+        type: ClientCatalogType.SECTOR
+      },
+      select: { name: true }
+    });
+    if (legacyCatalogRow) {
+      const remapped = resolveEconomicActivitySelection(legacyCatalogRow.name);
+      resolvedId = remapped.id;
+      fallbackLegacyText = remapped.legacyText ?? (remapped.id === ECONOMIC_ACTIVITY_OTHER_ID ? legacyCatalogRow.name : null);
+    }
+  }
+
+  if (!resolvedId) {
+    return {
+      catalogRow: null as { id: string; name: string; canonicalId: string } | null,
+      activityOtherNote: null as string | null,
+      canonicalId: null as string | null
+    };
+  }
+
+  const catalogRow = await ensureEconomicActivityCatalogItem(tx, resolvedId);
+  const noteCandidate = input.otherNote ?? fallbackLegacyText;
+  const noteValidation = validateEconomicActivityOtherNote({
+    activityId: resolvedId,
+    otherNote: noteCandidate
+  });
+  if (!noteValidation.ok) throw new Error(noteValidation.error);
+
+  return {
+    catalogRow,
+    activityOtherNote: noteValidation.normalizedNote,
+    canonicalId: resolvedId
+  };
 }
 
 async function assertCatalogItemActive(
@@ -1472,6 +1960,11 @@ export async function actionCreatePersonClient(input: {
   emails?: ClientEmailChannelInput[];
   birthDate?: string;
   birthCountryId?: string;
+  birthGeoAdmin1Id?: string;
+  birthGeoAdmin2Id?: string;
+  birthGeoAdmin3Id?: string;
+  birthGeoFreeState?: string;
+  birthGeoFreeCity?: string;
   birthCity?: string;
   residenceCountryId?: string;
   residenceSameAsBirth?: boolean;
@@ -1550,13 +2043,44 @@ export async function actionCreatePersonClient(input: {
   const guardianRelationshipTypeId = normalizeOptional(input.guardianRelationshipTypeId);
   const requiresResponsible = isMinorClient(birthDate);
   const birthCountryId = normalizeOptional(input.birthCountryId);
+  const birthGeoAdmin1Id = normalizeOptional(input.birthGeoAdmin1Id);
+  const birthGeoAdmin2Id = normalizeOptional(input.birthGeoAdmin2Id);
+  const birthGeoAdmin3Id = normalizeOptional(input.birthGeoAdmin3Id);
+  const birthGeoFreeState = normalizeOptional(input.birthGeoFreeState);
+  const birthGeoFreeCity = normalizeOptional(input.birthGeoFreeCity);
   const birthCity = normalizeOptional(input.birthCity);
   const residenceCountryId = normalizeOptional(input.residenceCountryId);
   const residenceSameAsBirth = Boolean(input.residenceSameAsBirth);
-  const effectiveBirthCountryId = birthCountryId ?? identityCountryId;
-  if (!effectiveBirthCountryId) {
-    throw new Error("País de nacimiento requerido.");
-  }
+  const hasBirthGeoSelection = Boolean(
+    birthCountryId || birthGeoAdmin1Id || birthGeoAdmin2Id || birthGeoAdmin3Id || birthGeoFreeState || birthGeoFreeCity
+  );
+  const birthGeo = hasBirthGeoSelection
+    ? await resolveGeoSelection({
+        geoCountryId: birthCountryId,
+        geoAdmin1Id: birthGeoAdmin1Id,
+        geoAdmin2Id: birthGeoAdmin2Id,
+        geoAdmin3Id: birthGeoAdmin3Id
+      })
+    : {
+        geoCountryId: null,
+        geoAdmin1Id: null,
+        geoAdmin2Id: null,
+        geoAdmin3Id: null,
+        countryName: null,
+        countryIso2: null,
+        admin1Name: null,
+        admin2Name: null,
+        admin3Name: null
+      };
+  const normalizedBirthCountryId = birthGeo.geoCountryId ?? birthCountryId ?? null;
+  const birthPlaceLabel = buildBirthPlaceLabel({
+    cityOrTown: birthCity,
+    geoAdmin2Name: birthGeo.admin2Name,
+    geoFreeCity: birthGeoFreeCity,
+    geoAdmin1Name: birthGeo.admin1Name,
+    geoFreeState: birthGeoFreeState,
+    geoCountryName: birthGeo.countryName
+  });
 
   const addressGeneral = normalizeOptional(input.addressGeneral);
   const addressHome = normalizeOptional(input.addressHome);
@@ -1575,7 +2099,7 @@ export async function actionCreatePersonClient(input: {
   }));
   const effectiveGeoCountryId =
     normalizeOptional(input.geoCountryId) ??
-    (residenceSameAsBirth ? effectiveBirthCountryId : residenceCountryId);
+    (residenceSameAsBirth ? normalizedBirthCountryId : residenceCountryId);
   const geo = await resolveGeoSelection({
     geoCountryId: effectiveGeoCountryId,
     geoAdmin1Id: input.geoAdmin1Id,
@@ -1696,23 +2220,23 @@ export async function actionCreatePersonClient(input: {
               select: { id: true, name: true, iso2: true }
             })
           : Promise.resolve(null),
-        effectiveBirthCountryId
+        normalizedBirthCountryId
           ? tx.geoCountry.findFirst({
-              where: { id: effectiveBirthCountryId, isActive: true },
+              where: { id: normalizedBirthCountryId, isActive: true },
               select: { id: true, name: true, iso2: true }
             })
           : Promise.resolve(null),
-        (residenceSameAsBirth ? effectiveBirthCountryId : residenceCountryId)
+        (residenceSameAsBirth ? normalizedBirthCountryId : residenceCountryId)
           ? tx.geoCountry.findFirst({
-              where: { id: (residenceSameAsBirth ? effectiveBirthCountryId : residenceCountryId) as string, isActive: true },
+              where: { id: (residenceSameAsBirth ? normalizedBirthCountryId : residenceCountryId) as string, isActive: true },
               select: { id: true, name: true, iso2: true }
             })
           : Promise.resolve(null)
       ]);
 
       if (identityCountryId && !identityCountry) throw new Error("País de identificación inválido o inactivo.");
-      if (effectiveBirthCountryId && !birthCountry) throw new Error("País de nacimiento inválido o inactivo.");
-      if ((residenceSameAsBirth ? effectiveBirthCountryId : residenceCountryId) && !residenceCountry) {
+      if (normalizedBirthCountryId && !birthCountry) throw new Error("País de nacimiento inválido o inactivo.");
+      if ((residenceSameAsBirth ? normalizedBirthCountryId : residenceCountryId) && !residenceCountry) {
         throw new Error("País de residencia inválido o inactivo.");
       }
 
@@ -1957,7 +2481,7 @@ export async function actionCreatePersonClient(input: {
           academicLevelId: academicLevelIdResolved,
           responsibleClientId: responsible?.id ?? null,
           birthCountryId: birthCountry?.id ?? null,
-          birthCity,
+          birthCity: birthPlaceLabel,
           residenceCountryId: residenceCountry?.id ?? geo.geoCountryId ?? null,
           residenceSameAsBirth
         }
@@ -2153,7 +2677,18 @@ export async function actionCreateCompanyClient(input: {
   geoPostalCode?: string;
   geoFreeState?: string;
   geoFreeCity?: string;
+  companyTypeId?: string;
   companyCategoryId?: string;
+  companySizeRange?: string;
+  legalForm?: string;
+  legalFormOther?: string;
+  economicActivityId?: string;
+  sectorId?: string;
+  economicActivitySecondaryIds?: string[];
+  economicActivityOtherNote?: string;
+  generalChannels?: CompanyGeneralChannelInput[];
+  contactPeople?: CompanyPersonContactInput[];
+  useSameAddressForFiscal?: boolean;
   acquisitionSourceId?: string;
   acquisitionDetailOptionId?: string;
   acquisitionOtherNote?: string;
@@ -2165,11 +2700,38 @@ export async function actionCreateCompanyClient(input: {
   emails?: ClientEmailChannelInput[];
 }) {
   const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const supportsContactExtendedColumns = await safeSupportsClientContactExtendedColumns("clients.actions.createCompany.contacts");
+  const supportsNoteExtendedColumns = await safeSupportsClientNoteExtendedColumns("clients.actions.createCompany.notes");
+  const usesNewContactPayload = Array.isArray(input.generalChannels) || Array.isArray(input.contactPeople);
+  const contactDirectories = usesNewContactPayload ? await getClientContactDirectories(tenantId, { includeInactive: true }) : null;
+  const pbxCategoryOptions = (contactDirectories?.pbxCategories ?? []).map((item) => ({
+    value: item.code.trim() || item.id.trim(),
+    label: item.name,
+    isActive: item.isActive
+  }));
 
   const companyName = normalizeRequired(input.legalName, "Razón social requerida.");
   const tradeName = normalizeRequired(input.tradeName, "Nombre comercial requerido.");
   const nit = normalizeRequired(input.nit, "NIT requerido.");
   const address = normalizeRequired(input.address, "Dirección requerida.");
+  const companyCategoryId = normalizeOptional(input.companyTypeId ?? input.companyCategoryId);
+  const companySizeRange = normalizeOptional(input.companySizeRange);
+  const legalForm = normalizeOptional(input.legalForm);
+  const legalFormOther = normalizeOptional(input.legalFormOther);
+  const economicActivitySelection = normalizeOptional(input.economicActivityId ?? input.sectorId);
+  if (companySizeRange && !isCompanyEmployeeRangeId(companySizeRange)) {
+    throw new Error("Tamaño de empresa inválido.");
+  }
+  if (usesNewContactPayload && !legalForm) throw new Error("Forma jurídica requerida.");
+  if (legalForm && !isCompanyLegalFormId(legalForm)) throw new Error("Forma jurídica inválida.");
+  if (requiresCompanyLegalFormOther(legalForm) && !legalFormOther) throw new Error("Forma jurídica: debes especificar el detalle para 'Otro'.");
+  if (legalFormOther && legalFormOther.length > 60) throw new Error("Forma jurídica: el detalle no puede exceder 60 caracteres.");
+  if (usesNewContactPayload && !economicActivitySelection) throw new Error("Actividad económica principal requerida.");
+  const economicActivityOtherNote = normalizeOptional(input.economicActivityOtherNote);
+  const economicActivitySecondarySelections = Array.isArray(input.economicActivitySecondaryIds)
+    ? Array.from(new Set(input.economicActivitySecondaryIds.map((item) => normalizeOptional(item)).filter(Boolean) as string[]))
+    : [];
   const geoPostalCode = normalizeOptional(input.geoPostalCode);
   const geoFreeState = normalizeOptional(input.geoFreeState);
   const geoFreeCity = normalizeOptional(input.geoFreeCity);
@@ -2185,15 +2747,61 @@ export async function actionCreateCompanyClient(input: {
   if (!country) throw new Error("País requerido.");
   if (!department) throw new Error("Departamento/Estado requerido.");
   if (!city) throw new Error("Ciudad/Municipio requerido.");
-  const companyCategoryId = normalizeOptional(input.companyCategoryId);
+  const normalizedGeneralChannels = usesNewContactPayload
+    ? normalizeCompanyGeneralChannels(input.generalChannels, { pbxCategoryOptions })
+    : [];
+  const normalizedContactPeople = usesNewContactPayload
+    ? normalizeCompanyPersonContacts(input.contactPeople, { pbxChannels: normalizedGeneralChannels })
+    : [];
+  const legacyPbxExtensionNotes = usesNewContactPayload
+    ? collectLegacyPbxExtensions({ generalChannels: input.generalChannels, pbxCategoryOptions })
+    : [];
+  const normalizedContactPeopleWithLegacy =
+    legacyPbxExtensionNotes.length > 0 && normalizedContactPeople.length > 0
+      ? normalizedContactPeople.map((person, index) => {
+          if (index !== 0) return person;
+          const legacyBlock = legacyPbxExtensionNotes.join(" | ");
+          const notes = [person.notes, legacyBlock].filter(Boolean).join(" | ");
+          return { ...person, notes };
+        })
+      : normalizedContactPeople;
+
+  if (usesNewContactPayload) {
+    const generalDraftsError = validateCompanyGeneralChannelDrafts(input.generalChannels, {
+      contactPeople: input.contactPeople,
+      pbxCategoryOptions
+    });
+    if (generalDraftsError) throw new Error(generalDraftsError);
+    const contactDraftsError = validateCompanyContactPeopleDrafts(input.contactPeople, {
+      generalChannels: input.generalChannels
+    });
+    if (contactDraftsError) throw new Error(contactDraftsError);
+    const generalChannelsError = validateCompanyGeneralChannels(normalizedGeneralChannels);
+    if (generalChannelsError) throw new Error(generalChannelsError);
+    const contactPeopleError = validateCompanyContactPeople(normalizedContactPeopleWithLegacy, {
+      generalChannels: normalizedGeneralChannels
+    });
+    if (contactPeopleError) throw new Error(contactPeopleError);
+    if (!hasAtLeastOneCompanyChannel({ generalChannels: normalizedGeneralChannels, contactPeople: normalizedContactPeopleWithLegacy })) {
+      throw new Error("Debes registrar al menos un canal general o un canal dentro de personas de contacto.");
+    }
+  }
+
+  const legacyFromGeneralChannels = usesNewContactPayload
+    ? mapCompanyGeneralChannelsToLegacy({ channels: normalizedGeneralChannels })
+    : { phoneChannels: input.phones ?? [], emailChannels: input.emails ?? [] };
+  const personFallbackPhone = usesNewContactPayload ? pickFirstPersonPhone(normalizedContactPeopleWithLegacy) : null;
+  const personFallbackEmail = usesNewContactPayload ? pickFirstPersonEmail(normalizedContactPeopleWithLegacy) : null;
+
   const phoneChannels = normalizeClientPhoneChannels({
-    channels: input.phones,
-    fallbackPhone: input.phone,
-    fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
+    channels: legacyFromGeneralChannels.phoneChannels,
+    fallbackPhone: input.phone ?? personFallbackPhone?.value ?? null,
+    fallbackCountryIso2:
+      input.phoneCountryIso2 ?? personFallbackPhone?.countryIso2 ?? geo.countryIso2
   });
   const emailChannels = normalizeClientEmailChannels({
-    channels: input.emails,
-    fallbackEmail: input.email
+    channels: legacyFromGeneralChannels.emailChannels,
+    fallbackEmail: input.email ?? personFallbackEmail?.value ?? null
   });
   const primaryPhone = pickPrimaryPhoneChannel(phoneChannels);
   const primaryEmail = pickPrimaryEmailChannel(emailChannels);
@@ -2201,20 +2809,51 @@ export async function actionCreateCompanyClient(input: {
   const email = primaryEmail?.valueNormalized ?? normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
 
+  const primaryGeneralPhone =
+    normalizedGeneralChannels.find((row) => row.kind !== "EMAIL" && row.isPrimary) ??
+    normalizedGeneralChannels.find((row) => row.kind !== "EMAIL") ??
+    null;
+  const primaryGeneralEmail =
+    normalizedGeneralChannels.find((row) => row.kind === "EMAIL" && row.isPrimary) ??
+    normalizedGeneralChannels.find((row) => row.kind === "EMAIL") ??
+    null;
+  const billingPhone = primaryGeneralPhone ? formatPhoneWithExtension(primaryGeneralPhone.value, primaryGeneralPhone.extension) : phone;
+  const billingEmail = primaryGeneralEmail?.value ?? email;
+
   const defaultStatusId = await resolveDefaultActiveStatusId();
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      if (companyCategoryId) {
-        const category = await tx.clientCatalogItem.findFirst({
-          where: {
-            id: companyCategoryId,
-            type: ClientCatalogType.COMPANY_CATEGORY,
-            isActive: true
-          },
-          select: { id: true }
-        });
-        if (!category) throw new Error("Categoría de empresa inválida o inactiva.");
+      const category = companyCategoryId
+        ? await tx.clientCatalogItem.findFirst({
+            where: {
+              id: companyCategoryId,
+              type: ClientCatalogType.COMPANY_CATEGORY,
+              isActive: true
+            },
+            select: { id: true }
+          })
+        : null;
+      if (companyCategoryId && !category) throw new Error("Tipo de empresa inválido o inactivo.");
+      const resolvedEconomicActivity = await resolveEconomicActivityCatalogSelection(tx, {
+        rawSelection: economicActivitySelection,
+        otherNote: economicActivityOtherNote
+      });
+      if (usesNewContactPayload && !resolvedEconomicActivity.catalogRow) {
+        throw new Error("Actividad económica principal requerida.");
+      }
+      const resolvedSecondaryActivityRows: Array<{ id: string; name: string; canonicalId: string }> = [];
+      if (economicActivitySecondarySelections.length) {
+        for (const secondarySelection of economicActivitySecondarySelections) {
+          if (!secondarySelection || secondarySelection === economicActivitySelection) continue;
+          const resolvedSecondary = resolveEconomicActivitySelection(secondarySelection);
+          if (!resolvedSecondary.id) continue;
+          if (resolvedSecondary.id === resolvedEconomicActivity.canonicalId) continue;
+          const row = await ensureEconomicActivityCatalogItem(tx, resolvedSecondary.id);
+          if (!resolvedSecondaryActivityRows.some((item) => item.id === row.id)) {
+            resolvedSecondaryActivityRows.push(row);
+          }
+        }
       }
 
       const acquisition = await resolveAcquisitionInput(tx, {
@@ -2234,6 +2873,7 @@ export async function actionCreateCompanyClient(input: {
           department,
           country,
           companyCategoryId,
+          sectorId: resolvedEconomicActivity.catalogRow?.id ?? null,
           acquisitionSourceId: acquisition.sourceId,
           acquisitionDetailOptionId: acquisition.detailOptionId,
           acquisitionOtherNote: acquisition.otherNote,
@@ -2259,6 +2899,87 @@ export async function actionCreateCompanyClient(input: {
         fallbackPhone: phone,
         fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
       });
+
+      if (normalizedContactPeopleWithLegacy.length) {
+        for (let index = 0; index < normalizedContactPeopleWithLegacy.length; index += 1) {
+          const person = normalizedContactPeopleWithLegacy[index];
+          const primaryPersonPhone = person.phones.find((row) => row.isPrimary) ?? person.phones[0] ?? null;
+          const primaryPersonEmail = person.emails.find((row) => row.isPrimary) ?? person.emails[0] ?? null;
+          const role = buildLegacyCompanyPersonRole({
+            department: person.department,
+            role: person.role
+          });
+          const name = `${person.firstName} ${person.lastName}`.trim();
+
+          await tx.clientContact.create({
+            data: supportsContactExtendedColumns
+              ? {
+                  clientId: created.id,
+                  name,
+                  relationType: "WORK",
+                  role,
+                  phone: primaryPersonPhone ? formatPhoneWithExtension(primaryPersonPhone.value, primaryPersonPhone.extension) : null,
+                  email: primaryPersonEmail?.value ?? null,
+                  isEmergencyContact: false,
+                  isPrimary: index === 0
+                }
+              : {
+                  clientId: created.id,
+                  name,
+                  role,
+                  phone: primaryPersonPhone ? formatPhoneWithExtension(primaryPersonPhone.value, primaryPersonPhone.extension) : null,
+                  email: primaryPersonEmail?.value ?? null,
+                  isPrimary: index === 0
+                }
+          });
+        }
+      }
+
+      const companyCoreResult = await safeCreateCompanyCoreWithContacts(tx, {
+        tenantId,
+        clientProfileId: created.id,
+        legalName: companyName,
+        tradeName,
+        taxId: nit,
+        billingEmail,
+        billingPhone,
+        companySizeRange,
+        legalFormId: legalForm,
+        legalFormOther,
+        activityPrimaryId: resolvedEconomicActivity.catalogRow?.id ?? null,
+        activitySecondaryIds: resolvedSecondaryActivityRows.map((item) => item.id),
+        legacyPbxExtensionNotes,
+        generalChannels: normalizedGeneralChannels,
+        contactPeople: normalizedContactPeopleWithLegacy
+      });
+
+      if (resolvedEconomicActivity.activityOtherNote) {
+        const noteBody = `Actividad económica (Otro): ${resolvedEconomicActivity.activityOtherNote}`;
+        try {
+          await tx.clientNote.create({
+            data: supportsNoteExtendedColumns
+              ? {
+                  clientId: created.id,
+                  title: "Actividad económica principal",
+                  body: noteBody,
+                  noteType: "ADMIN",
+                  visibility: "INTERNA",
+                  actorId: user.id
+                }
+              : {
+                  clientId: created.id,
+                  body: noteBody,
+                  actorId: user.id
+                }
+          });
+        } catch (error) {
+          if (isPrismaMissingTableError(error) || isPrismaSchemaMismatchError(error)) {
+            warnDevClientsCompat("clients.actions.createCompany.activityOtherNote", error);
+          } else {
+            throw error;
+          }
+        }
+      }
 
       const referralResult = await createReferralIfNeeded(tx, {
         referredClientId: created.id,
@@ -2294,6 +3015,16 @@ export async function actionCreateCompanyClient(input: {
         metadata: {
           type: "COMPANY",
           companyCategoryId,
+          companySizeRange,
+          economicActivityId: resolvedEconomicActivity.catalogRow?.id ?? null,
+          economicActivityCanonicalId: resolvedEconomicActivity.canonicalId,
+          economicActivitySecondaryIds: resolvedSecondaryActivityRows.map((item) => item.id),
+          legalForm,
+          legalFormOther,
+          companyCoreId: companyCoreResult.companyId,
+          generalChannelsCount: normalizedGeneralChannels.length,
+          contactPeopleCount: normalizedContactPeopleWithLegacy.length,
+          legacyPbxExtensionNotes,
           acquisitionSourceId: acquisition.sourceId,
           acquisitionSourceCode: acquisition.sourceCode,
           acquisitionDetailOptionId: acquisition.detailOptionId,
@@ -2764,6 +3495,54 @@ export async function actionSearchClientProfiles(input: {
   };
 }
 
+export async function actionSearchTenantUsers(input: { q: string; limit?: number }) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const q = input.q.trim();
+  if (q.length < 2) return { items: [] as Array<{ id: string; name: string; email: string }> };
+  const limit = Math.min(Math.max(input.limit ?? 15, 5), 25);
+
+  const rows = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      OR: [{ tenantId }, ...(tenantId === "global" ? [{ tenantId: null }] : [])],
+      AND: [
+        {
+          OR: [{ name: { contains: q, mode: Prisma.QueryMode.insensitive } }, { email: { contains: q, mode: Prisma.QueryMode.insensitive } }]
+        }
+      ]
+    },
+    orderBy: [{ name: "asc" }, { email: "asc" }],
+    take: limit,
+    select: {
+      id: true,
+      name: true,
+      email: true
+    }
+  });
+
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      name: row.name?.trim() || row.email,
+      email: row.email
+    }))
+  };
+}
+
+export async function actionListCallingCodeOptions(input?: {
+  q?: string;
+  includeInactive?: boolean;
+  limit?: number;
+}) {
+  await requireAdminUser();
+  return getCallingCodeOptions({
+    q: input?.q,
+    includeInactive: input?.includeInactive,
+    limit: input?.limit
+  });
+}
+
 export async function actionListClientAcquisitionSources(input?: { includeInactive?: boolean }) {
   await requireAdminUser();
   const includeInactive = Boolean(input?.includeInactive);
@@ -2821,6 +3600,18 @@ export async function actionListClientCatalogItems(input: { type: ClientCatalogT
   });
 
   return { items: rows };
+}
+
+export async function actionListClientContactDirectories(input?: {
+  includeInactive?: boolean;
+  q?: string;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  return getClientContactDirectories(tenantId, {
+    includeInactive: input?.includeInactive,
+    q: input?.q
+  });
 }
 
 export async function actionCheckPersonDpi(input: { dpi: string; excludeClientId?: string }) {
@@ -5007,6 +5798,1139 @@ export async function actionCreateClientCatalogItem(input: {
   }
 }
 
+export async function actionLoadClientCatalogDefaults(input: { type: ClientCatalogType }) {
+  const user = await requireAdminUser();
+  const type = input.type;
+  const defaults = getClientCatalogDefaultsByType(type);
+  if (!defaults.length) {
+    throw new Error("Este catálogo no tiene valores iniciales configurados.");
+  }
+
+  const existingRows = await prisma.clientCatalogItem.findMany({
+    where: { type },
+    select: { id: true, name: true, isActive: true }
+  });
+
+  const rowsById = new Map(existingRows.map((row) => [row.id, row] as const));
+  const rowsByToken = new Map(existingRows.map((row) => [normalizeSourceToken(row.name), row] as const));
+
+  let created = 0;
+  let reactivated = 0;
+  let updated = 0;
+
+  for (const row of defaults) {
+    const label = normalizeRequired(row.label, "Nombre inicial inválido.");
+    const token = normalizeSourceToken(label);
+    const matched = (row.id ? rowsById.get(row.id) : null) ?? rowsByToken.get(token) ?? null;
+
+    if (matched) {
+      const shouldReactivate = !matched.isActive;
+      const shouldRename = matched.name !== label;
+      const shouldAdoptId = Boolean(row.id && matched.id !== row.id);
+
+      if (shouldAdoptId) {
+        try {
+          await prisma.clientCatalogItem.update({
+            where: { id: matched.id },
+            data: {
+              id: row.id,
+              name: label,
+              isActive: true
+            },
+            select: { id: true, name: true, isActive: true }
+          });
+        } catch (error: any) {
+          if (error?.code !== "P2002") throw error;
+          await prisma.clientCatalogItem.update({
+            where: { id: matched.id },
+            data: {
+              name: label,
+              isActive: true
+            },
+            select: { id: true, name: true, isActive: true }
+          });
+        }
+      } else if (shouldReactivate || shouldRename) {
+        await prisma.clientCatalogItem.update({
+          where: { id: matched.id },
+          data: {
+            name: label,
+            isActive: true
+          },
+          select: { id: true, name: true, isActive: true }
+        });
+      }
+
+      if (shouldReactivate) reactivated += 1;
+      if (shouldRename || shouldAdoptId) updated += 1;
+      continue;
+    }
+
+    try {
+      await prisma.clientCatalogItem.create({
+        data: {
+          ...(row.id ? { id: row.id } : {}),
+          type,
+          name: label,
+          isActive: true
+        },
+        select: { id: true }
+      });
+      created += 1;
+    } catch (error: any) {
+      if (error?.code !== "P2002") throw error;
+      const byName = await prisma.clientCatalogItem.findFirst({
+        where: { type, name: label },
+        select: { id: true, isActive: true }
+      });
+      if (byName && !byName.isActive) {
+        await prisma.clientCatalogItem.update({
+          where: { id: byName.id },
+          data: { isActive: true },
+          select: { id: true }
+        });
+        reactivated += 1;
+      }
+    }
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_CATALOG_DEFAULTS_LOADED",
+      entityType: "ClientCatalogItem",
+      entityId: type,
+      metadata: {
+        type,
+        created,
+        reactivated,
+        updated
+      }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  return { ok: true, created, reactivated, updated };
+}
+
+export async function actionLoadClientAcquisitionDefaults() {
+  const user = await requireAdminUser();
+
+  const existingSources = await prisma.clientAcquisitionSource.findMany({
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, code: true, category: true, sortOrder: true, isActive: true }
+  });
+
+  const sourcesByCode = new Map(existingSources.map((row) => [normalizeSourceToken(row.code), row] as const));
+  const sourcesByName = new Map(existingSources.map((row) => [normalizeSourceToken(row.name), row] as const));
+
+  let createdSources = 0;
+  let reactivatedSources = 0;
+  let updatedSources = 0;
+
+  for (const source of CLIENT_ACQUISITION_SOURCE_DEFAULTS) {
+    const sourceCodeToken = normalizeSourceToken(source.code);
+    const sourceNameToken = normalizeSourceToken(source.name);
+    const matched = sourcesByCode.get(sourceCodeToken) ?? sourcesByName.get(sourceNameToken) ?? null;
+
+    if (matched) {
+      const shouldReactivate = !matched.isActive;
+      const shouldUpdate =
+        matched.name !== source.name ||
+        normalizeSourceToken(matched.code) !== sourceCodeToken ||
+        normalizeSourceToken(matched.category) !== normalizeSourceToken(source.category) ||
+        matched.sortOrder !== source.sortOrder;
+
+      if (shouldReactivate || shouldUpdate) {
+        await prisma.clientAcquisitionSource.update({
+          where: { id: matched.id },
+          data: {
+            name: source.name,
+            code: source.code,
+            category: source.category,
+            sortOrder: source.sortOrder,
+            isActive: true
+          },
+          select: { id: true }
+        });
+      }
+
+      if (shouldReactivate) reactivatedSources += 1;
+      if (shouldUpdate) updatedSources += 1;
+      continue;
+    }
+
+    await prisma.clientAcquisitionSource.create({
+      data: {
+        name: source.name,
+        code: source.code,
+        category: source.category,
+        sortOrder: source.sortOrder,
+        isActive: true
+      },
+      select: { id: true }
+    });
+    createdSources += 1;
+  }
+
+  const socialSource = await prisma.clientAcquisitionSource.findFirst({
+    where: {
+      OR: [{ code: "SOCIAL_MEDIA" }, { name: "Redes sociales" }]
+    },
+    select: { id: true }
+  });
+
+  let createdDetails = 0;
+  let reactivatedDetails = 0;
+  let updatedDetails = 0;
+  if (socialSource) {
+    for (const detail of CLIENT_ACQUISITION_SOCIAL_DETAILS_DEFAULTS) {
+      const existingDetail = await prisma.clientAcquisitionDetailOption.findUnique({
+        where: {
+          sourceId_code: {
+            sourceId: socialSource.id,
+            code: detail.code
+          }
+        },
+        select: { id: true, isActive: true, name: true }
+      });
+
+      if (existingDetail) {
+        const shouldReactivate = !existingDetail.isActive;
+        const shouldUpdate = existingDetail.name !== detail.name;
+        if (shouldReactivate || shouldUpdate) {
+          await prisma.clientAcquisitionDetailOption.update({
+            where: { id: existingDetail.id },
+            data: {
+              name: detail.name,
+              isActive: true
+            },
+            select: { id: true }
+          });
+        }
+        if (shouldReactivate) reactivatedDetails += 1;
+        if (shouldUpdate) updatedDetails += 1;
+        continue;
+      }
+
+      await prisma.clientAcquisitionDetailOption.create({
+        data: {
+          sourceId: socialSource.id,
+          code: detail.code,
+          name: detail.name,
+          isActive: true
+        },
+        select: { id: true }
+      });
+      createdDetails += 1;
+    }
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_ACQUISITION_DEFAULTS_LOADED",
+      entityType: "ClientAcquisitionSource",
+      entityId: "global",
+      metadata: {
+        createdSources,
+        reactivatedSources,
+        updatedSources,
+        createdDetails,
+        reactivatedDetails,
+        updatedDetails
+      }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/personas/nuevo");
+  revalidatePath("/admin/clientes/empresas/nuevo");
+  revalidatePath("/admin/clientes/instituciones/nuevo");
+  revalidatePath("/admin/clientes/aseguradoras/nuevo");
+  return {
+    ok: true,
+    createdSources,
+    reactivatedSources,
+    updatedSources,
+    createdDetails,
+    reactivatedDetails,
+    updatedDetails
+  };
+}
+
+export async function actionCreateClientContactDepartment(input: {
+  name: string;
+  code?: string;
+  description?: string;
+  sortOrder?: number;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientContactDirectoryDepartmentDelegateOrThrow();
+  const name = normalizeRequired(input.name, "Nombre de área requerido.");
+  const codeBase = normalizeContactDirectoryCode({ value: input.code, fallbackName: name });
+  if (!codeBase) throw new Error("Código de área inválido.");
+  const existingRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+  const code = resolveUniqueContactDirectoryCode({
+    baseCode: codeBase,
+    existingCodes: existingRows.map((row) => row.code)
+  });
+  if (!code) throw new Error("No se pudo generar un slug único para el área.");
+  const description = normalizeOptional(input.description);
+  const sortOrder = normalizeDirectorySortOrder(input.sortOrder);
+
+  try {
+    const created = await delegate.create({
+      data: {
+        tenantId,
+        code,
+        name,
+        description,
+        sortOrder,
+        isActive: true
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_CONTACT_DEPARTMENT_CREATED",
+        entityType: "ClientContactDepartmentDirectory",
+        entityId: created.id,
+        metadata: { tenantId, name, code, requestedCode: codeBase, sortOrder }
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    revalidatePath("/admin/clientes/empresas/nuevo");
+    return { id: created.id };
+  } catch (err: any) {
+    if (err?.code === "P2002") throw new Error("Ya existe un área con ese nombre o código.");
+    throw err;
+  }
+}
+
+export async function actionUpdateClientContactDepartment(input: {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  sortOrder?: number;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientContactDirectoryDepartmentDelegateOrThrow();
+  const id = normalizeRequired(input.id, "Área inválida.");
+  const name = normalizeRequired(input.name, "Nombre de área requerido.");
+  const codeBase = normalizeContactDirectoryCode({ value: input.code, fallbackName: name });
+  if (!codeBase) throw new Error("Código de área inválido.");
+  const description = normalizeOptional(input.description);
+  const sortOrder = normalizeDirectorySortOrder(input.sortOrder);
+
+  const existing = await delegate.findUnique({
+    where: { id },
+    select: { id: true, tenantId: true, name: true, code: true, description: true, sortOrder: true, isActive: true }
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new Error("Área no encontrada.");
+
+  const tenantRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+  const code = resolveUniqueContactDirectoryCode({
+    baseCode: codeBase,
+    existingCodes: tenantRows.filter((row) => row.id !== id).map((row) => row.code)
+  });
+  if (!code) throw new Error("No se pudo generar un slug único para el área.");
+
+  try {
+    await delegate.update({
+      where: { id },
+      data: {
+        name,
+        code,
+        description,
+        sortOrder
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_CONTACT_DEPARTMENT_UPDATED",
+        entityType: "ClientContactDepartmentDirectory",
+        entityId: id,
+        before: existing as Prisma.InputJsonValue,
+        after: { name, code, requestedCode: codeBase, description, sortOrder } as Prisma.InputJsonValue
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    revalidatePath("/admin/clientes/empresas/nuevo");
+    return { ok: true };
+  } catch (err: any) {
+    if (err?.code === "P2002") throw new Error("Ya existe un área con ese nombre o código.");
+    throw err;
+  }
+}
+
+export async function actionSetClientContactDepartmentActive(input: { id: string; isActive: boolean }) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientContactDirectoryDepartmentDelegateOrThrow();
+  const id = normalizeRequired(input.id, "Área inválida.");
+
+  const existing = await delegate.findUnique({
+    where: { id },
+    select: { id: true, tenantId: true, isActive: true }
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new Error("Área no encontrada.");
+
+  await delegate.update({
+    where: { id },
+    data: { isActive: Boolean(input.isActive) },
+    select: { id: true }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_CONTACT_DEPARTMENT_STATUS_CHANGED",
+      entityType: "ClientContactDepartmentDirectory",
+      entityId: id,
+      metadata: { before: existing.isActive, after: Boolean(input.isActive) }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/empresas/nuevo");
+  return { ok: true };
+}
+
+export async function actionCreateClientContactJobTitle(input: {
+  name: string;
+  code?: string;
+  description?: string;
+  sortOrder?: number;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientContactDirectoryJobTitleDelegateOrThrow();
+  const name = normalizeRequired(input.name, "Nombre de cargo requerido.");
+  const codeBase = normalizeContactDirectoryCode({ value: input.code, fallbackName: name });
+  if (!codeBase) throw new Error("Código de cargo inválido.");
+  const existingRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+  const code = resolveUniqueContactDirectoryCode({
+    baseCode: codeBase,
+    existingCodes: existingRows.map((row) => row.code)
+  });
+  if (!code) throw new Error("No se pudo generar un slug único para el cargo.");
+  const description = normalizeOptional(input.description);
+  const sortOrder = normalizeDirectorySortOrder(input.sortOrder);
+
+  try {
+    const created = await delegate.create({
+      data: {
+        tenantId,
+        code,
+        name,
+        description,
+        sortOrder,
+        isActive: true
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_CONTACT_JOB_TITLE_CREATED",
+        entityType: "ClientContactJobTitleDirectory",
+        entityId: created.id,
+        metadata: { tenantId, name, code, requestedCode: codeBase, sortOrder }
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    revalidatePath("/admin/clientes/empresas/nuevo");
+    return { id: created.id };
+  } catch (err: any) {
+    if (err?.code === "P2002") throw new Error("Ya existe un cargo con ese nombre o código.");
+    throw err;
+  }
+}
+
+export async function actionUpdateClientContactJobTitle(input: {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  sortOrder?: number;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientContactDirectoryJobTitleDelegateOrThrow();
+  const id = normalizeRequired(input.id, "Cargo inválido.");
+  const name = normalizeRequired(input.name, "Nombre de cargo requerido.");
+  const codeBase = normalizeContactDirectoryCode({ value: input.code, fallbackName: name });
+  if (!codeBase) throw new Error("Código de cargo inválido.");
+  const description = normalizeOptional(input.description);
+  const sortOrder = normalizeDirectorySortOrder(input.sortOrder);
+
+  const existing = await delegate.findUnique({
+    where: { id },
+    select: { id: true, tenantId: true, name: true, code: true, description: true, sortOrder: true, isActive: true }
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new Error("Cargo no encontrado.");
+
+  const tenantRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+  const code = resolveUniqueContactDirectoryCode({
+    baseCode: codeBase,
+    existingCodes: tenantRows.filter((row) => row.id !== id).map((row) => row.code)
+  });
+  if (!code) throw new Error("No se pudo generar un slug único para el cargo.");
+
+  try {
+    await delegate.update({
+      where: { id },
+      data: {
+        name,
+        code,
+        description,
+        sortOrder
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_CONTACT_JOB_TITLE_UPDATED",
+        entityType: "ClientContactJobTitleDirectory",
+        entityId: id,
+        before: existing as Prisma.InputJsonValue,
+        after: { name, code, requestedCode: codeBase, description, sortOrder } as Prisma.InputJsonValue
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    revalidatePath("/admin/clientes/empresas/nuevo");
+    return { ok: true };
+  } catch (err: any) {
+    if (err?.code === "P2002") throw new Error("Ya existe un cargo con ese nombre o código.");
+    throw err;
+  }
+}
+
+export async function actionSetClientContactJobTitleActive(input: { id: string; isActive: boolean }) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientContactDirectoryJobTitleDelegateOrThrow();
+  const id = normalizeRequired(input.id, "Cargo inválido.");
+
+  const existing = await delegate.findUnique({
+    where: { id },
+    select: { id: true, tenantId: true, isActive: true }
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new Error("Cargo no encontrado.");
+
+  await delegate.update({
+    where: { id },
+    data: { isActive: Boolean(input.isActive) },
+    select: { id: true }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_CONTACT_JOB_TITLE_STATUS_CHANGED",
+      entityType: "ClientContactJobTitleDirectory",
+      entityId: id,
+      metadata: { before: existing.isActive, after: Boolean(input.isActive) }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/empresas/nuevo");
+  return { ok: true };
+}
+
+export async function actionLoadClientContactDepartmentDefaults() {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientContactDirectoryDepartmentDelegateOrThrow();
+
+  const existingRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+
+  const defaultsByCode = new Map(
+    COMPANY_CONTACT_DEPARTMENTS.map((item, index) => [
+      normalizeContactDirectoryCode({ value: item.id }),
+      {
+        ...item,
+        sortOrder: (index + 1) * 10
+      }
+    ] as const)
+  );
+
+  let reactivated = 0;
+  for (const row of existingRows) {
+    const rowCode = normalizeContactDirectoryCode({ value: row.code });
+    if (!defaultsByCode.has(rowCode)) continue;
+    if (row.isActive) continue;
+    await delegate.update({
+      where: { id: row.id },
+      data: { isActive: true },
+      select: { id: true }
+    });
+    reactivated += 1;
+  }
+
+  const refreshedRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+
+  const missingDefaults = resolveMissingDepartmentDefaults(
+    refreshedRows.map((row) => ({ code: row.code, name: row.name }))
+  );
+
+  let created = 0;
+  for (const defaultRow of missingDefaults) {
+    const codeBase = normalizeContactDirectoryCode({ value: defaultRow.id, fallbackName: defaultRow.label });
+    const code = resolveUniqueContactDirectoryCode({
+      baseCode: codeBase,
+      existingCodes: refreshedRows.map((row) => row.code)
+    });
+    if (!code) continue;
+
+    try {
+      await delegate.create({
+        data: {
+          tenantId,
+          code,
+          name: defaultRow.label,
+          sortOrder: (COMPANY_CONTACT_DEPARTMENTS.findIndex((item) => item.id === defaultRow.id) + 1 || 1) * 10,
+          isActive: true
+        },
+        select: { id: true }
+      });
+      refreshedRows.push({
+        id: `created_department_${code}_${created}`,
+        tenantId,
+        code,
+        name: defaultRow.label,
+        description: null,
+        sortOrder: (COMPANY_CONTACT_DEPARTMENTS.findIndex((item) => item.id === defaultRow.id) + 1 || 1) * 10,
+        isActive: true
+      });
+      created += 1;
+    } catch (error: any) {
+      if (error?.code !== "P2002") {
+        throw error;
+      }
+    }
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_CONTACT_DEPARTMENT_DEFAULTS_LOADED",
+      entityType: "ClientContactDepartmentDirectory",
+      entityId: tenantId,
+      metadata: { tenantId, created, reactivated }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/empresas/nuevo");
+  return { ok: true, created, reactivated };
+}
+
+export async function actionLoadClientContactJobTitleDefaults() {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientContactDirectoryJobTitleDelegateOrThrow();
+
+  const existingRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+
+  const defaultsByCode = new Map(
+    COMPANY_CONTACT_JOB_TITLES.map((item, index) => [
+      normalizeContactDirectoryCode({ value: item.id }),
+      {
+        ...item,
+        sortOrder: (index + 1) * 10
+      }
+    ] as const)
+  );
+
+  let reactivated = 0;
+  for (const row of existingRows) {
+    const rowCode = normalizeContactDirectoryCode({ value: row.code });
+    if (!defaultsByCode.has(rowCode)) continue;
+    if (row.isActive) continue;
+    await delegate.update({
+      where: { id: row.id },
+      data: { isActive: true },
+      select: { id: true }
+    });
+    reactivated += 1;
+  }
+
+  const refreshedRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+
+  const missingDefaults = resolveMissingJobTitleDefaults(
+    refreshedRows.map((row) => ({ code: row.code, name: row.name }))
+  );
+
+  let created = 0;
+  for (const defaultRow of missingDefaults) {
+    const codeBase = normalizeContactDirectoryCode({ value: defaultRow.id, fallbackName: defaultRow.label });
+    const code = resolveUniqueContactDirectoryCode({
+      baseCode: codeBase,
+      existingCodes: refreshedRows.map((row) => row.code)
+    });
+    if (!code) continue;
+
+    try {
+      await delegate.create({
+        data: {
+          tenantId,
+          code,
+          name: defaultRow.label,
+          sortOrder: (COMPANY_CONTACT_JOB_TITLES.findIndex((item) => item.id === defaultRow.id) + 1 || 1) * 10,
+          isActive: true
+        },
+        select: { id: true }
+      });
+      refreshedRows.push({
+        id: `created_job_title_${code}_${created}`,
+        tenantId,
+        code,
+        name: defaultRow.label,
+        description: null,
+        sortOrder: (COMPANY_CONTACT_JOB_TITLES.findIndex((item) => item.id === defaultRow.id) + 1 || 1) * 10,
+        isActive: true
+      });
+      created += 1;
+    } catch (error: any) {
+      if (error?.code !== "P2002") {
+        throw error;
+      }
+    }
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_CONTACT_JOB_TITLE_DEFAULTS_LOADED",
+      entityType: "ClientContactJobTitleDirectory",
+      entityId: tenantId,
+      metadata: { tenantId, created, reactivated }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/empresas/nuevo");
+  return { ok: true, created, reactivated };
+}
+
+export async function actionCreateClientPbxCategory(input: {
+  name: string;
+  code?: string;
+  description?: string;
+  sortOrder?: number;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientPbxCategoryDirectoryDelegateOrThrow();
+  const name = normalizeRequired(input.name, "Nombre de categoría PBX requerido.");
+  const codeBase = normalizeContactDirectoryCode({ value: input.code, fallbackName: name });
+  if (!codeBase) throw new Error("Código de categoría PBX inválido.");
+  const existingRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+  const code = resolveUniqueContactDirectoryCode({
+    baseCode: codeBase,
+    existingCodes: existingRows.map((row) => row.code)
+  });
+  if (!code) throw new Error("No se pudo generar un slug único para la categoría PBX.");
+  const description = normalizeOptional(input.description);
+  const sortOrder = normalizeDirectorySortOrder(input.sortOrder);
+
+  try {
+    const created = await delegate.create({
+      data: {
+        tenantId,
+        code,
+        name,
+        description,
+        sortOrder,
+        isActive: true
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_PBX_CATEGORY_CREATED",
+        entityType: "ClientPbxCategoryDirectory",
+        entityId: created.id,
+        metadata: { tenantId, name, code, requestedCode: codeBase, sortOrder }
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    revalidatePath("/admin/clientes/empresas/nuevo");
+    return { id: created.id };
+  } catch (err: any) {
+    if (err?.code === "P2002") throw new Error("Ya existe una categoría PBX con ese nombre o código.");
+    throw err;
+  }
+}
+
+export async function actionUpdateClientPbxCategory(input: {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  sortOrder?: number;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientPbxCategoryDirectoryDelegateOrThrow();
+  const id = normalizeRequired(input.id, "Categoría PBX inválida.");
+  const name = normalizeRequired(input.name, "Nombre de categoría PBX requerido.");
+  const codeBase = normalizeContactDirectoryCode({ value: input.code, fallbackName: name });
+  if (!codeBase) throw new Error("Código de categoría PBX inválido.");
+  const description = normalizeOptional(input.description);
+  const sortOrder = normalizeDirectorySortOrder(input.sortOrder);
+
+  const existing = await delegate.findUnique({
+    where: { id },
+    select: { id: true, tenantId: true, name: true, code: true, description: true, sortOrder: true, isActive: true }
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new Error("Categoría PBX no encontrada.");
+
+  const tenantRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+  const code = resolveUniqueContactDirectoryCode({
+    baseCode: codeBase,
+    existingCodes: tenantRows.filter((row) => row.id !== id).map((row) => row.code)
+  });
+  if (!code) throw new Error("No se pudo generar un slug único para la categoría PBX.");
+
+  try {
+    await delegate.update({
+      where: { id },
+      data: {
+        name,
+        code,
+        description,
+        sortOrder
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_PBX_CATEGORY_UPDATED",
+        entityType: "ClientPbxCategoryDirectory",
+        entityId: id,
+        before: existing as Prisma.InputJsonValue,
+        after: { name, code, requestedCode: codeBase, description, sortOrder } as Prisma.InputJsonValue
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    revalidatePath("/admin/clientes/empresas/nuevo");
+    return { ok: true };
+  } catch (err: any) {
+    if (err?.code === "P2002") throw new Error("Ya existe una categoría PBX con ese nombre o código.");
+    throw err;
+  }
+}
+
+export async function actionSetClientPbxCategoryActive(input: { id: string; isActive: boolean }) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientPbxCategoryDirectoryDelegateOrThrow();
+  const id = normalizeRequired(input.id, "Categoría PBX inválida.");
+
+  const existing = await delegate.findUnique({
+    where: { id },
+    select: { id: true, tenantId: true, isActive: true }
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new Error("Categoría PBX no encontrada.");
+
+  await delegate.update({
+    where: { id },
+    data: { isActive: Boolean(input.isActive) },
+    select: { id: true }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_PBX_CATEGORY_STATUS_CHANGED",
+      entityType: "ClientPbxCategoryDirectory",
+      entityId: id,
+      metadata: { before: existing.isActive, after: Boolean(input.isActive) }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/empresas/nuevo");
+  return { ok: true };
+}
+
+export async function actionLoadClientPbxCategoryDefaults() {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientPbxCategoryDirectoryDelegateOrThrow();
+
+  const existingRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+
+  const defaultsByCode = new Map(
+    COMPANY_PBX_CATEGORY_SEED.map((item, index) => [
+      normalizeContactDirectoryCode({ value: item.id }),
+      {
+        ...item,
+        sortOrder: (index + 1) * 10
+      }
+    ] as const)
+  );
+
+  let reactivated = 0;
+  for (const row of existingRows) {
+    const rowCode = normalizeContactDirectoryCode({ value: row.code });
+    if (!defaultsByCode.has(rowCode)) continue;
+    if (row.isActive) continue;
+    await delegate.update({
+      where: { id: row.id },
+      data: { isActive: true },
+      select: { id: true }
+    });
+    reactivated += 1;
+  }
+
+  const refreshedRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+
+  const missingDefaults = resolveMissingPbxCategoryDefaults(
+    refreshedRows.map((row) => ({ code: row.code, name: row.name }))
+  );
+
+  let created = 0;
+  for (const defaultRow of missingDefaults) {
+    const codeBase = normalizeContactDirectoryCode({ value: defaultRow.id, fallbackName: defaultRow.label });
+    const code = resolveUniqueContactDirectoryCode({
+      baseCode: codeBase,
+      existingCodes: refreshedRows.map((row) => row.code)
+    });
+    if (!code) continue;
+
+    try {
+      await delegate.create({
+        data: {
+          tenantId,
+          code,
+          name: defaultRow.label,
+          sortOrder: (COMPANY_PBX_CATEGORY_SEED.findIndex((item) => item.id === defaultRow.id) + 1 || 1) * 10,
+          isSystem: true,
+          isActive: true
+        },
+        select: { id: true }
+      });
+      refreshedRows.push({
+        id: `created_${code}_${created}`,
+        tenantId,
+        code,
+        name: defaultRow.label,
+        description: null,
+        sortOrder: (COMPANY_PBX_CATEGORY_SEED.findIndex((item) => item.id === defaultRow.id) + 1 || 1) * 10,
+        isActive: true
+      });
+      created += 1;
+    } catch (error: any) {
+      if (error?.code !== "P2002") {
+        throw error;
+      }
+    }
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_PBX_CATEGORY_DEFAULTS_LOADED",
+      entityType: "ClientPbxCategoryDirectory",
+      entityId: tenantId,
+      metadata: { tenantId, created, reactivated }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/empresas/nuevo");
+  return { ok: true, created, reactivated };
+}
+
+export async function actionSaveClientContactDepartmentJobTitles(input: {
+  departmentId: string;
+  jobTitleIds: string[];
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const departmentDelegate = getClientContactDirectoryDepartmentDelegateOrThrow();
+  const jobTitleDelegate = getClientContactDirectoryJobTitleDelegateOrThrow();
+  const correlationDelegate = getClientContactDirectoryCorrelationDelegateOrThrow();
+
+  const departmentId = normalizeRequired(input.departmentId, "Área requerida.");
+  const requestedJobTitleIds = Array.from(
+    new Set((Array.isArray(input.jobTitleIds) ? input.jobTitleIds : []).map((item) => normalizeOptional(item)).filter(Boolean) as string[])
+  );
+
+  const department = await departmentDelegate.findUnique({
+    where: { id: departmentId },
+    select: { id: true, tenantId: true, name: true, isActive: true }
+  });
+  if (!department || department.tenantId !== tenantId) throw new Error("Área no encontrada.");
+
+  if (requestedJobTitleIds.length > 0) {
+    const existingJobTitles = await jobTitleDelegate.findMany({
+      where: {
+        tenantId,
+        id: { in: requestedJobTitleIds }
+      },
+      select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+    });
+
+    if (existingJobTitles.length !== requestedJobTitleIds.length) {
+      throw new Error("Uno o más cargos seleccionados no existen para este tenant.");
+    }
+  }
+
+  const existingLinks = await correlationDelegate.findMany({
+    where: {
+      tenantId,
+      departmentId
+    },
+    select: {
+      id: true,
+      jobTitleId: true,
+      isActive: true
+    }
+  });
+
+  for (const jobTitleId of requestedJobTitleIds) {
+    await correlationDelegate.upsert({
+      where: {
+        tenantId_departmentId_jobTitleId: {
+          tenantId,
+          departmentId,
+          jobTitleId
+        }
+      },
+      update: {
+        isActive: true,
+        updatedAt: new Date()
+      },
+      create: {
+        tenantId,
+        departmentId,
+        jobTitleId,
+        isActive: true
+      },
+      select: { id: true }
+    });
+  }
+
+  if (requestedJobTitleIds.length > 0) {
+    await correlationDelegate.updateMany({
+      where: {
+        tenantId,
+        departmentId,
+        jobTitleId: { notIn: requestedJobTitleIds }
+      },
+      data: {
+        isActive: false
+      }
+    });
+  } else {
+    await correlationDelegate.updateMany({
+      where: {
+        tenantId,
+        departmentId
+      },
+      data: {
+        isActive: false
+      }
+    });
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_CONTACT_DEPARTMENT_JOB_TITLES_UPDATED",
+      entityType: "ClientContactDepartmentDirectory",
+      entityId: departmentId,
+      metadata: {
+        tenantId,
+        before: existingLinks.filter((row) => row.isActive).map((row) => row.jobTitleId),
+        after: requestedJobTitleIds
+      }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/empresas/nuevo");
+  return { ok: true };
+}
+
 function normalizeRequiredRuleWeight(value: number | undefined) {
   const raw = Number.isFinite(value) ? Number(value) : 5;
   return Math.min(10, Math.max(1, Math.floor(raw)));
@@ -5787,4 +7711,138 @@ export async function actionUpdateClientRulesConfig(input: {
 
   revalidatePath("/admin/clientes/configuracion");
   return { ok: true };
+}
+
+export async function actionUpdateClientsDateFormat(input: {
+  clientsDateFormat: string;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const clientsDateFormat = normalizeClientsDateFormat(input.clientsDateFormat);
+
+  const snapshot = await updateTenantClientsDateFormat({
+    tenantId,
+    clientsDateFormat,
+    updatedByUserId: user.id
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_DATE_FORMAT_UPDATED",
+      entityType: "TenantClientsConfig",
+      entityId: tenantId,
+      metadata: {
+        tenantId,
+        clientsDateFormat: snapshot.clientsDateFormat
+      }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/personas/nuevo");
+  revalidatePath("/admin/clientes");
+  revalidatePath("/admin/clientes/reportes");
+  return { ok: true, clientsDateFormat: snapshot.clientsDateFormat };
+}
+
+export async function actionUpdateClientsOperatingCountryConfig(input: {
+  isOperatingCountryPinned: boolean;
+  operatingCountryId?: string | null;
+  operatingCountryDefaultsScopes?: unknown;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+
+  const snapshot = await updateOperatingCountryDefaults({
+    tenantId,
+    isOperatingCountryPinned: Boolean(input.isOperatingCountryPinned),
+    operatingCountryId: input.operatingCountryId ?? null,
+    scopes: input.operatingCountryDefaultsScopes,
+    updatedByUserId: user.id
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_OPERATING_COUNTRY_CONFIG_UPDATED",
+      entityType: "TenantClientsConfig",
+      entityId: tenantId,
+      metadata: {
+        tenantId,
+        isOperatingCountryPinned: snapshot.isOperatingCountryPinned,
+        operatingCountryId: snapshot.operatingCountryId,
+        scopes: snapshot.scopes
+      }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/personas/nuevo");
+  revalidatePath("/admin/clientes/empresas/nuevo");
+  revalidatePath("/admin/clientes/instituciones/nuevo");
+  revalidatePath("/admin/clientes/aseguradoras/nuevo");
+  revalidatePath("/admin/clientes");
+
+  return {
+    ok: true,
+    isOperatingCountryPinned: snapshot.isOperatingCountryPinned,
+    operatingCountryId: snapshot.operatingCountryId,
+    scopes: snapshot.scopes
+  };
+}
+
+export async function actionSetClientsConfigRegistryDeprecated(input: {
+  key: string;
+  deprecated: boolean;
+}) {
+  const user = await requireAdminUser();
+  const key = String(input.key ?? "").trim();
+  if (!key) throw new Error("Entrada de configuración requerida.");
+
+  const entry = CLIENTS_CONFIG_REGISTRY.find((item) => item.key === key);
+  if (!entry) throw new Error("Entrada de configuración no encontrada.");
+  if (input.deprecated && !canDeprecateClientsConfigEntry(entry)) {
+    throw new Error("Solo se puede deprecar una entrada sin uso activo y marcada como deprecable.");
+  }
+
+  const cookieStore = await cookies();
+  const current = parseClientsConfigDeprecatedCookie(cookieStore.get(CLIENTS_CONFIG_DEPRECATED_COOKIE)?.value ?? null);
+  const nextSet = new Set(current);
+  if (input.deprecated) {
+    nextSet.add(key);
+  } else {
+    nextSet.delete(key);
+  }
+  const next = Array.from(nextSet).sort((a, b) => a.localeCompare(b));
+
+  cookieStore.set(CLIENTS_CONFIG_DEPRECATED_COOKIE, serializeClientsConfigDeprecatedCookie(next), {
+    path: "/admin/clientes/configuracion",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 24 * 365,
+    secure: process.env.NODE_ENV === "production"
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId: tenantIdFromUser(user),
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: input.deprecated ? "CLIENT_CONFIG_REGISTRY_DEPRECATED" : "CLIENT_CONFIG_REGISTRY_RESTORED",
+      entityType: "ClientsConfigRegistry",
+      entityId: key,
+      metadata: {
+        key,
+        label: entry.label,
+        section: entry.section,
+        deprecated: Boolean(input.deprecated),
+        deprecatedKeys: next
+      }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  return { ok: true, key, deprecated: Boolean(input.deprecated), deprecatedKeys: next };
 }

@@ -71,3 +71,35 @@ export function buildPersonLocationDrafts(input: BuildPersonLocationDraftsInput)
 
   return locations;
 }
+
+type BuildBirthPlaceLabelInput = {
+  cityOrTown?: string | null;
+  geoAdmin2Name?: string | null;
+  geoFreeCity?: string | null;
+  geoAdmin1Name?: string | null;
+  geoFreeState?: string | null;
+  geoCountryName?: string | null;
+};
+
+function dedupeParts(parts: string[]) {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const part of parts) {
+    const key = part.trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(part.trim());
+  }
+  return output;
+}
+
+export function buildBirthPlaceLabel(input: BuildBirthPlaceLabelInput): string | null {
+  const cityOrTown = normalizeText(input.cityOrTown);
+  const municipality = normalizeText(input.geoAdmin2Name) ?? normalizeText(input.geoFreeCity);
+  const department = normalizeText(input.geoAdmin1Name) ?? normalizeText(input.geoFreeState);
+  const country = normalizeText(input.geoCountryName);
+
+  const parts = dedupeParts([cityOrTown, municipality, department, country].filter((value): value is string => Boolean(value)));
+  if (!parts.length) return null;
+  return parts.join(", ");
+}

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Edit3, PlusCircle, Save, ToggleLeft, ToggleRight } from "lucide-react";
+import { PlusCircle } from "lucide-react";
 import {
   actionCreateClientAcquisitionDetailOption,
   actionCreateClientAcquisitionSource,
@@ -11,6 +11,8 @@ import {
   actionUpdateClientAcquisitionDetailOption,
   actionUpdateClientAcquisitionSource
 } from "@/app/admin/clientes/actions";
+import ConfigDataTable, { type ConfigDataTableAction, type ConfigDataTableColumn } from "@/components/clients/config/ConfigDataTable";
+import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/lib/utils";
 
 type SourceRow = {
@@ -29,6 +31,68 @@ type DetailRow = {
   isActive: boolean;
 };
 
+type SourceAction = "edit" | "toggle" | "details";
+type DetailAction = "edit" | "toggle";
+
+const sourceColumns: ConfigDataTableColumn<SourceRow>[] = [
+  {
+    id: "name",
+    header: "Nombre",
+    render: (row) => <span className="font-semibold text-slate-900">{row.name}</span>
+  },
+  {
+    id: "code",
+    header: "Código/Key",
+    render: (row) => <span className="font-mono text-xs text-slate-600">{row.code || "—"}</span>
+  },
+  {
+    id: "category",
+    header: "Tipo",
+    render: (row) => <span className="text-slate-600">{row.category || "General"}</span>
+  },
+  {
+    id: "status",
+    header: "Estado",
+    render: (row) => (
+      <span
+        className={cn(
+          "inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+          row.isActive ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-600"
+        )}
+      >
+        {row.isActive ? "Activo" : "Inactivo"}
+      </span>
+    )
+  }
+];
+
+const detailColumns: ConfigDataTableColumn<DetailRow>[] = [
+  {
+    id: "name",
+    header: "Nombre",
+    render: (row) => <span className="font-semibold text-slate-900">{row.name}</span>
+  },
+  {
+    id: "code",
+    header: "Código/Key",
+    render: (row) => <span className="font-mono text-xs text-slate-600">{row.code || "—"}</span>
+  },
+  {
+    id: "status",
+    header: "Estado",
+    render: (row) => (
+      <span
+        className={cn(
+          "inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+          row.isActive ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-600"
+        )}
+      >
+        {row.isActive ? "Activo" : "Inactivo"}
+      </span>
+    )
+  }
+];
+
 export default function ClientAcquisitionSourceManager({
   sources,
   details
@@ -40,25 +104,42 @@ export default function ClientAcquisitionSourceManager({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedSourceId, setSelectedSourceId] = useState<string>(sources[0]?.id ?? "");
-
   const [sourceForm, setSourceForm] = useState({ name: "", code: "", category: "" });
-  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
-  const [sourceDraft, setSourceDraft] = useState({ name: "", code: "", category: "" });
-
   const [detailForm, setDetailForm] = useState({ name: "", code: "" });
+
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [editingDetailId, setEditingDetailId] = useState<string | null>(null);
+  const [sourceDraft, setSourceDraft] = useState({ name: "", code: "", category: "" });
   const [detailDraft, setDetailDraft] = useState({ name: "", code: "" });
+
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [selectedSourceId, setSelectedSourceId] = useState<string>(sources[0]?.id ?? "");
 
   const sortedSources = useMemo(
     () => [...sources].sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name)),
     [sources]
   );
 
+  const selectedSource = useMemo(
+    () => sortedSources.find((source) => source.id === selectedSourceId) ?? null,
+    [sortedSources, selectedSourceId]
+  );
+
   const sourceDetails = useMemo(
     () => details.filter((item) => item.sourceId === selectedSourceId).sort((a, b) => a.name.localeCompare(b.name)),
     [details, selectedSourceId]
   );
+
+  const sourceActions = (row: SourceRow): ConfigDataTableAction<SourceRow>[] => [
+    { id: "edit", label: "Editar" },
+    { id: "toggle", label: row.isActive ? "Desactivar" : "Activar" },
+    { id: "details", label: "Ver detalles" }
+  ];
+
+  const detailActions = (row: DetailRow): ConfigDataTableAction<DetailRow>[] => [
+    { id: "edit", label: "Editar" },
+    { id: "toggle", label: row.isActive ? "Desactivar" : "Activar" }
+  ];
 
   const createSource = () => {
     if (!sourceForm.name.trim()) return;
@@ -74,7 +155,7 @@ export default function ClientAcquisitionSourceManager({
         setError(null);
         router.refresh();
       } catch (err) {
-        setError((err as Error)?.message || "No se pudo crear canal.");
+        setError((err as Error)?.message || "No se pudo crear el canal.");
       }
     });
   };
@@ -90,10 +171,11 @@ export default function ClientAcquisitionSourceManager({
           category: sourceDraft.category
         });
         setEditingSourceId(null);
+        setSourceDraft({ name: "", code: "", category: "" });
         setError(null);
         router.refresh();
       } catch (err) {
-        setError((err as Error)?.message || "No se pudo actualizar canal.");
+        setError((err as Error)?.message || "No se pudo guardar el canal.");
       }
     });
   };
@@ -111,7 +193,7 @@ export default function ClientAcquisitionSourceManager({
         setError(null);
         router.refresh();
       } catch (err) {
-        setError((err as Error)?.message || "No se pudo crear detalle.");
+        setError((err as Error)?.message || "No se pudo crear el detalle.");
       }
     });
   };
@@ -126,280 +208,254 @@ export default function ClientAcquisitionSourceManager({
           code: detailDraft.code
         });
         setEditingDetailId(null);
+        setDetailDraft({ name: "", code: "" });
         setError(null);
         router.refresh();
       } catch (err) {
-        setError((err as Error)?.message || "No se pudo actualizar detalle.");
+        setError((err as Error)?.message || "No se pudo guardar el detalle.");
       }
     });
   };
 
+  const onSourceAction = (actionId: string, row: SourceRow) => {
+    const action = actionId as SourceAction;
+    if (action === "edit") {
+      setEditingSourceId(row.id);
+      setSourceDraft({
+        name: row.name,
+        code: row.code ?? "",
+        category: row.category ?? ""
+      });
+      return;
+    }
+
+    if (action === "details") {
+      setSelectedSourceId(row.id);
+      setDetailsOpen(true);
+      return;
+    }
+
+    if (action === "toggle") {
+      startTransition(async () => {
+        try {
+          await actionSetClientAcquisitionSourceActive({
+            id: row.id,
+            isActive: !row.isActive
+          });
+          setError(null);
+          router.refresh();
+        } catch (err) {
+          setError((err as Error)?.message || "No se pudo cambiar el estado del canal.");
+        }
+      });
+    }
+  };
+
+  const onDetailAction = (actionId: string, row: DetailRow) => {
+    const action = actionId as DetailAction;
+    if (action === "edit") {
+      setEditingDetailId(row.id);
+      setDetailDraft({ name: row.name, code: row.code ?? "" });
+      return;
+    }
+
+    if (action === "toggle") {
+      startTransition(async () => {
+        try {
+          await actionSetClientAcquisitionDetailOptionActive({
+            id: row.id,
+            isActive: !row.isActive
+          });
+          setError(null);
+          router.refresh();
+        } catch (err) {
+          setError((err as Error)?.message || "No se pudo cambiar estado del detalle.");
+        }
+      });
+    }
+  };
+
   return (
-    <section className="space-y-4 rounded-2xl border border-[#dce7f5] bg-white p-5 shadow-sm">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-diagnostics-corporate">Canales y comercial</p>
-        <h3 className="mt-1 text-lg font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
-          ¿Cómo nos conoció?
-        </h3>
-        <p className="text-sm text-slate-600">Gestiona canales y sus detalles. El canal “Referido” activa selector de cliente en formularios.</p>
-      </div>
+    <section className="space-y-3 rounded-xl border border-[#dce7f5] bg-white p-4 shadow-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2e75ba]">Canales y comercial</p>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3">
-          <p className="text-sm font-semibold text-slate-800">Canales</p>
-          <div className="space-y-2">
-            {sortedSources.map((source) => {
-              const editing = editingSourceId === source.id;
-              return (
-                <article key={source.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedSourceId(source.id)}
-                      className={cn(
-                        "text-left",
-                        selectedSourceId === source.id ? "text-[#2e75ba]" : "text-slate-900"
-                      )}
-                    >
-                      {editing ? (
-                        <div className="space-y-2">
-                          <input
-                            value={sourceDraft.name}
-                            onChange={(e) => setSourceDraft((prev) => ({ ...prev, name: e.target.value }))}
-                            className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-800"
-                          />
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              value={sourceDraft.code}
-                              onChange={(e) => setSourceDraft((prev) => ({ ...prev, code: e.target.value }))}
-                              placeholder="Código"
-                              className="rounded-lg border border-slate-200 px-2 py-1 text-xs"
-                            />
-                            <input
-                              value={sourceDraft.category}
-                              onChange={(e) => setSourceDraft((prev) => ({ ...prev, category: e.target.value }))}
-                              placeholder="Categoría"
-                              className="rounded-lg border border-slate-200 px-2 py-1 text-xs"
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <p className="text-sm font-semibold">{source.name}</p>
-                          <p className="text-xs text-slate-500">{source.code || "—"} · {source.category || "Sin categoría"}</p>
-                        </>
-                      )}
-                    </button>
+      {editingSourceId ? (
+        <div className="grid gap-2 rounded-xl border border-[#dce7f5] bg-[#f8fafc] p-3 lg:grid-cols-[1.2fr_1fr_1fr_auto_auto]">
+          <input
+            value={sourceDraft.name}
+            onChange={(event) => setSourceDraft((prev) => ({ ...prev, name: event.target.value }))}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+            placeholder="Nombre"
+          />
+          <input
+            value={sourceDraft.code}
+            onChange={(event) => setSourceDraft((prev) => ({ ...prev, code: event.target.value }))}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+            placeholder="Código/Key"
+          />
+          <input
+            value={sourceDraft.category}
+            onChange={(event) => setSourceDraft((prev) => ({ ...prev, category: event.target.value }))}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+            placeholder="Tipo"
+          />
+          <button
+            type="button"
+            onClick={saveSource}
+            disabled={isPending || !sourceDraft.name.trim()}
+            className={cn(
+              "h-9 rounded-lg bg-[#4aa59c] px-4 text-sm font-semibold text-white hover:bg-[#4aadf5]",
+              (isPending || !sourceDraft.name.trim()) && "cursor-not-allowed opacity-60 hover:bg-[#4aa59c]"
+            )}
+          >
+            Guardar
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditingSourceId(null)}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+          >
+            Cancelar
+          </button>
+        </div>
+      ) : null}
 
-                    <div className="flex items-center gap-1">
-                      {editing ? (
-                        <button
-                          type="button"
-                          onClick={saveSource}
-                          disabled={isPending || !sourceDraft.name.trim()}
-                          className="inline-flex items-center gap-1 rounded-full bg-[#4aa59c] px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
-                        >
-                          <Save size={12} /> Guardar
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingSourceId(source.id);
-                            setSourceDraft({
-                              name: source.name,
-                              code: source.code ?? "",
-                              category: source.category ?? ""
-                            });
-                          }}
-                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                        >
-                          <Edit3 size={12} /> Editar
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          startTransition(async () => {
-                            try {
-                              await actionSetClientAcquisitionSourceActive({
-                                id: source.id,
-                                isActive: !source.isActive
-                              });
-                              router.refresh();
-                            } catch (err) {
-                              setError((err as Error)?.message || "No se pudo cambiar estado del canal.");
-                            }
-                          })
-                        }
-                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                      >
-                        {source.isActive ? <ToggleRight size={12} /> : <ToggleLeft size={12} />}
-                        {source.isActive ? "Activo" : "Inactivo"}
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
+      <ConfigDataTable
+        title="Canales"
+        subtitle="Canal de adquisición con selector de detalles por fila."
+        columns={sourceColumns}
+        rows={sortedSources}
+        actions={sourceActions}
+        onAction={onSourceAction}
+        enableSearch
+        enableStatusFilter
+        searchPlaceholder="Buscar canal..."
+        getSearchText={(row) => `${row.name} ${row.code ?? ""} ${row.category ?? ""}`}
+        emptyState="Sin canales registrados."
+        headerActions={
+          <div className="grid gap-2 lg:grid-cols-[1.2fr_1fr_1fr_auto]">
+            <input
+              value={sourceForm.name}
+              onChange={(event) => setSourceForm((prev) => ({ ...prev, name: event.target.value }))}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+              placeholder="Nombre canal"
+            />
+            <input
+              value={sourceForm.code}
+              onChange={(event) => setSourceForm((prev) => ({ ...prev, code: event.target.value }))}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+              placeholder="Código/Key"
+            />
+            <input
+              value={sourceForm.category}
+              onChange={(event) => setSourceForm((prev) => ({ ...prev, category: event.target.value }))}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+              placeholder="Tipo"
+            />
+            <button
+              type="button"
+              onClick={createSource}
+              disabled={isPending || !sourceForm.name.trim()}
+              className={cn(
+                "inline-flex h-9 items-center gap-1 rounded-lg bg-[#4aa59c] px-3 text-sm font-semibold text-white hover:bg-[#4aadf5]",
+                (isPending || !sourceForm.name.trim()) && "cursor-not-allowed opacity-60 hover:bg-[#4aa59c]"
+              )}
+            >
+              <PlusCircle size={14} />
+              Nuevo
+            </button>
           </div>
+        }
+      />
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Nuevo canal</p>
-            <div className="mt-2 space-y-2">
+      <Modal
+        open={detailsOpen}
+        onClose={() => {
+          setDetailsOpen(false);
+          setEditingDetailId(null);
+        }}
+        title={`Detalles del canal${selectedSource ? ` · ${selectedSource.name}` : ""}`}
+        subtitle="Canales y comercial"
+        className="max-w-5xl"
+      >
+        {editingDetailId ? (
+          <div className="mb-3 grid gap-2 rounded-xl border border-[#dce7f5] bg-[#f8fafc] p-3 md:grid-cols-[1.2fr_1fr_auto_auto]">
+            <input
+              value={detailDraft.name}
+              onChange={(event) => setDetailDraft((prev) => ({ ...prev, name: event.target.value }))}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+              placeholder="Nombre"
+            />
+            <input
+              value={detailDraft.code}
+              onChange={(event) => setDetailDraft((prev) => ({ ...prev, code: event.target.value }))}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+              placeholder="Código/Key"
+            />
+            <button
+              type="button"
+              onClick={saveDetail}
+              disabled={isPending || !detailDraft.name.trim()}
+              className={cn(
+                "h-9 rounded-lg bg-[#4aa59c] px-4 text-sm font-semibold text-white hover:bg-[#4aadf5]",
+                (isPending || !detailDraft.name.trim()) && "cursor-not-allowed opacity-60 hover:bg-[#4aa59c]"
+              )}
+            >
+              Guardar
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditingDetailId(null)}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+            >
+              Cancelar
+            </button>
+          </div>
+        ) : null}
+
+        <ConfigDataTable
+          title="Opciones del canal"
+          columns={detailColumns}
+          rows={sourceDetails}
+          actions={detailActions}
+          onAction={onDetailAction}
+          enableSearch
+          enableStatusFilter
+          searchPlaceholder="Buscar detalle..."
+          getSearchText={(row) => `${row.name} ${row.code ?? ""}`}
+          emptyState="Sin detalles para este canal."
+          headerActions={
+            <div className="grid gap-2 md:grid-cols-[1.2fr_1fr_auto]">
               <input
-                value={sourceForm.name}
-                onChange={(e) => setSourceForm((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder="Nombre *"
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                value={detailForm.name}
+                onChange={(event) => setDetailForm((prev) => ({ ...prev, name: event.target.value }))}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+                placeholder="Nombre detalle"
               />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  value={sourceForm.code}
-                  onChange={(e) => setSourceForm((prev) => ({ ...prev, code: e.target.value }))}
-                  placeholder="Código"
-                  className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                />
-                <input
-                  value={sourceForm.category}
-                  onChange={(e) => setSourceForm((prev) => ({ ...prev, category: e.target.value }))}
-                  placeholder="Categoría"
-                  className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                />
-              </div>
+              <input
+                value={detailForm.code}
+                onChange={(event) => setDetailForm((prev) => ({ ...prev, code: event.target.value }))}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-[#4aadf5] focus:outline-none focus:ring-2 focus:ring-[#4aadf5]/20"
+                placeholder="Código/Key"
+              />
               <button
                 type="button"
-                onClick={createSource}
-                disabled={isPending || !sourceForm.name.trim()}
-                className="inline-flex items-center gap-1 rounded-full bg-[#4aa59c] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                onClick={createDetail}
+                disabled={isPending || !selectedSourceId || !detailForm.name.trim()}
+                className={cn(
+                  "inline-flex h-9 items-center gap-1 rounded-lg bg-[#4aa59c] px-3 text-sm font-semibold text-white hover:bg-[#4aadf5]",
+                  (isPending || !selectedSourceId || !detailForm.name.trim()) && "cursor-not-allowed opacity-60 hover:bg-[#4aa59c]"
+                )}
               >
-                <PlusCircle size={12} /> Crear canal
+                <PlusCircle size={14} />
+                Nuevo
               </button>
             </div>
-          </div>
-        </div>
+          }
+        />
+      </Modal>
 
-        <div className="space-y-3">
-          <p className="text-sm font-semibold text-slate-800">Detalle del canal seleccionado</p>
-          {!selectedSourceId ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              Selecciona un canal para gestionar sus detalles.
-            </div>
-          ) : (
-            <>
-              <div className="space-y-2">
-                {sourceDetails.map((detail) => {
-                  const editing = editingDetailId === detail.id;
-                  return (
-                    <article key={detail.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        {editing ? (
-                          <div className="flex-1 space-y-2">
-                            <input
-                              value={detailDraft.name}
-                              onChange={(e) => setDetailDraft((prev) => ({ ...prev, name: e.target.value }))}
-                              className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold"
-                            />
-                            <input
-                              value={detailDraft.code}
-                              onChange={(e) => setDetailDraft((prev) => ({ ...prev, code: e.target.value }))}
-                              placeholder="Código"
-                              className="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs"
-                            />
-                          </div>
-                        ) : (
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">{detail.name}</p>
-                            <p className="text-xs text-slate-500">{detail.code}</p>
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-1">
-                          {editing ? (
-                            <button
-                              type="button"
-                              onClick={saveDetail}
-                              disabled={isPending || !detailDraft.name.trim()}
-                              className="inline-flex items-center gap-1 rounded-full bg-[#4aa59c] px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
-                            >
-                              <Save size={12} /> Guardar
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingDetailId(detail.id);
-                                setDetailDraft({ name: detail.name, code: detail.code });
-                              }}
-                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                            >
-                              <Edit3 size={12} /> Editar
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              startTransition(async () => {
-                                try {
-                                  await actionSetClientAcquisitionDetailOptionActive({
-                                    id: detail.id,
-                                    isActive: !detail.isActive
-                                  });
-                                  router.refresh();
-                                } catch (err) {
-                                  setError((err as Error)?.message || "No se pudo cambiar estado del detalle.");
-                                }
-                              })
-                            }
-                            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                          >
-                            {detail.isActive ? <ToggleRight size={12} /> : <ToggleLeft size={12} />}
-                            {detail.isActive ? "Activo" : "Inactivo"}
-                          </button>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-
-                {!sourceDetails.length && (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">Sin detalles para este canal.</div>
-                )}
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Nuevo detalle</p>
-                <div className="mt-2 space-y-2">
-                  <input
-                    value={detailForm.name}
-                    onChange={(e) => setDetailForm((prev) => ({ ...prev, name: e.target.value }))}
-                    placeholder="Nombre *"
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                  />
-                  <input
-                    value={detailForm.code}
-                    onChange={(e) => setDetailForm((prev) => ({ ...prev, code: e.target.value }))}
-                    placeholder="Código"
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={createDetail}
-                    disabled={isPending || !detailForm.name.trim()}
-                    className="inline-flex items-center gap-1 rounded-full bg-[#4aa59c] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                  >
-                    <PlusCircle size={12} /> Crear detalle
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {error && <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
+      {error ? <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
     </section>
   );
 }

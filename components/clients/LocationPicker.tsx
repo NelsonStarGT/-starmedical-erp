@@ -179,7 +179,8 @@ export default function LocationPicker({
   errors,
   className,
   title = "Ubicación",
-  subtitle
+  subtitle,
+  showPostalCode = true
 }: {
   value: LocationPickerValue;
   onChange: (next: LocationPickerValue) => void;
@@ -188,6 +189,7 @@ export default function LocationPicker({
   className?: string;
   title?: string;
   subtitle?: string;
+  showPostalCode?: boolean;
 }) {
   const [isLoadingCountries, setIsLoadingCountries] = useState(false);
   const [isLoadingDepartments, setIsLoadingDepartments] = useState(false);
@@ -610,60 +612,62 @@ export default function LocationPicker({
         <p className="mt-1 text-xs text-slate-500">{computedSubtitle}</p>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="space-y-1">
-          <p className="text-xs font-semibold text-slate-500">Código postal (opcional)</p>
-          <input
-            value={postalInput}
-            onChange={(event) => {
-              const nextPostal = event.target.value;
-              setPostalInput(nextPostal);
-              onChange({
-                countryId: value.countryId,
-                departmentId: value.departmentId,
-                municipalityId: value.municipalityId,
-                admin3Id: value.admin3Id,
-                postalCode: nextPostal,
-                freeState: value.freeState ?? "",
-                freeCity: value.freeCity ?? ""
-              });
-            }}
-            placeholder={value.countryId ? "Ej. 05011" : "Puedes escribir CP; selecciona país para resolver"}
-            disabled={isDisabled}
-            className={cn(
-              "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
-              errors?.postalCode && "border-rose-300 focus:border-rose-300 focus:ring-rose-200",
-              isDisabled && "cursor-not-allowed bg-slate-100 text-slate-400"
-            )}
-          />
-          {isLoadingPostal ? <p className="text-xs text-slate-500">Buscando código postal...</p> : null}
-          {postalHintWithoutCountry ? (
-            <p className="text-xs text-amber-700">Selecciona un país para resolver el código postal automáticamente.</p>
-          ) : null}
-          {errors?.postalCode ? <p className="text-xs text-rose-700">{errors.postalCode}</p> : null}
-        </div>
-
-        {postalMatches.length > 1 ? (
+      {showPostalCode ? (
+        <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-1">
-            <GeoSearchSelect
-              label="Coincidencias de código postal"
-              value=""
-              options={postalMatchOptions}
-              placeholder="Selecciona una coincidencia"
-              disabled={isDisabled}
-              onChange={(selectedId) => {
-                const match = postalMatches.find((item) => item.id === selectedId);
-                if (!match) return;
-                skipPostalLookupRef.current = true;
-                setPostalInput(match.postalCode);
-                applyPostalMatch(match);
+            <p className="text-xs font-semibold text-slate-500">Código postal (opcional)</p>
+            <input
+              value={postalInput}
+              onChange={(event) => {
+                const nextPostal = event.target.value;
+                setPostalInput(nextPostal);
+                onChange({
+                  countryId: value.countryId,
+                  departmentId: value.departmentId,
+                  municipalityId: value.municipalityId,
+                  admin3Id: value.admin3Id,
+                  postalCode: nextPostal,
+                  freeState: value.freeState ?? "",
+                  freeCity: value.freeCity ?? ""
+                });
               }}
+              placeholder={value.countryId ? "Ej. 05011" : "Puedes escribir CP; selecciona país para resolver"}
+              disabled={isDisabled}
+              className={cn(
+                "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
+                errors?.postalCode && "border-rose-300 focus:border-rose-300 focus:ring-rose-200",
+                isDisabled && "cursor-not-allowed bg-slate-100 text-slate-400"
+              )}
             />
+            {isLoadingPostal ? <p className="text-xs text-slate-500">Buscando código postal...</p> : null}
+            {postalHintWithoutCountry ? (
+              <p className="text-xs text-amber-700">Selecciona un país para resolver el código postal automáticamente.</p>
+            ) : null}
+            {errors?.postalCode ? <p className="text-xs text-rose-700">{errors.postalCode}</p> : null}
           </div>
-        ) : (
-          <div className="hidden md:block" />
-        )}
-      </div>
+
+          {postalMatches.length > 1 ? (
+            <div className="space-y-1">
+              <GeoSearchSelect
+                label="Coincidencias de código postal"
+                value=""
+                options={postalMatchOptions}
+                placeholder="Selecciona una coincidencia"
+                disabled={isDisabled}
+                onChange={(selectedId) => {
+                  const match = postalMatches.find((item) => item.id === selectedId);
+                  if (!match) return;
+                  skipPostalLookupRef.current = true;
+                  setPostalInput(match.postalCode);
+                  applyPostalMatch(match);
+                }}
+              />
+            </div>
+          ) : (
+            <div className="hidden md:block" />
+          )}
+        </div>
+      ) : null}
 
       <div className={cn("grid gap-3", hasDivisionCatalog ? (showAdmin3 ? "md:grid-cols-4" : "md:grid-cols-3") : "md:grid-cols-3")}>
         <CountryPicker

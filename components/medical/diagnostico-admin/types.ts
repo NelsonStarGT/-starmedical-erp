@@ -36,5 +36,6 @@ export type AdminDiagnosticFiltersState = {
   type: "all" | DiagnosticOrderType;
   acceptance: "all" | DiagnosticAcceptance;
   status: "all" | DiagnosticOrderStatus;
+  dateFrom: string;
+  dateTo: string;
 };
-

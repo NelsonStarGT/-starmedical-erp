@@ -15,6 +15,9 @@ import {
   XMarkIcon,
   ArrowsRightLeftIcon
 } from "@heroicons/react/24/outline";
+import { DateRangeField } from "@/components/ui/DateRangeField";
+import { useTenantDateTimeConfigValue } from "@/lib/datetime/client";
+import { formatDateTime as formatDateTimeByConfig } from "@/lib/datetime/format";
 import { StatusBadge } from "@/components/diagnostics/StatusBadge";
 import {
   type DiagnosticCatalogItem,
@@ -60,18 +63,27 @@ export default function OrdersClient({ initialOrders, initialCatalog }: OrdersCl
   const [orders, setOrders] = useState<DiagnosticOrderDTO[]>(initialOrders);
   const [loading, setLoading] = useState(false);
   const [adminStatus, setAdminStatus] = useState<DiagnosticOrderAdminStatus | "ALL">("ALL");
+  const [dateRange, setDateRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
   const [catalog, setCatalog] = useState<DiagnosticCatalogItem[]>(initialCatalog);
   const [showNew, setShowNew] = useState(false);
+  const dateTimeConfig = useTenantDateTimeConfigValue();
   const [paymentModal, setPaymentModal] = useState<{
     open: boolean;
     order?: DiagnosticOrderDTO;
     mode?: "pay" | "method";
   }>({ open: false });
 
-  const loadOrders = async (nextStatus = adminStatus) => {
+  const loadOrders = async (
+    nextStatus = adminStatus,
+    nextRange: { from: string; to: string } = dateRange
+  ) => {
     setLoading(true);
     try {
-      const query = nextStatus && nextStatus !== "ALL" ? `?adminStatus=${nextStatus}` : "";
+      const qp = new URLSearchParams();
+      if (nextStatus && nextStatus !== "ALL") qp.set("adminStatus", nextStatus);
+      if (nextRange.from) qp.set("dateFrom", nextRange.from);
+      if (nextRange.to) qp.set("dateTo", nextRange.to);
+      const query = qp.toString() ? `?${qp.toString()}` : "";
       const data = await fetchJson<{ data: DiagnosticOrderDTO[] }>(`/api/diagnostics/orders${query}`);
       setOrders(data.data || []);
     } catch (err) {
@@ -84,7 +96,7 @@ export default function OrdersClient({ initialOrders, initialCatalog }: OrdersCl
   useEffect(() => {
     loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminStatus]);
+  }, [adminStatus, dateRange.from, dateRange.to]);
 
   useEffect(() => {
     if (!highlightId) return;
@@ -103,9 +115,14 @@ export default function OrdersClient({ initialOrders, initialCatalog }: OrdersCl
   }, [orders, patientId, sourceRefId]);
 
   const filteredOrders = useMemo(() => {
-    if (adminStatus === "ALL") return scopedOrders;
-    return scopedOrders.filter((o) => o.adminStatus === adminStatus);
-  }, [scopedOrders, adminStatus]);
+    const byStatus = adminStatus === "ALL" ? scopedOrders : scopedOrders.filter((o) => o.adminStatus === adminStatus);
+    return byStatus.filter((order) => {
+      const orderDate = String(order.orderedAt || "").slice(0, 10);
+      if (dateRange.from && orderDate < dateRange.from) return false;
+      if (dateRange.to && orderDate > dateRange.to) return false;
+      return true;
+    });
+  }, [adminStatus, dateRange.from, dateRange.to, scopedOrders]);
 
   const stats = useMemo(() => {
     const total = scopedOrders.length;
@@ -275,18 +292,26 @@ export default function OrdersClient({ initialOrders, initialCatalog }: OrdersCl
 
       <div className="rounded-2xl border border-[#dce7f5] bg-white shadow-md shadow-[#d7e6f8]">
         <div className="flex flex-col gap-3 border-b border-[#e5edf8] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-2">
-            {adminStatusOptions.map((opt) => (
-              <button
-                key={opt}
-                onClick={() => setAdminStatus(opt)}
-                className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
-                  adminStatus === opt ? "bg-[#2e75ba] text-white shadow-sm" : "bg-[#eef3fb] text-[#2e75ba] hover:bg-[#d8e6fb]"
-                }`}
-              >
-                {opt === "ALL" ? "Todos" : AdminStatusLabel(opt)}
-              </button>
-            ))}
+          <div className="flex w-full flex-col gap-3">
+            <div className="flex flex-wrap gap-2">
+              {adminStatusOptions.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => setAdminStatus(opt)}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
+                    adminStatus === opt ? "bg-[#2e75ba] text-white shadow-sm" : "bg-[#eef3fb] text-[#2e75ba] hover:bg-[#d8e6fb]"
+                  }`}
+                >
+                  {opt === "ALL" ? "Todos" : AdminStatusLabel(opt)}
+                </button>
+              ))}
+            </div>
+            <DateRangeField
+              value={dateRange}
+              onChange={setDateRange}
+              labels={{ from: "Desde", to: "Hasta" }}
+              className="max-w-[380px]"
+            />
           </div>
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <div className="h-2 w-2 rounded-full bg-[#4aa59c]" />
@@ -359,7 +384,7 @@ export default function OrdersClient({ initialOrders, initialCatalog }: OrdersCl
                     <ClinicalSummary summary={order.clinicalSummary} />
                   </td>
                   <td className="px-4 py-3 align-top text-sm text-slate-600">
-                    {new Date(order.orderedAt).toLocaleString("es-GT", { dateStyle: "medium", timeStyle: "short" })}
+                    {formatDateTimeByConfig(order.orderedAt, dateTimeConfig)}
                   </td>
                   <td className="px-4 py-3 align-top">
                     <div className="flex flex-col gap-2">

@@ -1,6 +1,10 @@
 import { ClientCatalogType, ClientProfileType, PrismaClient } from "@prisma/client";
 import { seedGeoCatalogs } from "./seed.geo";
 import { seedPhoneCountryCodes } from "./seed.phone";
+import { COMPANY_CONTACT_DEPARTMENTS } from "../lib/catalogs/departments";
+import { ECONOMIC_ACTIVITIES } from "../lib/catalogs/economicActivities";
+import { COMPANY_CONTACT_JOB_TITLES } from "../lib/catalogs/jobTitles";
+import { COMPANY_PBX_CATEGORY_SEED } from "../lib/catalogs/pbxCategories";
 
 const prisma = new PrismaClient();
 
@@ -33,7 +37,7 @@ const BASE_RELATIONSHIP_TYPES = ["Padre", "Madre", "Tutor", "Encargado", "Cónyu
 const BASE_LOCATION_TYPES = ["Principal", "Sucursal", "Oficina", "Planta", "Tienda", "Fiscal", "Casa", "Trabajo", "Otro"] as const;
 const BASE_SOCIAL_NETWORKS = ["Facebook", "Instagram", "TikTok", "LinkedIn", "X", "YouTube", "Otra red"] as const;
 const BASE_PERSON_CATEGORIES = ["General", "Paciente", "Particular"] as const;
-const BASE_COMPANY_CATEGORIES = ["PYME", "Corporativo", "Proveedor", "Empresa"] as const;
+const BASE_COMPANY_CATEGORIES = ["Corporativo", "PyME", "Operador", "ONG", "Gobierno", "Educativa", "Otro"] as const;
 const BASE_INSTITUTION_CATEGORIES = [
   "Colegio",
   "Universidad",
@@ -121,6 +125,77 @@ async function ensureCatalogItems(type: ClientCatalogType, items: readonly strin
   }
 }
 
+async function ensureCatalogItemsWithStableIds(
+  type: ClientCatalogType,
+  items: ReadonlyArray<{ id: string; label: string }>
+) {
+  for (const item of items) {
+    const existingById = await prisma.clientCatalogItem.findUnique({
+      where: { id: item.id },
+      select: { id: true, type: true, name: true, isActive: true }
+    });
+
+    if (existingById) {
+      if (existingById.type !== type) {
+        throw new Error(`[seed:clients] id en conflicto (${item.id}) para tipo ${String(existingById.type)}.`);
+      }
+      if (existingById.name !== item.label || !existingById.isActive) {
+        await prisma.clientCatalogItem.update({
+          where: { id: item.id },
+          data: {
+            name: item.label,
+            isActive: true
+          }
+        });
+      }
+      continue;
+    }
+
+    const existingByName = await prisma.clientCatalogItem.findFirst({
+      where: {
+        type,
+        name: item.label
+      },
+      select: { id: true, isActive: true }
+    });
+    if (existingByName) {
+      if (existingByName.id !== item.id) {
+        try {
+          await prisma.clientCatalogItem.update({
+            where: { id: existingByName.id },
+            data: {
+              id: item.id,
+              isActive: true
+            }
+          });
+        } catch {
+          await prisma.clientCatalogItem.update({
+            where: { id: existingByName.id },
+            data: {
+              isActive: true
+            }
+          });
+        }
+      } else if (!existingByName.isActive) {
+        await prisma.clientCatalogItem.update({
+          where: { id: existingByName.id },
+          data: { isActive: true }
+        });
+      }
+      continue;
+    }
+
+    await prisma.clientCatalogItem.create({
+      data: {
+        id: item.id,
+        type,
+        name: item.label,
+        isActive: true
+      }
+    });
+  }
+}
+
 async function translateLegacyLocationTypesToSpanish() {
   for (const item of LEGACY_LOCATION_TYPE_TRANSLATIONS) {
     const legacy = await prisma.clientCatalogItem.findFirst({
@@ -183,6 +258,7 @@ async function ensureClientCatalogDefaults() {
   await ensureCatalogItems(ClientCatalogType.SOCIAL_NETWORK, BASE_SOCIAL_NETWORKS);
   await ensureCatalogItems(ClientCatalogType.PERSON_CATEGORY, BASE_PERSON_CATEGORIES);
   await ensureCatalogItems(ClientCatalogType.COMPANY_CATEGORY, BASE_COMPANY_CATEGORIES);
+  await ensureCatalogItemsWithStableIds(ClientCatalogType.SECTOR, ECONOMIC_ACTIVITIES);
   await ensureCatalogItems(ClientCatalogType.INSTITUTION_CATEGORY, BASE_INSTITUTION_CATEGORIES);
   await ensureCatalogItems(ClientCatalogType.INSTITUTION_TYPE, BASE_INSTITUTION_TYPES);
   await ensureCatalogItems(ClientCatalogType.PERSON_PROFESSION, BASE_PROFESSIONS);
@@ -262,6 +338,96 @@ async function ensureClientAcquisitionDefaults() {
   }
 }
 
+async function ensureClientContactDirectoryDefaults() {
+  const delegate = prisma as unknown as {
+    clientContactDepartmentDirectory?: {
+      upsert?: (args: unknown) => Promise<unknown>;
+    };
+    clientContactJobTitleDirectory?: {
+      upsert?: (args: unknown) => Promise<unknown>;
+    };
+    clientPbxCategoryDirectory?: {
+      upsert?: (args: unknown) => Promise<unknown>;
+    };
+  };
+
+  const departmentUpsert = delegate.clientContactDepartmentDirectory?.upsert;
+  const jobTitleUpsert = delegate.clientContactJobTitleDirectory?.upsert;
+  const pbxCategoryUpsert = delegate.clientPbxCategoryDirectory?.upsert;
+
+  if (!departmentUpsert || !jobTitleUpsert || !pbxCategoryUpsert) {
+    return;
+  }
+
+  const tenantRows = await prisma.tenant.findMany({
+    select: { id: true }
+  });
+  const tenantIds = Array.from(new Set(["global", ...tenantRows.map((row) => row.id).filter(Boolean)]));
+
+  for (const tenantId of tenantIds) {
+    for (let index = 0; index < COMPANY_CONTACT_DEPARTMENTS.length; index += 1) {
+      const department = COMPANY_CONTACT_DEPARTMENTS[index]!;
+      await departmentUpsert({
+        where: {
+          tenantId_code: {
+            tenantId,
+            code: department.id
+          }
+        },
+        update: {},
+        create: {
+          tenantId,
+          code: department.id,
+          name: department.label,
+          sortOrder: (index + 1) * 10,
+          isActive: true
+        }
+      });
+    }
+
+    for (let index = 0; index < COMPANY_CONTACT_JOB_TITLES.length; index += 1) {
+      const jobTitle = COMPANY_CONTACT_JOB_TITLES[index]!;
+      await jobTitleUpsert({
+        where: {
+          tenantId_code: {
+            tenantId,
+            code: jobTitle.id
+          }
+        },
+        update: {},
+        create: {
+          tenantId,
+          code: jobTitle.id,
+          name: jobTitle.label,
+          sortOrder: (index + 1) * 10,
+          isActive: true
+        }
+      });
+    }
+
+    for (let index = 0; index < COMPANY_PBX_CATEGORY_SEED.length; index += 1) {
+      const pbxCategory = COMPANY_PBX_CATEGORY_SEED[index]!;
+      await pbxCategoryUpsert({
+        where: {
+          tenantId_code: {
+            tenantId,
+            code: pbxCategory.id
+          }
+        },
+        update: {},
+        create: {
+          tenantId,
+          code: pbxCategory.id,
+          name: pbxCategory.label,
+          sortOrder: (index + 1) * 10,
+          isSystem: true,
+          isActive: true
+        }
+      });
+    }
+  }
+}
+
 async function resolveActiveStatusId() {
   const activeStatus = await prisma.clientCatalogItem.findFirst({
     where: {
@@ -335,6 +501,7 @@ async function main() {
   await seedPhoneCountryCodes(prisma);
   await seedGeoCatalogs(prisma);
   await ensureClientCatalogDefaults();
+  await ensureClientContactDirectoryDefaults();
   await ensureClientAcquisitionDefaults();
   const statusId = await resolveActiveStatusId();
   const realPerson = await ensureRealPerson(statusId);
@@ -347,9 +514,13 @@ async function main() {
   console.info("[seed:clients] socialNetworks=%d", BASE_SOCIAL_NETWORKS.length);
   console.info("[seed:clients] personCategories=%d", BASE_PERSON_CATEGORIES.length);
   console.info("[seed:clients] companyCategories=%d", BASE_COMPANY_CATEGORIES.length);
+  console.info("[seed:clients] economicSectors=%d", ECONOMIC_ACTIVITIES.length);
   console.info("[seed:clients] institutionCategories=%d", BASE_INSTITUTION_CATEGORIES.length);
   console.info("[seed:clients] institutionTypes=%d", BASE_INSTITUTION_TYPES.length);
   console.info("[seed:clients] professions=%d", BASE_PROFESSIONS.length);
+  console.info("[seed:clients] contactDepartments=%d", COMPANY_CONTACT_DEPARTMENTS.length);
+  console.info("[seed:clients] contactJobTitles=%d", COMPANY_CONTACT_JOB_TITLES.length);
+  console.info("[seed:clients] pbxCategories=%d", COMPANY_PBX_CATEGORY_SEED.length);
   console.info("[seed:clients] acquisitionSources=%d", BASE_ACQUISITION_SOURCES.length);
   console.info("[seed:clients] socialSourceDetails=%d", SOCIAL_SOURCE_DETAILS.length);
   console.info("[seed:clients] realPersonMode=%s", realPerson.mode);

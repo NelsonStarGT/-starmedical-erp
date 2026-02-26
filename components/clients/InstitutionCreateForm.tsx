@@ -17,6 +17,10 @@ import { ClientProfileLookup, type ClientProfileLookupItem } from "@/components/
 import GeoCascadeFieldset, { type GeoCascadeErrors, type GeoCascadeValue } from "@/components/clients/GeoCascadeFieldset";
 import { useClientsCountryContext } from "@/components/clients/useClientsCountryContext";
 import {
+  applyDefaultsToDraft,
+  type OperatingCountryDefaultsSnapshot
+} from "@/lib/clients/operatingCountryDefaults";
+import {
   isReferralAcquisitionSource,
   isSocialAcquisitionSource,
   requiresAcquisitionOtherNote
@@ -97,7 +101,13 @@ function modeToFlags(mode: RelationMode) {
   return { institutionIsPayer: false, institutionIsGroupOrganizer: true, institutionIsSponsor: false };
 }
 
-export default function InstitutionCreateForm({ initialTypes }: { initialTypes: Option[] }) {
+export default function InstitutionCreateForm({
+  initialTypes,
+  initialOperatingDefaults
+}: {
+  initialTypes: Option[];
+  initialOperatingDefaults?: OperatingCountryDefaultsSnapshot;
+}) {
   const router = useRouter();
   const { country: countryContext } = useClientsCountryContext();
   const [isPending, startTransition] = useTransition();
@@ -170,9 +180,36 @@ export default function InstitutionCreateForm({ initialTypes }: { initialTypes: 
   }, []);
 
   useEffect(() => {
+    if (initialOperatingDefaults?.isOperatingCountryPinned) return;
     if (!countryContext?.countryId) return;
     setForm((prev) => (prev.geoCountryId ? prev : { ...prev, geoCountryId: countryContext.countryId }));
-  }, [countryContext?.countryId]);
+  }, [countryContext?.countryId, initialOperatingDefaults?.isOperatingCountryPinned]);
+
+  useEffect(() => {
+    if (!initialOperatingDefaults?.isOperatingCountryPinned) return;
+    const countryId = initialOperatingDefaults.operatingCountryId;
+    if (!countryId) return;
+
+    if (initialOperatingDefaults.scopes.geo) {
+      setForm((prev) =>
+        applyDefaultsToDraft(prev, {
+          geoCountryId: countryId
+        })
+      );
+    }
+
+    const defaultIso2 = initialOperatingDefaults.operatingCountryCode?.trim().toUpperCase();
+    if (initialOperatingDefaults.scopes.phone && defaultIso2) {
+      setContacts((prev) => {
+        const primaryIndex = prev.phones.findIndex((row) => row.isPrimary && row.isActive !== false);
+        if (primaryIndex < 0) return prev;
+        if (prev.phones[primaryIndex].countryIso2.trim()) return prev;
+        const nextPhones = [...prev.phones];
+        nextPhones[primaryIndex] = { ...nextPhones[primaryIndex], countryIso2: defaultIso2 };
+        return { ...prev, phones: nextPhones };
+      });
+    }
+  }, [initialOperatingDefaults]);
 
   const selectedSource = useMemo(
     () => sources.find((source) => source.id === form.acquisitionSourceId) ?? null,

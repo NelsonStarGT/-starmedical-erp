@@ -11,3 +11,9 @@ test("parseOptionalBirthDate valida fecha futura", () => {
   const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   assert.throws(() => parseOptionalBirthDate(futureDate), /no puede ser futura/i);
 });
+
+test("parseOptionalBirthDate valida límite de 120 años", () => {
+  const today = new Date();
+  const tooOldDate = new Date(today.getFullYear() - 121, today.getMonth(), today.getDate()).toISOString().slice(0, 10);
+  assert.throws(() => parseOptionalBirthDate(tooOldDate), /anterior a 120 años/i);
+});

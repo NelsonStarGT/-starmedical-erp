@@ -8,9 +8,13 @@ import {
   CloudArrowUpIcon,
   PlayIcon
 } from "@heroicons/react/24/outline";
+import { DateRangeField } from "@/components/ui/DateRangeField";
 import { Modal } from "@/components/ui/Modal";
 import { ToastContainer } from "@/components/ui/Toast";
 import { useToast } from "@/hooks/useToast";
+import { useTenantDateTimeConfigValue } from "@/lib/datetime/client";
+import { formatDateTime as formatDateTimeByConfig } from "@/lib/datetime/format";
+import type { TenantDateTimeConfig } from "@/lib/datetime/types";
 import { cn } from "@/lib/utils";
 import type { EncounterResultValueRow } from "@/components/medical/encounter/types";
 import {
@@ -55,9 +59,9 @@ function priorityPill(priority: WorklistOrderPriority) {
     : "border-slate-200 bg-slate-50 text-slate-700";
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value: string, timeConfig: TenantDateTimeConfig) {
   try {
-    return new Intl.DateTimeFormat("es-GT", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+    return formatDateTimeByConfig(value, timeConfig);
   } catch {
     return value;
   }
@@ -106,6 +110,7 @@ function parseImageUrls(raw: string): string[] {
 
 export default function OperationalWorklistClient({ modality }: { modality: WorklistModality }) {
   const { toasts, showToast, dismiss } = useToast();
+  const dateTimeConfig = useTenantDateTimeConfigValue();
   const [items, setItems] = useState<WorklistOrderItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusScope, setStatusScope] = useState<StatusScope>("pending");
@@ -230,7 +235,7 @@ export default function OperationalWorklistClient({ modality }: { modality: Work
       </header>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[180px_160px_minmax(0,1fr)_170px_170px_auto] xl:items-end">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[180px_160px_minmax(0,1fr)_360px_auto] xl:items-end">
           <label className="space-y-1">
             <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Estado</span>
             <select
@@ -269,25 +274,14 @@ export default function OperationalWorklistClient({ modality }: { modality: Work
             />
           </label>
 
-          <label className="space-y-1">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Desde</span>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-[#2e75ba] focus:ring-2 focus:ring-[#2e75ba]/15"
-            />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Hasta</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-[#2e75ba] focus:ring-2 focus:ring-[#2e75ba]/15"
-            />
-          </label>
+          <DateRangeField
+            value={{ from: dateFrom, to: dateTo }}
+            onChange={(range) => {
+              setDateFrom(range.from);
+              setDateTo(range.to);
+            }}
+            labels={{ from: "Desde", to: "Hasta" }}
+          />
 
           <button
             type="button"
@@ -354,8 +348,8 @@ export default function OperationalWorklistClient({ modality }: { modality: Work
                         </span>
                       </td>
                       <td className="px-3 py-3 align-top text-xs text-slate-600">
-                        <p>{formatDateTime(item.createdAt)}</p>
-                        <p className="mt-1 text-slate-500">Actualizado: {formatDateTime(item.updatedAt)}</p>
+                        <p>{formatDateTime(item.createdAt, dateTimeConfig)}</p>
+                        <p className="mt-1 text-slate-500">Actualizado: {formatDateTime(item.updatedAt, dateTimeConfig)}</p>
                       </td>
                       <td className="px-3 py-3 align-top">
                         <div className="flex flex-wrap items-center justify-end gap-2">

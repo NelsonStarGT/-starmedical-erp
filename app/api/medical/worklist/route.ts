@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { listWorklistOrders } from "@/lib/medical/encounterRealStore";
 import { canAccessWorklistByModality, type WorklistModality } from "@/lib/medical/worklistAccess";
+import { getTenantDateTimeConfig } from "@/lib/datetime/config";
+import { parseDate, parseIsoDateString } from "@/lib/datetime/parse";
+import { buildRange } from "@/lib/datetime/range";
 
 type WorklistStatus = "ordered" | "in_progress" | "completed" | "cancelled";
 
@@ -55,18 +58,35 @@ export async function GET(req: NextRequest) {
 
   const priority = parsePriority((url.searchParams.get("priority") || "").toLowerCase());
   const patientQuery = (url.searchParams.get("patient") || url.searchParams.get("query") || "").trim();
-  const dateFrom = (url.searchParams.get("dateFrom") || "").trim() || null;
-  const dateTo = (url.searchParams.get("dateTo") || "").trim() || null;
+  const rawDateFrom = (url.searchParams.get("dateFrom") || "").trim();
+  const rawDateTo = (url.searchParams.get("dateTo") || "").trim();
   const statusFilter = parseStatusFilter(url);
 
   try {
+    const tenantDateTime = await getTenantDateTimeConfig(auth.user?.tenantId);
+    const parseInputDate = (raw: string) => {
+      if (!raw) return null;
+      const isoDate = parseIsoDateString(raw);
+      if (isoDate) return isoDate;
+      const formattedDate = parseDate(raw, tenantDateTime.dateFormat);
+      if (formattedDate) return formattedDate;
+      const fallback = new Date(raw);
+      return Number.isNaN(fallback.getTime()) ? null : fallback;
+    };
+
+    const normalizedRange = buildRange({
+      from: parseInputDate(rawDateFrom),
+      to: parseInputDate(rawDateTo),
+      timeZone: tenantDateTime.timezone
+    });
+
     const items = await listWorklistOrders({
       modality,
       priority,
       patientQuery: patientQuery || null,
       statusFilter,
-      dateFrom,
-      dateTo
+      dateFrom: normalizedRange.from ? normalizedRange.from.toISOString() : null,
+      dateTo: normalizedRange.to ? normalizedRange.to.toISOString() : null
     });
 
     return NextResponse.json({

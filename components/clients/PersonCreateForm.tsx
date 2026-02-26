@@ -44,7 +44,22 @@ import {
   validateAcquisitionConditionalFields
 } from "@/lib/clients/acquisition";
 import { CLIENT_TYPE_LABELS } from "@/lib/clients/constants";
+import {
+  CLIENTS_DATE_FORMAT_DEFAULT,
+  formatIsoDateForClients,
+  getClientsDatePlaceholder,
+  maskClientsDateInput,
+  parseClientsDateInput,
+  parseIsoDateString,
+  toIsoDateString,
+  type ClientsDateFormat
+} from "@/lib/clients/dateFormat";
 import { sanitizePhoneInputValue } from "@/lib/clients/phoneValidation";
+import {
+  applyDefaultsToDraft,
+  type OperatingCountryDefaultsSnapshot
+} from "@/lib/clients/operatingCountryDefaults";
+import { useClientsDateFormat } from "@/components/clients/useClientsDateFormat";
 import { cn } from "@/lib/utils";
 
 type FormState = {
@@ -72,7 +87,12 @@ type FormState = {
   phoneCountryIso2: string;
   email: string;
   birthCountryId: string;
-  birthSameAsIdentity: boolean;
+  birthSameAsResidence: boolean;
+  birthGeoAdmin1Id: string;
+  birthGeoAdmin2Id: string;
+  birthGeoAdmin3Id: string;
+  birthGeoFreeState: string;
+  birthGeoFreeCity: string;
   birthCity: string;
   residenceCountryId: string;
   residenceSameAsIdentity: boolean;
@@ -208,6 +228,7 @@ const CALENDAR_MONTHS_ES = [
 ] as const;
 
 const CALENDAR_WEEK_DAYS_ES = ["L", "M", "X", "J", "V", "S", "D"] as const;
+const BIRTH_DATE_MAX_YEARS_BACK = 120;
 
 const WIZARD_STEPS: Array<{ step: WizardStep; title: string; subtitle: string }> = [
   { step: 1, title: "Identidad", subtitle: "Datos mínimos" },
@@ -248,7 +269,12 @@ const DEFAULT_FORM: FormState = {
   phoneCountryIso2: "",
   email: "",
   birthCountryId: "",
-  birthSameAsIdentity: true,
+  birthSameAsResidence: false,
+  birthGeoAdmin1Id: "",
+  birthGeoAdmin2Id: "",
+  birthGeoAdmin3Id: "",
+  birthGeoFreeState: "",
+  birthGeoFreeCity: "",
   birthCity: "",
   residenceCountryId: "",
   residenceSameAsIdentity: true,
@@ -334,8 +360,15 @@ function randomId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export default function PersonCreateForm() {
+export default function PersonCreateForm({
+  initialDateFormat = CLIENTS_DATE_FORMAT_DEFAULT,
+  initialOperatingDefaults
+}: {
+  initialDateFormat?: ClientsDateFormat;
+  initialOperatingDefaults?: OperatingCountryDefaultsSnapshot;
+}) {
   const router = useRouter();
+  const clientsDateFormat = useClientsDateFormat(initialDateFormat);
   const { country: countryContext } = useClientsCountryContext();
   const [isPending, startTransition] = useTransition();
 
@@ -343,6 +376,7 @@ export default function PersonCreateForm() {
   const [contacts, setContacts] = useState<ClientContactsDraft>(DEFAULT_CONTACTS);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [geoErrors, setGeoErrors] = useState<GeoCascadeErrors>({});
+  const [birthGeoErrors, setBirthGeoErrors] = useState<GeoCascadeErrors>({});
   const [error, setError] = useState<string | null>(null);
 
   const [identityStatus, setIdentityStatus] = useState<IdentityStatus>({ state: "idle" });
@@ -418,6 +452,15 @@ export default function PersonCreateForm() {
     geoPostalCode: form.geoPostalCode,
     geoFreeState: form.geoFreeState,
     geoFreeCity: form.geoFreeCity
+  };
+  const birthGeoValue: GeoCascadeValue = {
+    geoCountryId: form.birthCountryId,
+    geoAdmin1Id: form.birthGeoAdmin1Id,
+    geoAdmin2Id: form.birthGeoAdmin2Id,
+    geoAdmin3Id: form.birthGeoAdmin3Id,
+    geoPostalCode: "",
+    geoFreeState: form.birthGeoFreeState,
+    geoFreeCity: form.birthGeoFreeCity
   };
   const workGeoValue: GeoCascadeValue = {
     geoCountryId: form.workGeoCountryId,
@@ -727,6 +770,44 @@ export default function PersonCreateForm() {
   }, [form.identityCountryId]);
 
   useEffect(() => {
+    if (!initialOperatingDefaults?.isOperatingCountryPinned) return;
+    const countryId = initialOperatingDefaults.operatingCountryId;
+    if (!countryId) return;
+
+    setForm((prev) => {
+      const countryDefaults: Partial<FormState> = {
+        identityCountryId: initialOperatingDefaults.scopes.identity ? countryId : undefined,
+        residenceCountryId: initialOperatingDefaults.scopes.residence ? countryId : undefined,
+        geoCountryId: initialOperatingDefaults.scopes.geo ? countryId : undefined
+      };
+
+      return applyDefaultsToDraft(prev, countryDefaults);
+    });
+
+    const defaultIso2 = initialOperatingDefaults.operatingCountryCode?.trim().toUpperCase();
+    if (initialOperatingDefaults.scopes.phone && defaultIso2) {
+      setForm((prev) =>
+        applyDefaultsToDraft(prev, {
+          phoneCountryIso2: defaultIso2
+        })
+      );
+
+      setContacts((prev) => {
+        const primaryIndex = prev.phones.findIndex((row) => row.isPrimary && row.isActive !== false);
+        if (primaryIndex < 0) return prev;
+        if (prev.phones[primaryIndex].countryIso2.trim()) return prev;
+        const nextPhones = [...prev.phones];
+        nextPhones[primaryIndex] = {
+          ...nextPhones[primaryIndex],
+          countryIso2: defaultIso2
+        };
+        return { ...prev, phones: nextPhones };
+      });
+    }
+  }, [initialOperatingDefaults]);
+
+  useEffect(() => {
+    if (initialOperatingDefaults?.isOperatingCountryPinned) return;
     if (!countryContext?.countryId) return;
     setForm((prev) =>
       prev.identityCountryId && prev.birthCountryId && prev.residenceCountryId
@@ -739,7 +820,7 @@ export default function PersonCreateForm() {
             geoCountryId: prev.geoCountryId || countryContext.countryId
           }
     );
-  }, [countryContext?.countryId]);
+  }, [countryContext?.countryId, initialOperatingDefaults?.isOperatingCountryPinned]);
 
   useEffect(() => {
     if (!form.residenceSameAsIdentity) return;
@@ -759,16 +840,25 @@ export default function PersonCreateForm() {
   }, [form.identityCountryId, form.residenceSameAsIdentity]);
 
   useEffect(() => {
-    if (!form.birthSameAsIdentity) return;
-    if (!form.identityCountryId) return;
-    setForm((prev) => {
-      if (prev.birthCountryId === prev.identityCountryId) return prev;
-      return {
-        ...prev,
-        birthCountryId: prev.identityCountryId
-      };
-    });
-  }, [form.birthSameAsIdentity, form.identityCountryId]);
+    if (!form.birthSameAsResidence) return;
+    setForm((prev) => ({
+      ...prev,
+      birthCountryId: prev.residenceCountryId,
+      birthGeoAdmin1Id: prev.geoAdmin1Id,
+      birthGeoAdmin2Id: prev.geoAdmin2Id,
+      birthGeoAdmin3Id: prev.geoAdmin3Id,
+      birthGeoFreeState: prev.geoFreeState,
+      birthGeoFreeCity: prev.geoFreeCity
+    }));
+  }, [
+    form.birthSameAsResidence,
+    form.residenceCountryId,
+    form.geoAdmin1Id,
+    form.geoAdmin2Id,
+    form.geoAdmin3Id,
+    form.geoFreeState,
+    form.geoFreeCity
+  ]);
 
   useEffect(() => {
     if (!form.identityCountryId) return;
@@ -1167,14 +1257,8 @@ export default function PersonCreateForm() {
       openAndGoToSection("acquisition");
       return;
     }
-    const effectiveBirthCountryId = form.birthSameAsIdentity ? form.identityCountryId : form.birthCountryId;
-    if (!effectiveBirthCountryId) {
-      setError("Selecciona país de nacimiento.");
-      setErrors((prev) => ({ ...prev, birthCountryId: "País de nacimiento requerido." }));
-      openAndGoToSection("profile");
-      return;
-    }
     setErrors((prev) => ({ ...prev, birthCountryId: undefined }));
+    setBirthGeoErrors({});
     if (isMinor && !responsibleClient?.id) {
       setError("Menor de edad: selecciona un responsable.");
       openAndGoToSection("relations");
@@ -1269,7 +1353,12 @@ export default function PersonCreateForm() {
           phoneCountryIso2: primaryPhone?.countryIso2 || form.phoneCountryIso2 || undefined,
           email: primaryEmail?.value || form.email || undefined,
           photoAssetId: profilePhoto?.assetId || undefined,
-          birthCountryId: effectiveBirthCountryId || undefined,
+          birthCountryId: form.birthCountryId || undefined,
+          birthGeoAdmin1Id: form.birthGeoAdmin1Id || undefined,
+          birthGeoAdmin2Id: form.birthGeoAdmin2Id || undefined,
+          birthGeoAdmin3Id: form.birthGeoAdmin3Id || undefined,
+          birthGeoFreeState: form.birthGeoFreeState || undefined,
+          birthGeoFreeCity: form.birthGeoFreeCity || undefined,
           birthCity: form.birthCity || undefined,
           residenceCountryId: shouldPersistResidence ? form.residenceCountryId || undefined : undefined,
           residenceSameAsBirth: shouldPersistResidence ? residenceSameAsBirth : undefined,
@@ -1320,6 +1409,7 @@ export default function PersonCreateForm() {
         }
         if (message.toLowerCase().includes("nacimiento")) {
           setErrors((prev) => ({ ...prev, birthCountryId: message }));
+          setBirthGeoErrors((prev) => ({ ...prev, geoCountryId: message }));
           openAndGoToSection("profile");
         }
       }
@@ -1450,7 +1540,6 @@ export default function PersonCreateForm() {
                   setForm((prev) => ({
                     ...prev,
                     identityCountryId,
-                    birthCountryId: prev.birthSameAsIdentity ? identityCountryId : prev.birthCountryId || identityCountryId,
                     residenceCountryId: prev.residenceSameAsIdentity
                       ? identityCountryId
                       : prev.residenceCountryId || identityCountryId,
@@ -1901,13 +1990,20 @@ export default function PersonCreateForm() {
                 <option value={PatientSex.M}>Masculino</option>
               </select>
 
-              <BrandedDatePicker
+              <BirthDateField
                 label="Fecha de nacimiento"
                 value={form.birthDate}
+                dateFormat={clientsDateFormat}
                 onChange={(birthDate) => {
                   setForm((prev) => ({ ...prev, birthDate }));
                   setErrors((prev) => ({ ...prev, birthDate: undefined }));
                 }}
+                onErrorChange={(birthDateError) =>
+                  setErrors((prev) => ({
+                    ...prev,
+                    birthDate: birthDateError
+                  }))
+                }
                 disabled={isPending}
                 error={errors.birthDate}
               />
@@ -1972,42 +2068,61 @@ export default function PersonCreateForm() {
             </div>
 
             <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Nacimiento (opcional)</p>
               <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <input
                   type="checkbox"
-                  checked={form.birthSameAsIdentity}
+                  checked={form.birthSameAsResidence}
                   onChange={(e) => {
                     const checked = e.target.checked;
                     setForm((prev) => ({
                       ...prev,
-                      birthSameAsIdentity: checked,
-                      birthCountryId: checked ? prev.identityCountryId : prev.birthCountryId
+                      birthSameAsResidence: checked,
+                      birthCountryId: checked ? prev.residenceCountryId : prev.birthCountryId,
+                      birthGeoAdmin1Id: checked ? prev.geoAdmin1Id : prev.birthGeoAdmin1Id,
+                      birthGeoAdmin2Id: checked ? prev.geoAdmin2Id : prev.birthGeoAdmin2Id,
+                      birthGeoAdmin3Id: checked ? prev.geoAdmin3Id : prev.birthGeoAdmin3Id,
+                      birthGeoFreeState: checked ? prev.geoFreeState : prev.birthGeoFreeState,
+                      birthGeoFreeCity: checked ? prev.geoFreeCity : prev.birthGeoFreeCity
                     }));
-                    if (checked && form.identityCountryId) {
+                    if (checked) {
                       setErrors((prev) => ({ ...prev, birthCountryId: undefined }));
+                      setBirthGeoErrors({});
                     }
                   }}
                   className="h-4 w-4 rounded border-slate-300 text-[#4aa59c] focus:ring-[#4aa59c]"
                   disabled={isPending}
                 />
-                Nacimiento = Identificación
+                Nacimiento = Residencia
               </label>
-              <CountryPicker
-                label="País de nacimiento"
-                value={form.birthCountryId}
-                options={countryOptions}
-                onChange={(birthCountryId) => {
-                  setForm((prev) => ({ ...prev, birthCountryId }));
-                  if (birthCountryId) setErrors((prev) => ({ ...prev, birthCountryId: undefined }));
+              {form.birthSameAsResidence ? <p className="text-xs text-slate-500">Usando país y divisiones de residencia.</p> : null}
+
+              <GeoCascadeFieldset
+                value={birthGeoValue}
+                onChange={(next) => {
+                  setForm((prev) => ({
+                    ...prev,
+                    birthCountryId: next.geoCountryId,
+                    birthGeoAdmin1Id: next.geoAdmin1Id,
+                    birthGeoAdmin2Id: next.geoAdmin2Id,
+                    birthGeoAdmin3Id: next.geoAdmin3Id,
+                    birthGeoFreeState: next.geoFreeState ?? "",
+                    birthGeoFreeCity: next.geoFreeCity ?? ""
+                  }));
+                  setBirthGeoErrors({});
+                  setErrors((prev) => ({ ...prev, birthCountryId: undefined }));
                 }}
-                disabled={isPending || form.birthSameAsIdentity}
-                error={errors.birthCountryId}
+                errors={birthGeoErrors}
+                disabled={isPending || form.birthSameAsResidence}
+                title="Ubicación de nacimiento"
+                subtitle="País, departamento y municipio."
+                showPostalCode={false}
               />
-              {form.birthSameAsIdentity ? <p className="text-xs text-slate-500">Usando país de identificación.</p> : null}
+
               <InputField
                 value={form.birthCity}
                 onChange={(birthCity) => setForm((prev) => ({ ...prev, birthCity }))}
-                placeholder="Ciudad de nacimiento (opcional)"
+                placeholder="Ciudad / poblado (opcional)"
               />
             </div>
 
@@ -2499,34 +2614,43 @@ function CollapsibleSection({
 }
 
 function parseIsoDate(value: string) {
-  const normalized = (value ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
-  const [year, month, day] = normalized.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  if (
-    Number.isNaN(date.getTime()) ||
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
-  ) {
-    return null;
-  }
-  return date;
+  return parseIsoDateString(value);
 }
 
 function toIsoDate(date: Date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return toIsoDateString(date);
 }
 
-function formatDateDisplay(value: string) {
-  const date = parseIsoDate(value);
-  if (!date) return "";
-  const day = `${date.getDate()}`.padStart(2, "0");
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  return `${day}/${month}/${date.getFullYear()}`;
+function formatDateDisplay(value: string, dateFormat: ClientsDateFormat) {
+  return formatIsoDateForClients(value, dateFormat);
+}
+
+function buildDateOnlyFromNow(now = new Date()) {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function getBirthDateBounds(now = new Date()) {
+  const maxDate = buildDateOnlyFromNow(now);
+  const minDate = new Date(maxDate.getFullYear() - BIRTH_DATE_MAX_YEARS_BACK, maxDate.getMonth(), maxDate.getDate());
+  return { minDate, maxDate };
+}
+
+function maskBirthDateInput(rawValue: string, dateFormat: ClientsDateFormat) {
+  return maskClientsDateInput(rawValue, dateFormat);
+}
+
+function parseMaskedBirthDate(maskedValue: string, dateFormat: ClientsDateFormat) {
+  return parseClientsDateInput(maskedValue, dateFormat);
+}
+
+function validateBirthDateRange(date: Date, minDate: Date, maxDate: Date) {
+  if (date.getTime() > maxDate.getTime()) {
+    return "La fecha de nacimiento no puede ser futura.";
+  }
+  if (date.getTime() < minDate.getTime()) {
+    return `La fecha de nacimiento no puede ser anterior a ${BIRTH_DATE_MAX_YEARS_BACK} años.`;
+  }
+  return null;
 }
 
 function isSameDate(left: Date | null, right: Date | null) {
@@ -2559,26 +2683,115 @@ function buildCalendarCells(monthDate: Date) {
   });
 }
 
-function BrandedDatePicker({
+function BirthDateField({
   label,
   value,
+  dateFormat,
   onChange,
+  onErrorChange,
   disabled,
   error
 }: {
   label: string;
   value: string;
+  dateFormat: ClientsDateFormat;
   onChange: (value: string) => void;
+  onErrorChange?: (error?: string) => void;
   disabled?: boolean;
   error?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const selectedDate = useMemo(() => parseIsoDate(value), [value]);
+  const { minDate, maxDate } = useMemo(() => getBirthDateBounds(), []);
+  const minMonth = useMemo(() => new Date(minDate.getFullYear(), minDate.getMonth(), 1), [minDate]);
+  const maxMonth = useMemo(() => new Date(maxDate.getFullYear(), maxDate.getMonth(), 1), [maxDate]);
   const [open, setOpen] = useState(false);
+  const [inputValue, setInputValue] = useState(() => formatDateDisplay(value, dateFormat));
+  const [localError, setLocalError] = useState<string | undefined>(undefined);
   const [visibleMonth, setVisibleMonth] = useState(() => {
-    const base = parseIsoDate(value) ?? new Date();
+    const base = parseIsoDate(value) ?? maxDate;
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
+
+  const monthOptions = useMemo(
+    () =>
+      CALENDAR_MONTHS_ES.map((name, index) => ({
+        value: index,
+        label: name
+      })),
+    []
+  );
+  const yearOptions = useMemo(() => {
+    const years: number[] = [];
+    for (let year = maxDate.getFullYear(); year >= minDate.getFullYear(); year -= 1) years.push(year);
+    return years;
+  }, [maxDate, minDate]);
+
+  const pushError = useCallback(
+    (message?: string) => {
+      setLocalError(message);
+      onErrorChange?.(message);
+    },
+    [onErrorChange]
+  );
+
+  const commitInput = useCallback(() => {
+    const trimmed = inputValue.trim();
+    const placeholder = getClientsDatePlaceholder(dateFormat);
+    if (!trimmed) {
+      onChange("");
+      pushError(undefined);
+      return;
+    }
+
+    const masked = maskBirthDateInput(trimmed, dateFormat);
+    if (masked.length !== 10) {
+      pushError(`Fecha inválida. Usa formato ${placeholder}.`);
+      return;
+    }
+
+    const parsed = parseMaskedBirthDate(masked, dateFormat);
+    if (!parsed) {
+      pushError(`Fecha inválida. Usa formato ${placeholder}.`);
+      return;
+    }
+
+    const rangeError = validateBirthDateRange(parsed, minDate, maxDate);
+    if (rangeError) {
+      pushError(rangeError);
+      return;
+    }
+
+    const isoValue = toIsoDate(parsed);
+    onChange(isoValue);
+    setInputValue(formatDateDisplay(isoValue, dateFormat));
+    pushError(undefined);
+  }, [dateFormat, inputValue, maxDate, minDate, onChange, pushError]);
+
+  const applySelectedDate = useCallback(
+    (date: Date) => {
+      const rangeError = validateBirthDateRange(date, minDate, maxDate);
+      if (rangeError) {
+        pushError(rangeError);
+        return;
+      }
+      const isoValue = toIsoDate(date);
+      onChange(isoValue);
+      setInputValue(formatDateDisplay(isoValue, dateFormat));
+      pushError(undefined);
+      setOpen(false);
+    },
+    [dateFormat, maxDate, minDate, onChange, pushError]
+  );
+
+  const isMonthBeforeMin =
+    visibleMonth.getFullYear() < minMonth.getFullYear() ||
+    (visibleMonth.getFullYear() === minMonth.getFullYear() && visibleMonth.getMonth() <= minMonth.getMonth());
+  const isMonthAfterMax =
+    visibleMonth.getFullYear() > maxMonth.getFullYear() ||
+    (visibleMonth.getFullYear() === maxMonth.getFullYear() && visibleMonth.getMonth() >= maxMonth.getMonth());
+
+  const mergedError = localError ?? error;
 
   useEffect(() => {
     if (!open) return;
@@ -2591,52 +2804,131 @@ function BrandedDatePicker({
   }, [open]);
 
   useEffect(() => {
+    setInputValue(formatDateDisplay(value, dateFormat));
+  }, [dateFormat, value]);
+
+  useEffect(() => {
     if (!selectedDate) return;
     setVisibleMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
   }, [value, selectedDate]);
 
-  const monthLabel = `${CALENDAR_MONTHS_ES[visibleMonth.getMonth()]} ${visibleMonth.getFullYear()}`;
   const cells = useMemo(() => buildCalendarCells(visibleMonth), [visibleMonth]);
-  const today = new Date();
-  const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const display = formatDateDisplay(value);
+  const todayDate = useMemo(() => buildDateOnlyFromNow(), []);
 
   return (
     <div className="relative space-y-1" ref={containerRef}>
       <p className="text-xs font-semibold text-slate-500">{label}</p>
-      <button
-        type="button"
-        onClick={() => {
-          if (disabled) return;
-          setOpen((prev) => !prev);
-        }}
-        disabled={disabled}
-        className={cn(
-          "flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
-          !display && "text-slate-400",
-          error && "border-rose-300 focus:border-rose-300 focus:ring-rose-200",
-          disabled && "cursor-not-allowed bg-slate-100 text-slate-400"
-        )}
-      >
-        <span>{display || "dd/mm/aaaa"}</span>
-        <CalendarDays size={16} className="text-[#2e75ba]" />
-      </button>
+      <div className="relative">
+        <input
+          value={inputValue}
+          onChange={(event) => {
+            const masked = maskBirthDateInput(event.target.value, dateFormat);
+            setInputValue(masked);
+            if (!masked) {
+              onChange("");
+              pushError(undefined);
+            } else if (localError) {
+              pushError(undefined);
+            }
+          }}
+          onPaste={(event) => {
+            event.preventDefault();
+            const pasted = event.clipboardData.getData("text");
+            const masked = maskBirthDateInput(pasted, dateFormat);
+            setInputValue(masked);
+            if (!masked) {
+              onChange("");
+              pushError(undefined);
+            } else if (localError) {
+              pushError(undefined);
+            }
+          }}
+          onBlur={commitInput}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitInput();
+            }
+          }}
+          placeholder={getClientsDatePlaceholder(dateFormat)}
+          inputMode="numeric"
+          maxLength={10}
+          disabled={disabled}
+          className={cn(
+            "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 pr-10 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
+            !inputValue && "text-slate-400",
+            mergedError && "border-rose-300 focus:border-rose-300 focus:ring-rose-200",
+            disabled && "cursor-not-allowed bg-slate-100 text-slate-400"
+          )}
+        />
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            if (disabled) return;
+            setOpen((prev) => !prev);
+          }}
+          disabled={disabled}
+          className={cn(
+            "absolute inset-y-0 right-2 inline-flex items-center justify-center text-[#2e75ba]",
+            disabled && "cursor-not-allowed text-slate-400"
+          )}
+          aria-label="Abrir calendario"
+        >
+          <CalendarDays size={16} />
+        </button>
+      </div>
 
       {open && !disabled ? (
-        <div className="absolute z-40 mt-2 w-[296px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
-          <div className="mb-2 flex items-center justify-between">
+        <div className="absolute z-40 mt-2 w-[320px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+          <div className="mb-2 flex items-center justify-between gap-2">
             <button
               type="button"
-              onClick={() => setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+              onClick={() => {
+                if (isMonthBeforeMin) return;
+                setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+              }}
+              disabled={isMonthBeforeMin}
               className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-600 hover:border-[#4aadf5] hover:bg-[#4aadf5]/10"
               aria-label="Mes anterior"
             >
               <ChevronLeft size={16} />
             </button>
-            <p className="text-sm font-semibold text-[#2e75ba]">{monthLabel}</p>
+            <div className="grid flex-1 grid-cols-2 gap-2">
+              <select
+                value={visibleMonth.getMonth()}
+                onChange={(event) =>
+                  setVisibleMonth((prev) => new Date(prev.getFullYear(), Number(event.target.value), 1))
+                }
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-[#2e75ba] focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25"
+              >
+                {monthOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={visibleMonth.getFullYear()}
+                onChange={(event) =>
+                  setVisibleMonth((prev) => new Date(Number(event.target.value), prev.getMonth(), 1))
+                }
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-[#2e75ba] focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25"
+              >
+                {yearOptions.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </div>
             <button
               type="button"
-              onClick={() => setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+              onClick={() => {
+                if (isMonthAfterMax) return;
+                setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+              }}
+              disabled={isMonthAfterMax}
               className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-600 hover:border-[#4aadf5] hover:bg-[#4aadf5]/10"
               aria-label="Mes siguiente"
             >
@@ -2653,24 +2945,25 @@ function BrandedDatePicker({
             {cells.map((cell) => {
               const selected = isSameDate(cell.date, selectedDate);
               const isToday = isSameDate(cell.date, todayDate);
+              const outOfRange = validateBirthDateRange(cell.date, minDate, maxDate) !== null;
+              const selectable = cell.inCurrentMonth && !outOfRange;
               return (
                 <button
                   key={cell.key}
                   type="button"
                   onClick={() => {
-                    if (!cell.inCurrentMonth) return;
-                    onChange(toIsoDate(cell.date));
-                    setOpen(false);
+                    if (!selectable) return;
+                    applySelectedDate(cell.date);
                   }}
-                  disabled={!cell.inCurrentMonth}
+                  disabled={!selectable}
                   className={cn(
                     "h-9 w-9 rounded-full text-sm font-semibold transition",
                     selected
                       ? "bg-[#4aa59c] text-white"
-                      : cell.inCurrentMonth
+                      : selectable
                         ? "text-slate-700 hover:bg-[#4aadf5]/20"
                         : "cursor-not-allowed text-slate-300",
-                    !selected && isToday && cell.inCurrentMonth && "border border-[#4aadf5]/60 text-[#2e75ba]"
+                    !selected && isToday && selectable && "border border-[#4aadf5]/60 text-[#2e75ba]"
                   )}
                 >
                   {cell.date.getDate()}
@@ -2681,7 +2974,7 @@ function BrandedDatePicker({
         </div>
       ) : null}
 
-      {error ? <p className="text-xs text-rose-700">{error}</p> : null}
+      {mergedError ? <p className="text-xs text-rose-700">{mergedError}</p> : null}
     </div>
   );
 }

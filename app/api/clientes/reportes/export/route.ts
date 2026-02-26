@@ -3,19 +3,23 @@ import { ClientProfileType } from "@prisma/client";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { requireAuth } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
+import { parseClientsDateInput, parseIsoDateString, type ClientsDateFormat } from "@/lib/clients/dateFormat";
+import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
 import { getClientsReportList, type ClientsReportFilters } from "@/lib/clients/reports.service";
 import { exportExcelViaProcessingService } from "@/lib/processing-service/excel";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function parseDate(value: string | null) {
+function parseDate(value: string | null, dateFormat: ClientsDateFormat) {
   if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  const byFormat = parseClientsDateInput(value, dateFormat);
+  if (byFormat) return byFormat;
+  return parseIsoDateString(value);
 }
 
-function buildFilters(req: NextRequest): ClientsReportFilters {
+function buildFilters(req: NextRequest, dateFormat: ClientsDateFormat): ClientsReportFilters {
   const { searchParams } = new URL(req.url);
   const rawType = searchParams.get("type");
 
@@ -25,8 +29,8 @@ function buildFilters(req: NextRequest): ClientsReportFilters {
       rawType && rawType !== "ALL" && Object.values(ClientProfileType).includes(rawType as ClientProfileType)
         ? (rawType as ClientProfileType)
         : "ALL",
-    from: parseDate(searchParams.get("from")),
-    to: parseDate(searchParams.get("to")),
+    from: parseDate(searchParams.get("from"), dateFormat),
+    to: parseDate(searchParams.get("to"), dateFormat),
     country: searchParams.get("country") || undefined,
     acquisitionSourceId: searchParams.get("sourceId") || undefined,
     acquisitionDetailOptionId: searchParams.get("detailId") || undefined,
@@ -55,7 +59,8 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const format = (searchParams.get("format") || "csv").toLowerCase();
-    const filters = buildFilters(req);
+    const dateFormat = await getClientsDateFormat(tenantIdFromUser(auth.user));
+    const filters = buildFilters(req, dateFormat);
     const list = await getClientsReportList(filters);
 
     const header = [

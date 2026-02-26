@@ -1,8 +1,19 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { ClientProfileType } from "@prisma/client";
 import { Download, FilterX } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { getSessionUserFromCookies } from "@/lib/auth";
+import {
+  formatDateForClients,
+  getClientsDatePlaceholder,
+  parseClientsDateInput,
+  parseIsoDateString,
+  type ClientsDateFormat
+} from "@/lib/clients/dateFormat";
+import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
 import { getClientsReportList, getClientsReportSummary, type ClientsReportFilters } from "@/lib/clients/reports.service";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 type SearchParams = {
   q?: string | string[];
@@ -30,14 +41,14 @@ function firstValue(value?: string | string[]) {
   return value;
 }
 
-function parseDate(value?: string | null) {
+function parseDate(value: string | null | undefined, dateFormat: ClientsDateFormat) {
   if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
+  const byFormat = parseClientsDateInput(value, dateFormat);
+  if (byFormat) return byFormat;
+  return parseIsoDateString(value);
 }
 
-function buildFilters(searchParams?: SearchParams): ClientsReportFilters {
+function buildFilters(searchParams: SearchParams | undefined, dateFormat: ClientsDateFormat): ClientsReportFilters {
   const page = Number(firstValue(searchParams?.page) || "1");
   const pageSize = Number(firstValue(searchParams?.pageSize) || "25");
   const rawType = firstValue(searchParams?.type);
@@ -48,8 +59,8 @@ function buildFilters(searchParams?: SearchParams): ClientsReportFilters {
       rawType && rawType !== "ALL" && Object.values(ClientProfileType).includes(rawType as ClientProfileType)
         ? (rawType as ClientProfileType)
         : "ALL",
-    from: parseDate(firstValue(searchParams?.from) || null),
-    to: parseDate(firstValue(searchParams?.to) || null),
+    from: parseDate(firstValue(searchParams?.from) || null, dateFormat),
+    to: parseDate(firstValue(searchParams?.to) || null, dateFormat),
     country: firstValue(searchParams?.country) || undefined,
     acquisitionSourceId: firstValue(searchParams?.sourceId) || undefined,
     acquisitionDetailOptionId: firstValue(searchParams?.detailId) || undefined,
@@ -74,7 +85,9 @@ export default async function ClientesReportesPage({
   searchParams?: Promise<SearchParams | undefined> | SearchParams;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const filters = buildFilters(resolvedSearchParams);
+  const currentUser = await getSessionUserFromCookies(cookies());
+  const dateFormat = await getClientsDateFormat(tenantIdFromUser(currentUser));
+  const filters = buildFilters(resolvedSearchParams, dateFormat);
 
   const [summary, list, sources, sourceDetails, countries] = await Promise.all([
     getClientsReportSummary(filters),
@@ -99,8 +112,8 @@ export default async function ClientesReportesPage({
   const queryParams = {
     q: filters.q || "",
     type: filters.type && filters.type !== "ALL" ? filters.type : "ALL",
-    from: filters.from ? filters.from.toISOString().slice(0, 10) : "",
-    to: filters.to ? filters.to.toISOString().slice(0, 10) : "",
+    from: filters.from ? formatDateForClients(filters.from, dateFormat) : "",
+    to: filters.to ? formatDateForClients(filters.to, dateFormat) : "",
     country: filters.country || "",
     sourceId: filters.acquisitionSourceId || "",
     detailId: filters.acquisitionDetailOptionId || "",
@@ -218,8 +231,22 @@ export default async function ClientesReportesPage({
               ))}
           </select>
 
-          <input name="from" type="date" defaultValue={queryParams.from} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />
-          <input name="to" type="date" defaultValue={queryParams.to} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />
+          <input
+            name="from"
+            type="text"
+            inputMode="numeric"
+            defaultValue={queryParams.from}
+            placeholder={getClientsDatePlaceholder(dateFormat)}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+          />
+          <input
+            name="to"
+            type="text"
+            inputMode="numeric"
+            defaultValue={queryParams.to}
+            placeholder={getClientsDatePlaceholder(dateFormat)}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+          />
 
           <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
             <input type="checkbox" name="referred" value="1" defaultChecked={Boolean(queryParams.referred)} className="h-4 w-4 rounded border-slate-300 text-[#4aa59c]" />
@@ -315,7 +342,7 @@ export default async function ClientesReportesPage({
               ) : (
                 list.items.map((item, index) => (
                   <tr key={item.id} className={index % 2 ? "bg-slate-50/60" : "bg-white"}>
-                    <td className="px-3 py-2">{item.createdAt.toLocaleDateString()}</td>
+                    <td className="px-3 py-2">{formatDateForClients(item.createdAt, dateFormat)}</td>
                     <td className="px-3 py-2 font-semibold text-slate-900">{item.displayName}</td>
                     <td className="px-3 py-2">{item.type}</td>
                     <td className="px-3 py-2">{[item.department, item.city, item.country].filter(Boolean).join(", ") || "—"}</td>
