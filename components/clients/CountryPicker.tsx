@@ -57,7 +57,8 @@ export default function CountryPicker({
   disabled,
   error,
   placeholder = "Selecciona país",
-  className
+  className,
+  triggerId
 }: {
   label?: string;
   value: string;
@@ -67,6 +68,7 @@ export default function CountryPicker({
   error?: string;
   placeholder?: string;
   className?: string;
+  triggerId?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -106,6 +108,7 @@ export default function CountryPicker({
     <div className={cn("space-y-1", className)} ref={containerRef}>
       <p className="text-xs font-semibold text-slate-500">{label}</p>
       <button
+        id={triggerId}
         type="button"
         onClick={() => {
           if (disabled) return;

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+import Image from "next/image";
 import { ClientCatalogType, ClientProfileType, Prisma } from "@prisma/client";
-import { Building2, Landmark, Shield, UserRound } from "lucide-react";
+import { Building2, CalendarClock, Landmark, MapPin, Shield, ShieldCheck, UserRound } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
 import { getSessionUserFromCookies } from "@/lib/auth";
@@ -34,6 +35,7 @@ import ClientActivityTimelinePanel from "@/components/clients/portal/ClientActiv
 import { ClientArchiveAction } from "@/components/clients/ClientArchiveAction";
 import ClientIdentityCard from "@/components/clients/ClientIdentityCard";
 import { tenantIdFromUser } from "@/lib/tenant";
+import { isCompanySsoDocumentType, mapCompanyDocumentTypeLabel } from "@/lib/clients/companyDocumentTypes";
 
 type SearchParams = { tab?: string | string[] };
 
@@ -45,6 +47,7 @@ const TABS: Array<{ key: string; label: string; show?: (type: ClientProfileType)
   { key: "contactos", label: "Contactos" },
   { key: "relaciones", label: "Relaciones / Convenios" },
   { key: "empleados", label: "Empleados asociados", show: (type) => type !== ClientProfileType.PERSON },
+  { key: "sso", label: "Salud y Seguridad Ocupacional", show: (type) => type !== ClientProfileType.PERSON },
   { key: "notas", label: "Notas / Historial" },
   { key: "actividad", label: "Actividad" }
 ];
@@ -130,6 +133,17 @@ function getEntityLabel(client: {
 
   const name = client.companyName || client.tradeName || "Cliente";
   return client.nit ? `${name} · NIT ${client.nit}` : name;
+}
+
+function buildCompanyDocumentTypeOptions(options: Array<{ id: string; name: string }>) {
+  const byLabel = new Map<string, { id: string; name: string }>();
+  for (const item of options) {
+    const mapped = mapCompanyDocumentTypeLabel(item.name);
+    if (!byLabel.has(mapped)) {
+      byLabel.set(mapped, { id: item.id, name: mapped });
+    }
+  }
+  return Array.from(byLabel.values());
 }
 
 function firstValue(value?: string | string[]) {
@@ -306,6 +320,10 @@ export default async function ClientePortalPage({
 }) {
   const resolvedParams = await params;
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const currentUser = await getSessionUserFromCookies(cookies());
+  const tenantId = tenantIdFromUser(currentUser);
+  const dateFormat = await getClientsDateFormat(tenantId);
+  const docPermissions = getClientDocumentPermissions(currentUser);
   const clientRef = resolvedParams.id?.trim();
   const tab = firstValue(resolvedSearchParams?.tab) ?? "resumen";
 
@@ -313,7 +331,7 @@ export default async function ClientePortalPage({
     return <MissingClientState />;
   }
 
-  const resolvedClientId = await resolveClientIdFromRef(clientRef);
+  const resolvedClientId = await resolveClientIdFromRef(clientRef, { tenantId });
   if (!resolvedClientId) {
     return <MissingClientState clientRef={clientRef} />;
   }
@@ -321,7 +339,7 @@ export default async function ClientePortalPage({
   const supportsPhotoColumns = await safeSupportsClientProfilePhotoColumns("clients.detail");
   const clientSelect = buildClientProfileSelect(supportsPhotoColumns);
   const client = await prisma.clientProfile.findFirst({
-    where: { id: resolvedClientId, deletedAt: null },
+    where: { id: resolvedClientId, tenantId, deletedAt: null },
     select: clientSelect
   });
   if (!client) {
@@ -354,7 +372,7 @@ export default async function ClientePortalPage({
   const displayName = getDisplayName(client);
   const missingFields = getClientMissingRequiredFields(snapshot);
 
-  const [docsExpiredCount, docsExpiringCount, statusOptions, institutionTypeOptions, documentTypeOptions, rulesConfig, requiredRulesRows] =
+  const [docsExpiredCount, docsExpiringCount, statusOptions, institutionTypeOptions, documentTypeCatalogRows, rulesConfig, requiredRulesRows, primaryLocation] =
     await Promise.all([
     prisma.clientDocument.count({ where: { clientId, supersededAt: null, expiresAt: { lt: todayStart } } }),
     prisma.clientDocument.count({
@@ -394,8 +412,16 @@ export default async function ClientePortalPage({
         isActive: true,
         documentType: { select: { name: true } }
       }
+    }),
+    prisma.clientLocation.findFirst({
+      where: { clientId, isPrimary: true },
+      select: { country: true, city: true, department: true }
     })
   ]);
+
+  const documentTypeOptions =
+    client.type === ClientProfileType.COMPANY ? buildCompanyDocumentTypeOptions(documentTypeCatalogRows) : documentTypeCatalogRows;
+  const companyCountryLabel = primaryLocation?.country || client.country || "Sin país";
 
   const requiredDocTypeIds = requiredRulesRows.map((rule) => rule.documentTypeId);
   const requiredDocsRows = requiredDocTypeIds.length
@@ -457,9 +483,6 @@ export default async function ClientePortalPage({
     }
   });
   const isIncomplete = healthScore < 100;
-  const currentUser = await getSessionUserFromCookies(cookies());
-  const dateFormat = await getClientsDateFormat(tenantIdFromUser(currentUser));
-  const docPermissions = getClientDocumentPermissions(currentUser);
   const referralSummary = await (async () => {
     try {
       const [referredByEdge, generatedEdges] = await Promise.all([
@@ -618,6 +641,27 @@ export default async function ClientePortalPage({
     return acc;
   }, {});
 
+  const ssoDocumentsRaw =
+    activeTab === "sso"
+      ? await prisma.clientDocument.findMany({
+          where: { clientId, supersededAt: null },
+          orderBy: { createdAt: "desc" },
+          take: 60,
+          select: {
+            id: true,
+            title: true,
+            expiresAt: true,
+            approvalStatus: true,
+            documentType: { select: { name: true } }
+          }
+        })
+      : [];
+  const ssoDocuments = ssoDocumentsRaw.filter((doc) => isCompanySsoDocumentType(doc.documentType?.name ?? doc.title));
+  const ssoExpiredCount = ssoDocuments.filter((doc) => doc.expiresAt && doc.expiresAt < todayStart).length;
+  const ssoExpiringCount = ssoDocuments.filter(
+    (doc) => doc.expiresAt && doc.expiresAt >= todayStart && doc.expiresAt <= expiringUntil
+  ).length;
+
   const clientTimelineRows =
     activeTab === "actividad"
       ? await prisma.clientAuditEvent.findMany({
@@ -673,28 +717,67 @@ export default async function ClientePortalPage({
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-[#dce7f5] bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-1">
+        <div className="flex flex-wrap items-start justify-between gap-5">
+          <div className="min-w-0 space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-diagnostics-corporate">
-              {CLIENT_TYPE_LABELS[client.type]}
+              {client.type === ClientProfileType.COMPANY ? "Empresa cliente" : CLIENT_TYPE_LABELS[client.type]}
             </p>
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-diagnostics-background p-3 text-diagnostics-primary">
-                <Icon size={18} />
+
+            {client.type === ClientProfileType.COMPANY ? (
+              <div className="flex items-start gap-3">
+                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-[#f8fafc]">
+                  {photoUrl ? (
+                    <Image src={photoUrl} alt={displayName} width={64} height={64} className="h-full w-full object-cover" />
+                  ) : (
+                    <Building2 size={24} className="text-[#2e75ba]" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <h1 className="truncate text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
+                    {displayName}
+                  </h1>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="inline-flex rounded-full border border-[#4aa59c]/30 bg-[#4aa59c]/10 px-3 py-1 text-xs font-semibold text-[#2e75ba]">
+                      {client.status?.name ?? "Sin estado"}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                      <MapPin size={12} className="text-[#2e75ba]" />
+                      País de la empresa: {companyCountryLabel}
+                    </span>
+                    {client.nit ? (
+                      <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                        NIT {client.nit}
+                      </span>
+                    ) : null}
+                    {client.clientCode ? (
+                      <span className="inline-flex rounded-full border border-[#4aa59c]/30 bg-[#4aa59c]/10 px-3 py-1 text-xs font-mono font-semibold text-[#2e75ba]">
+                        {client.clientCode}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">Creado el {formatDateForClients(client.createdAt, dateFormat)}</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <h1 className="truncate text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
-                  {displayName}
-                </h1>
-                <p className="text-sm text-slate-600">
-                  {client.status?.name ? `Estado: ${client.status.name}` : "Sin estado"} · Creado{" "}
-                  {formatDateForClients(client.createdAt, dateFormat)}
-                </p>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl bg-diagnostics-background p-3 text-diagnostics-primary">
+                  <Icon size={18} />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="truncate text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
+                    {displayName}
+                  </h1>
+                  <p className="text-sm text-slate-600">
+                    {client.status?.name ? `Estado: ${client.status.name}` : "Sin estado"} · Creado{" "}
+                    {formatDateForClients(client.createdAt, dateFormat)}
+                    {client.clientCode ? ` · Código ${client.clientCode}` : ""}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          <div className="min-w-[260px] space-y-2">
+          <div className="min-w-[280px] space-y-2">
             <div className="rounded-xl border border-slate-200 bg-[#f8fafc] px-4 py-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Health score</p>
@@ -739,21 +822,36 @@ export default async function ClientePortalPage({
             </div>
 
             <div className="flex flex-wrap justify-end gap-2">
+              <Link
+                href={tabHref(client.id, "resumen")}
+                className="inline-flex rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              >
+                Editar
+              </Link>
+              {docPermissions.canViewDocs ? (
+                <Link
+                  href={tabHref(client.id, "documentos")}
+                  className="inline-flex rounded-full border border-[#4aa59c]/40 bg-white px-4 py-2 text-sm font-semibold text-[#2e75ba] hover:border-[#4aadf5]"
+                >
+                  Documentos
+                </Link>
+              ) : null}
               <ClientArchiveAction clientId={client.id} redirectAfterArchive />
             </div>
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-2">
+        <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
           {visibleTabs.map((item) => (
             <Link
               key={item.key}
               href={tabHref(client.id, item.key)}
+              aria-current={item.key === activeTab ? "page" : undefined}
               className={cn(
-                "rounded-full border px-4 py-2 text-sm font-semibold transition",
+                "rounded-full border px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4aa59c]/35",
                 item.key === activeTab
-                  ? "border-diagnostics-corporate bg-diagnostics-corporate text-white shadow-sm"
-                  : "border-slate-200 bg-white text-slate-700 hover:bg-diagnostics-background hover:text-diagnostics-corporate"
+                  ? "border-[#4aa59c] bg-[#4aa59c]/12 text-[#2e75ba] shadow-sm"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
               )}
             >
               {item.label}
@@ -848,12 +946,22 @@ export default async function ClientePortalPage({
                 </p>
               )}
               {docPermissions.canViewDocs && (
-                <Link
-                  href={tabHref(client.id, "documentos")}
-                  className="mt-3 inline-flex rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-diagnostics-secondary hover:text-diagnostics-corporate"
-                >
-                  Ir a documentos
-                </Link>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link
+                    href={tabHref(client.id, "documentos")}
+                    className="inline-flex rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-diagnostics-secondary hover:text-diagnostics-corporate"
+                  >
+                    Ir a documentos
+                  </Link>
+                  {client.type === ClientProfileType.COMPANY ? (
+                    <Link
+                      href={`/admin/clientes/empresas/${client.id}/documentos`}
+                      className="inline-flex rounded-full border border-[#4aa59c]/40 bg-white px-4 py-2 text-sm font-semibold text-[#2e75ba] hover:border-[#4aadf5]"
+                    >
+                      Wizard documentos empresa
+                    </Link>
+                  ) : null}
+                </div>
               )}
             </div>
 
@@ -961,6 +1069,7 @@ export default async function ClientePortalPage({
       {activeTab === "documentos" && (
         <ClientDocumentsPanel
           clientId={client.id}
+          clientType={client.type}
           documents={documentsData.map((doc) => ({
             id: doc.id,
             title: doc.title,
@@ -1167,6 +1276,67 @@ export default async function ClientePortalPage({
           title="Empleados asociados"
           description="Asociación de empleados se habilita para empresas e instituciones. Aquí se listarán y gestionarán dependencias sin mezclar finanzas."
         />
+      )}
+
+      {activeTab === "sso" && (
+        <section className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <article className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2e75ba]">Vencimientos</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">{ssoExpiredCount}</p>
+              <p className="text-xs text-slate-500">Documentos SSO vencidos</p>
+            </article>
+            <article className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2e75ba]">Por vencer</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">{ssoExpiringCount}</p>
+              <p className="text-xs text-slate-500">Próximos 30 días</p>
+            </article>
+            <article className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2e75ba]">Productos/Servicios SSO</p>
+              <p className="mt-2 text-sm font-semibold text-slate-800">Próximamente</p>
+              <p className="text-xs text-slate-500">Este módulo consolidará cobertura y oferta SSO por cliente.</p>
+            </article>
+          </div>
+
+          <article className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-900">Documentos SSO relacionados</p>
+              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-[#F8FAFC] px-3 py-1 text-xs font-semibold text-slate-700">
+                <ShieldCheck size={12} className="text-[#2e75ba]" />
+                {ssoDocuments.length} registrados
+              </span>
+            </div>
+            {ssoDocuments.length ? (
+              <div className="mt-3 space-y-2">
+                {ssoDocuments.slice(0, 8).map((doc) => (
+                  <div key={doc.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-800">{doc.title}</p>
+                      <p className="text-xs text-slate-500">{mapCompanyDocumentTypeLabel(doc.documentType?.name ?? doc.title)}</p>
+                    </div>
+                    <span className="text-xs text-slate-600">
+                      {doc.expiresAt ? formatDateForClients(doc.expiresAt, dateFormat) : "Sin vencimiento"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-[#F8FAFC] px-4 py-3 text-sm text-slate-600">
+                Próximamente: tablero SSO con vencimientos, reportes y productos/servicios.
+              </div>
+            )}
+          </article>
+
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            <p className="inline-flex items-center gap-2 font-semibold text-slate-800">
+              <CalendarClock size={15} className="text-[#2e75ba]" />
+              Salud y Seguridad Ocupacional
+            </p>
+            <p className="mt-1">
+              Próximamente se habilitarán reglas de alertas, reportes y seguimiento de servicios SSO por empresa.
+            </p>
+          </div>
+        </section>
       )}
 
       {activeTab === "actividad" && (

@@ -7,6 +7,7 @@ import {
   COMPANY_CONTACT_JOB_TITLE_OTHER_ID
 } from "@/lib/catalogs/jobTitles";
 import { COMPANY_PBX_CATEGORY_FALLBACK, COMPANY_PBX_CATEGORY_SEED } from "@/lib/catalogs/pbxCategories";
+import { INSURER_LINE_FALLBACK, INSURER_LINE_SEED } from "@/lib/catalogs/insurerLines";
 
 export type ClientContactDirectoryItem = {
   id: string;
@@ -32,6 +33,8 @@ export type ClientContactDirectoriesSnapshot = {
   correlations: ClientContactDirectoryCorrelation[];
   pbxCategories: ClientContactDirectoryItem[];
   pbxCategoriesSource: "db" | "fallback";
+  insurerLines: ClientContactDirectoryItem[];
+  insurerLinesSource: "db" | "fallback";
 };
 
 const SORT_STEP = 10;
@@ -96,6 +99,24 @@ export function resolveMissingPbxCategoryDefaults(
   const existingNames = new Set(items.map((item) => normalizeContactDirectoryCode({ value: item.name })).filter(Boolean));
 
   return COMPANY_PBX_CATEGORY_SEED.filter((item) => {
+    const code = normalizeContactDirectoryCode({ value: item.id });
+    const name = normalizeContactDirectoryCode({ value: item.label });
+    if (existingCodes.has(code)) return false;
+    if (existingNames.has(name)) return false;
+    return true;
+  });
+}
+
+export function resolveMissingInsurerLineDefaults(
+  items: ReadonlyArray<{
+    code?: string | null;
+    name?: string | null;
+  }>
+) {
+  const existingCodes = new Set(items.map((item) => normalizeContactDirectoryCode({ value: item.code })).filter(Boolean));
+  const existingNames = new Set(items.map((item) => normalizeContactDirectoryCode({ value: item.name })).filter(Boolean));
+
+  return INSURER_LINE_SEED.filter((item) => {
     const code = normalizeContactDirectoryCode({ value: item.id });
     const name = normalizeContactDirectoryCode({ value: item.label });
     if (existingCodes.has(code)) return false;
@@ -173,7 +194,17 @@ export function buildFallbackClientContactDirectories(tenantId = "global"): Clie
       sortOrder: (index + 1) * SORT_STEP,
       isActive: true
     })),
-    pbxCategoriesSource: "fallback"
+    pbxCategoriesSource: "fallback",
+    insurerLines: INSURER_LINE_FALLBACK.map((item, index) => ({
+      id: item.id,
+      tenantId,
+      code: item.id,
+      name: item.label,
+      description: null,
+      sortOrder: (index + 1) * SORT_STEP,
+      isActive: true
+    })),
+    insurerLinesSource: "fallback"
   };
 }
 

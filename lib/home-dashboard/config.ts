@@ -36,7 +36,7 @@ export const HOME_QUICK_ACTION_CATALOG: Array<{
     key: "reception_checkin",
     label: "Check-in",
     description: "Ingreso rapido de paciente.",
-    href: "/admin/reception/check-in",
+    href: "/admin/recepcion/check-in",
     module: "Recepcion",
     requiresReception: true
   },
@@ -44,7 +44,7 @@ export const HOME_QUICK_ACTION_CATALOG: Array<{
     key: "reception_queues",
     label: "Colas",
     description: "Turnos en espera y llamados.",
-    href: "/admin/reception/queues",
+    href: "/admin/recepcion/queues",
     module: "Recepcion",
     requiresReception: true
   },

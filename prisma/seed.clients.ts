@@ -5,6 +5,7 @@ import { COMPANY_CONTACT_DEPARTMENTS } from "../lib/catalogs/departments";
 import { ECONOMIC_ACTIVITIES } from "../lib/catalogs/economicActivities";
 import { COMPANY_CONTACT_JOB_TITLES } from "../lib/catalogs/jobTitles";
 import { COMPANY_PBX_CATEGORY_SEED } from "../lib/catalogs/pbxCategories";
+import { INSURER_LINE_SEED } from "../lib/catalogs/insurerLines";
 
 const prisma = new PrismaClient();
 
@@ -349,11 +350,15 @@ async function ensureClientContactDirectoryDefaults() {
     clientPbxCategoryDirectory?: {
       upsert?: (args: unknown) => Promise<unknown>;
     };
+    clientInsurerLineDirectory?: {
+      upsert?: (args: unknown) => Promise<unknown>;
+    };
   };
 
   const departmentUpsert = delegate.clientContactDepartmentDirectory?.upsert;
   const jobTitleUpsert = delegate.clientContactJobTitleDirectory?.upsert;
   const pbxCategoryUpsert = delegate.clientPbxCategoryDirectory?.upsert;
+  const insurerLineUpsert = delegate.clientInsurerLineDirectory?.upsert;
 
   if (!departmentUpsert || !jobTitleUpsert || !pbxCategoryUpsert) {
     return;
@@ -424,6 +429,29 @@ async function ensureClientContactDirectoryDefaults() {
           isActive: true
         }
       });
+    }
+
+    if (insurerLineUpsert) {
+      for (let index = 0; index < INSURER_LINE_SEED.length; index += 1) {
+        const insurerLine = INSURER_LINE_SEED[index]!;
+        await insurerLineUpsert({
+          where: {
+            tenantId_code: {
+              tenantId,
+              code: insurerLine.id
+            }
+          },
+          update: {},
+          create: {
+            tenantId,
+            code: insurerLine.id,
+            name: insurerLine.label,
+            sortOrder: (index + 1) * 10,
+            isSystem: true,
+            isActive: true
+          }
+        });
+      }
     }
   }
 }
@@ -521,6 +549,7 @@ async function main() {
   console.info("[seed:clients] contactDepartments=%d", COMPANY_CONTACT_DEPARTMENTS.length);
   console.info("[seed:clients] contactJobTitles=%d", COMPANY_CONTACT_JOB_TITLES.length);
   console.info("[seed:clients] pbxCategories=%d", COMPANY_PBX_CATEGORY_SEED.length);
+  console.info("[seed:clients] insurerLines=%d", INSURER_LINE_SEED.length);
   console.info("[seed:clients] acquisitionSources=%d", BASE_ACQUISITION_SOURCES.length);
   console.info("[seed:clients] socialSourceDetails=%d", SOCIAL_SOURCE_DETAILS.length);
   console.info("[seed:clients] realPersonMode=%s", realPerson.mode);

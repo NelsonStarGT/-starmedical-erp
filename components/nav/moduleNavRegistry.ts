@@ -162,18 +162,19 @@ export const moduleNavRegistry: ModuleNavConfig[] = [
     ]
   },
   {
-    moduleKey: "reception",
+    moduleKey: "recepcion",
     moduleLabel: "RECEPCION",
-    matchPrefixes: ["/admin/reception"],
+    matchPrefixes: ["/admin/recepcion", "/admin/reception"],
     items: [
-      { key: "dashboard", label: "Dashboard", href: "/admin/reception", icon: Gauge },
-      { key: "checkin", label: "Check-in", href: "/admin/reception/check-in", icon: QrCode },
-      { key: "appointments", label: "Citas", href: "/admin/reception/appointments", icon: CalendarDays },
-      { key: "availability", label: "Disponibilidad", href: "/admin/reception/availability", icon: Timer },
-      { key: "queues", label: "Colas", href: "/admin/reception/queues", icon: UsersRound },
-      { key: "incidents", label: "Incidentes", href: "/admin/reception/incidents", icon: Stethoscope },
-      { key: "worklist", label: "Worklist", href: "/admin/reception/worklist", icon: UserCheck },
-      { key: "settings", label: "Configuracion", href: "/admin/reception/settings", icon: Settings },
+      { key: "dashboard", label: "Dashboard", href: "/admin/recepcion", icon: Gauge },
+      { key: "checkin", label: "Check-in", href: "/admin/recepcion/check-in", icon: QrCode },
+      { key: "appointments", label: "Citas", href: "/admin/recepcion/appointments", icon: CalendarDays },
+      { key: "availability", label: "Disponibilidad", href: "/admin/recepcion/availability", icon: Timer },
+      { key: "queues", label: "Colas", href: "/admin/recepcion/queues", icon: UsersRound },
+      { key: "registros", label: "Registros", href: "/admin/recepcion/registros", icon: ClipboardList },
+      { key: "incidents", label: "Incidentes", href: "/admin/recepcion/incidents", icon: Stethoscope },
+      { key: "worklist", label: "Worklist", href: "/admin/recepcion/worklist", icon: UserCheck },
+      { key: "settings", label: "Configuracion", href: "/admin/recepcion/settings", icon: Settings },
       { key: "monitor", label: "Turnos", href: "/display/turnos", icon: MonitorCheck }
     ]
   },

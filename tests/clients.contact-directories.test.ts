@@ -4,11 +4,13 @@ import {
   buildFallbackClientContactDirectories,
   filterJobTitlesByDepartment,
   resolveMissingDepartmentDefaults,
+  resolveMissingInsurerLineDefaults,
   resolveMissingJobTitleDefaults,
   resolveMissingPbxCategoryDefaults,
   resolveUniqueContactDirectoryCode,
   toDirectorySelectOptions
 } from "@/lib/clients/contactDirectories";
+import { normalizeInsurerLineSelection } from "@/lib/catalogs/insurerLines";
 import { resolveCompanyContactDepartment, resolveCompanyContactJobTitle } from "@/lib/clients/companyProfile";
 
 test("fallback de directorios incluye mínimos y opción Otro", () => {
@@ -21,9 +23,13 @@ test("fallback de directorios incluye mínimos y opción Otro", () => {
   assert.ok(snapshot.pbxCategories.length >= 6);
   assert.ok(snapshot.pbxCategories.some((item) => item.code === "central"));
   assert.ok(snapshot.pbxCategories.some((item) => item.code === "otro"));
+  assert.ok(snapshot.insurerLines.length >= 6);
+  assert.ok(snapshot.insurerLines.some((item) => item.code === "medico"));
+  assert.ok(snapshot.insurerLines.some((item) => item.code === "otro"));
   assert.equal(snapshot.departmentsSource, "fallback");
   assert.equal(snapshot.jobTitlesSource, "fallback");
   assert.equal(snapshot.pbxCategoriesSource, "fallback");
+  assert.equal(snapshot.insurerLinesSource, "fallback");
 });
 
 test("filtro de cargos por área usa correlación y conserva 'Otro'", () => {
@@ -101,6 +107,26 @@ test("CTA de categorías PBX devuelve solo defaults faltantes", () => {
   assert.equal(missing.some((item) => item.id === "compras"), true);
   assert.equal(missing.some((item) => item.id === "soporte"), true);
   assert.equal(missing.some((item) => item.id === "recepcion"), true);
+});
+
+test("CTA de ramos de seguro devuelve solo defaults faltantes", () => {
+  const missing = resolveMissingInsurerLineDefaults([
+    { code: "medico", name: "Médico / Salud" },
+    { code: "auto", name: "Auto" }
+  ]);
+  assert.equal(missing.some((item) => item.id === "medico"), false);
+  assert.equal(missing.some((item) => item.id === "auto"), false);
+  assert.equal(missing.some((item) => item.id === "vida"), true);
+  assert.equal(missing.some((item) => item.id === "funerario"), true);
+});
+
+test("ramo principal no se duplica en ramos adicionales", () => {
+  const selection = normalizeInsurerLineSelection({
+    primaryCode: "medico",
+    secondaryCodes: ["vida", "medico", "auto", "vida"]
+  });
+  assert.equal(selection.primaryCode, "medico");
+  assert.deepEqual(selection.secondaryCodes, ["vida", "auto"]);
 });
 
 test("CTA de áreas devuelve solo defaults faltantes", () => {

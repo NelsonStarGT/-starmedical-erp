@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   actionLoadClientContactDepartmentDefaults,
   actionLoadClientContactJobTitleDefaults,
+  actionLoadClientInsurerLineDefaults,
   actionLoadClientPbxCategoryDefaults
 } from "@/app/admin/clientes/actions";
 import ClientsConfigManagerDrawer from "@/components/clients/config/ClientsConfigManagerDrawer";
@@ -43,6 +44,7 @@ function resolveLoadDefaultsAction(managerComponentId: string) {
   if (managerComponentId === "directories:departments") return actionLoadClientContactDepartmentDefaults;
   if (managerComponentId === "directories:job_titles") return actionLoadClientContactJobTitleDefaults;
   if (managerComponentId === "directories:pbx_categories") return actionLoadClientPbxCategoryDefaults;
+  if (managerComponentId === "directories:insurer_lines") return actionLoadClientInsurerLineDefaults;
   return null;
 }
 
@@ -88,7 +90,7 @@ export default function ClientsConfigDirectoriesSummary({
       <section className="rounded-xl border border-[#dce7f5] bg-white p-4 shadow-sm">
         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2e75ba]">Autoguía</p>
         <p className="mt-1 text-sm text-slate-600">
-          Inicia por Áreas y Cargos, luego define categorías PBX y termina con la correlación Área↔Cargo.
+          Inicia por Áreas y Cargos, luego define categorías PBX y ramos de seguro, y termina con la correlación Área↔Cargo.
         </p>
       </section>
 

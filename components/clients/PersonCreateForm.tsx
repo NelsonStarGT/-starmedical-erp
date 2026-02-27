@@ -2,6 +2,7 @@
 
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { ClientCatalogType, ClientPhoneCategory, ClientPhoneRelationType, ClientProfileType, PatientSex } from "@prisma/client";
 import {
@@ -421,17 +422,20 @@ export default function PersonCreateForm({
     setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
   }, []);
 
-  const sectionStepMap: Record<FormSectionKey, WizardStep> = {
-    identity: 1,
-    phones: 1,
-    emails: 4,
-    acquisition: 4,
-    profile: 3,
-    residence: 2,
-    work: 2,
-    relations: 4,
-    affiliations: 4
-  };
+  const sectionStepMap = useMemo<Record<FormSectionKey, WizardStep>>(
+    () => ({
+      identity: 1,
+      phones: 1,
+      emails: 4,
+      acquisition: 4,
+      profile: 3,
+      residence: 2,
+      work: 2,
+      relations: 4,
+      affiliations: 4
+    }),
+    []
+  );
 
   const openAndGoToSection = useCallback((section: FormSectionKey) => {
     setStep(sectionStepMap[section]);
@@ -1632,7 +1636,14 @@ export default function PersonCreateForm({
               <div className="mt-2 flex flex-wrap items-center gap-3">
                 <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-white shadow-sm">
                   {profilePhoto?.previewUrl ? (
-                    <img src={profilePhoto.previewUrl} alt="Vista previa foto de perfil" className="h-full w-full object-cover" />
+                    <Image
+                      src={profilePhoto.previewUrl}
+                      alt="Vista previa foto de perfil"
+                      width={80}
+                      height={80}
+                      className="h-full w-full object-cover"
+                      unoptimized
+                    />
                   ) : (
                     <span className="text-[11px] font-semibold text-slate-500">Sin foto</span>
                   )}

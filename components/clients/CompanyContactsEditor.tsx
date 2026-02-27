@@ -1,10 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo } from "react";
 import { PlusCircle, Trash2, UserRound } from "lucide-react";
-import { actionLoadClientPbxCategoryDefaults } from "@/app/admin/clientes/actions";
 import PhoneNumberField from "@/components/phone/PhoneNumberField";
 import TenantUserLookup, { type TenantUserLookupItem } from "@/components/clients/TenantUserLookup";
 import SearchableSelect from "@/components/ui/SearchableSelect";
@@ -115,17 +113,21 @@ export type CompanyContactsDraft = {
   people: CompanyContactPersonDraft[];
 };
 
-const GENERAL_KIND_OPTIONS: ReadonlyArray<{ value: CompanyGeneralChannelKind; label: string }> = [
-  { value: "PHONE", label: "Teléfono" },
-  { value: "EMAIL", label: "Correo" },
-  { value: "WHATSAPP", label: "WhatsApp" }
-] as const;
-
 const GENERAL_KIND_PRIMARY_LABELS: Record<CompanyGeneralChannelKind, string> = {
   PHONE: "teléfono",
   EMAIL: "correo",
   WHATSAPP: "whatsapp"
 };
+
+type GeneralContactType = "PBX" | "FIJO" | "MOVIL" | "WHATSAPP" | "EMAIL";
+
+const GENERAL_CONTACT_TYPE_OPTIONS: ReadonlyArray<{ value: GeneralContactType; label: string }> = [
+  { value: "PBX", label: "PBX" },
+  { value: "FIJO", label: "Fijo" },
+  { value: "MOVIL", label: "Móvil" },
+  { value: "WHATSAPP", label: "WhatsApp" },
+  { value: "EMAIL", label: "Email" }
+] as const;
 
 const GENERAL_ROW_INPUT_CLASSNAME =
   "h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25";
@@ -158,11 +160,81 @@ function buildPbxOptionLabel(channel: CompanyGeneralChannelDraft) {
 }
 
 function normalizeGeneralChannelOwner(row: CompanyGeneralChannelDraft): CompanyGeneralChannelDraft {
-  const ownerType: CompanyGeneralChannelOwnerType = row.ownerType === "PERSON" ? "PERSON" : "COMPANY";
   return {
     ...row,
-    ownerType,
-    ownerPersonId: ownerType === "PERSON" ? row.ownerPersonId ?? null : null
+    ownerType: "COMPANY",
+    ownerPersonId: null
+  };
+}
+
+function resolveGeneralContactType(row: CompanyGeneralChannelDraft): GeneralContactType {
+  if (row.kind === "EMAIL") return "EMAIL";
+  if (row.kind === "WHATSAPP") return "WHATSAPP";
+  if (row.labelPreset === "pbx") return "PBX";
+  if (row.phoneLineType === "fijo") return "FIJO";
+  return "MOVIL";
+}
+
+function applyGeneralContactType(
+  row: CompanyGeneralChannelDraft,
+  type: GeneralContactType,
+  options: {
+    defaultPbxAreaPreset: CompanyPbxAreaPreset;
+  }
+): CompanyGeneralChannelDraft {
+  const fallbackPreset = row.labelPreset === "pbx" ? "recepcion" : row.labelPreset;
+  if (type === "EMAIL") {
+    return {
+      ...row,
+      kind: "EMAIL",
+      phoneLineType: "movil",
+      labelPreset: fallbackPreset,
+      pbxAreaPreset: options.defaultPbxAreaPreset,
+      pbxAreaOther: "",
+      extension: "",
+      countryCode: "",
+      countryIso2: ""
+    };
+  }
+  if (type === "WHATSAPP") {
+    return {
+      ...row,
+      kind: "WHATSAPP",
+      phoneLineType: "movil",
+      labelPreset: fallbackPreset,
+      pbxAreaPreset: options.defaultPbxAreaPreset,
+      pbxAreaOther: "",
+      extension: ""
+    };
+  }
+  if (type === "PBX") {
+    return {
+      ...row,
+      kind: "PHONE",
+      phoneLineType: "fijo",
+      labelPreset: "pbx",
+      labelOther: "",
+      pbxAreaPreset: row.pbxAreaPreset || options.defaultPbxAreaPreset
+    };
+  }
+  if (type === "FIJO") {
+    return {
+      ...row,
+      kind: "PHONE",
+      phoneLineType: "fijo",
+      labelPreset: fallbackPreset,
+      pbxAreaPreset: options.defaultPbxAreaPreset,
+      pbxAreaOther: ""
+    };
+  }
+  return {
+    ...row,
+    kind: "PHONE",
+    phoneLineType: "movil",
+    labelPreset: fallbackPreset,
+    pbxAreaPreset: options.defaultPbxAreaPreset,
+    pbxAreaOther: "",
+    extension: ""
   };
 }
 
@@ -589,11 +661,6 @@ export default function CompanyContactsEditor({
   preferredGeoCountryId?: string | null;
   disabled?: boolean;
 }) {
-  const router = useRouter();
-  const [isLoadingPbxDefaults, startLoadingPbxDefaults] = useTransition();
-  const [pbxDefaultsError, setPbxDefaultsError] = useState<string | null>(null);
-  const [pbxDefaultsSuccess, setPbxDefaultsSuccess] = useState<string | null>(null);
-
   const resolvedDepartmentOptions = useMemo(() => {
     const source = departmentOptions?.length
       ? departmentOptions
@@ -707,20 +774,6 @@ export default function CompanyContactsEditor({
     () => normalizeCompanyGeneralChannels(value.generalChannels, { pbxCategoryOptions: pbxCategoryResolverOptions }),
     [value.generalChannels, pbxCategoryResolverOptions]
   );
-  const ownerSelectOptions = useMemo(
-    () => [
-      { id: "COMPANY", label: "Empresa" },
-      ...value.people.map((person) => {
-        const fullName = `${person.firstName} ${person.lastName}`.trim() || `Persona #${person.id.slice(-4)}`;
-        const profile = [person.department || person.departmentOther, person.role || person.jobTitleOther].filter(Boolean).join(" · ");
-        return {
-          id: `PERSON:${person.id}`,
-          label: profile ? `${fullName} · ${profile}` : fullName
-        };
-      })
-    ],
-    [value.people]
-  );
 
   function updateGeneralChannels(nextChannels: CompanyGeneralChannelDraft[]) {
     const ensuredChannels = ensureGeneralChannels(nextChannels, {
@@ -829,260 +882,26 @@ export default function CompanyContactsEditor({
     return false;
   }
 
-  const complementaryChannels = value.generalChannels.filter(
-    (row) => !(row.kind === "PHONE" && row.labelPreset === "pbx")
-  );
-
-  function setPbxDefault(targetId: string) {
-    updateGeneralChannels(
-      value.generalChannels.map((row) =>
-        row.kind === "PHONE" && row.labelPreset === "pbx"
-          ? { ...row, isPrimary: row.id === targetId }
-          : row
-      )
-    );
-  }
+  const complementaryChannels = value.generalChannels;
 
   return (
     <section className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="space-y-2">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">C0) PBX de la empresa</p>
-          <p className="text-xs text-slate-500">Puedes definir múltiples PBX por área; uno debe quedar como PBX por defecto.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">C0) Contactos generales de la empresa</p>
+          <p className="text-xs text-slate-500">
+            Canales de contacto de empresa por tipo (PBX/Fijo/Móvil/WhatsApp/Email).{" "}
+            <Link
+              href="/admin/clientes/configuracion?section=directorios"
+              className="font-semibold text-[#2e75ba] underline decoration-[#2e75ba]/30 underline-offset-2"
+            >
+              Configurar etiquetas PBX
+            </Link>
+          </p>
         </div>
         {pbxCategoriesSource === "fallback" ? (
-          <div className="space-y-2 rounded-lg border border-[#4aa59c]/20 bg-[#4aa59c]/5 px-3 py-2 text-xs text-slate-600">
-            <p>
-              Usando categorías PBX por defecto.{" "}
-              <Link href="/admin/clientes/configuracion?section=directorios" className="font-semibold text-[#2e75ba] underline decoration-[#2e75ba]/35 underline-offset-2">
-                Configurar categorías PBX
-              </Link>
-              .
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                startLoadingPbxDefaults(async () => {
-                  try {
-                    setPbxDefaultsError(null);
-                    setPbxDefaultsSuccess(null);
-                    const result = await actionLoadClientPbxCategoryDefaults();
-                    setPbxDefaultsSuccess(`Categorías PBX cargadas: ${result.created} nuevas, ${result.reactivated} reactivadas.`);
-                    router.refresh();
-                  } catch (error) {
-                    setPbxDefaultsError((error as Error)?.message || "No se pudieron cargar categorías PBX iniciales.");
-                  }
-                });
-              }}
-              disabled={disabled || isLoadingPbxDefaults}
-              className={cn(
-                "inline-flex h-9 items-center gap-1 rounded-lg border border-[#4aa59c]/40 bg-white px-3 text-xs font-semibold text-[#2e75ba] hover:border-[#4aadf5]",
-                (disabled || isLoadingPbxDefaults) && "cursor-not-allowed opacity-60"
-              )}
-            >
-              Cargar categorías iniciales
-            </button>
-            {pbxDefaultsError ? <p className="text-rose-700">{pbxDefaultsError}</p> : null}
-            {pbxDefaultsSuccess ? <p className="text-emerald-700">{pbxDefaultsSuccess}</p> : null}
-          </div>
+          <p className="text-[11px] text-slate-500">Usando categorías PBX por defecto. Puedes personalizarlas en Configuración.</p>
         ) : null}
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() =>
-              updateGeneralChannels([
-                ...value.generalChannels,
-                buildDefaultGeneralChannel({
-                  isPrimary: false,
-                  labelPreset: "pbx",
-                  phoneLineType: "fijo",
-                  pbxAreaPreset: defaultPbxAreaPreset,
-                  pbxCategoryOptions: pbxCategoryResolverOptions
-                })
-              ])
-            }
-            disabled={disabled}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-lg border border-[#4aa59c]/30 bg-[#4aa59c]/10 px-3 py-1.5 text-xs font-semibold text-[#2e75ba]",
-              disabled && "cursor-not-allowed opacity-60"
-            )}
-          >
-            <PlusCircle size={14} />
-            Agregar PBX
-          </button>
-        </div>
-
-        {pbxChannels.map((channel, rowIndex) => {
-          const canRemove = !disabled && pbxChannels.length > 1;
-          const hasPeerPbx = pbxChannels.some((row) => row.id !== channel.id);
-          const selectedCategory = pbxCategoryById.get(channel.pbxAreaPreset) ?? null;
-          const selectedInactiveCategory = selectedCategory && !selectedCategory.isActive ? selectedCategory : null;
-          const legacySelectedCategory =
-            !selectedCategory && channel.pbxAreaPreset.trim()
-              ? {
-                  id: channel.pbxAreaPreset,
-                  label: channel.pbxAreaOther.trim() || channel.pbxAreaPreset,
-                  isActive: false
-                }
-              : null;
-          const selectedOption = selectedInactiveCategory ?? legacySelectedCategory;
-          const pbxAreaOptions = selectedOption
-            ? [selectedOption, ...activePbxCategoryOptions]
-            : activePbxCategoryOptions;
-          const isSelectedPbxCategoryInactive = Boolean(selectedOption);
-
-          return (
-            <article key={channel.id} className="space-y-2 rounded-xl border border-[#4aa59c]/25 bg-[#4aa59c]/5 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-slate-700">PBX #{rowIndex + 1}</p>
-                <button
-                  type="button"
-                  onClick={() => updateGeneralChannels(value.generalChannels.filter((row) => row.id !== channel.id))}
-                  disabled={!canRemove}
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700",
-                    !canRemove && "cursor-not-allowed opacity-60"
-                  )}
-                  title={!canRemove ? "Debe existir al menos un PBX." : undefined}
-                >
-                  <Trash2 size={13} />
-                  Quitar
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-12">
-                <select
-                  value={channel.pbxAreaPreset}
-                  onChange={(event) => {
-                    const nextPreset = event.target.value as CompanyPbxAreaPreset;
-                    updateGeneralChannels(
-                      value.generalChannels.map((row) => {
-                        if (row.id !== channel.id) return row;
-                        const resolvedLabel = resolveCompanyGeneralChannelLabel({
-                          labelPreset: "pbx",
-                          pbxAreaPreset: nextPreset,
-                          pbxAreaOther: nextPreset === "otro" ? row.pbxAreaOther : null
-                        }, {
-                          pbxCategoryOptions: pbxCategoryResolverOptions
-                        });
-                        return {
-                          ...row,
-                          kind: "PHONE",
-                          phoneLineType: "fijo",
-                          labelPreset: "pbx",
-                          labelOther: "",
-                          pbxAreaPreset: resolvedLabel.pbxAreaPreset ?? nextPreset,
-                          pbxAreaOther: resolvedLabel.pbxAreaPreset === "otro" ? resolvedLabel.pbxAreaOther ?? row.pbxAreaOther : "",
-                          label: resolvedLabel.label ?? row.label
-                        };
-                      })
-                    );
-                  }}
-                  disabled={disabled}
-                  className={cn(GENERAL_ROW_INPUT_CLASSNAME, "md:col-span-1 lg:col-span-3")}
-                >
-                  {pbxAreaOptions.map((option) => (
-                    <option key={option.id} value={option.id} disabled={option.isActive === false && option.id !== channel.pbxAreaPreset}>
-                      {option.label}
-                      {option.isActive === false ? " (Inactiva)" : ""}
-                    </option>
-                  ))}
-                </select>
-                {isSelectedPbxCategoryInactive ? (
-                  <p className="md:col-span-1 lg:col-span-3 text-[11px] font-semibold text-amber-700">Categoría PBX inactiva (se conserva por compatibilidad).</p>
-                ) : null}
-
-                {channel.pbxAreaPreset === "otro" ? (
-                  <input
-                    value={channel.pbxAreaOther}
-                    onChange={(event) =>
-                      updateGeneralChannels(
-                        value.generalChannels.map((row) => {
-                          if (row.id !== channel.id) return row;
-                          const pbxAreaOther = event.target.value.slice(0, 60);
-                          const resolvedLabel = resolveCompanyGeneralChannelLabel({
-                            labelPreset: "pbx",
-                            pbxAreaPreset: "otro",
-                            pbxAreaOther
-                          }, {
-                            pbxCategoryOptions: pbxCategoryResolverOptions
-                          });
-                          return {
-                            ...row,
-                            kind: "PHONE",
-                            phoneLineType: "fijo",
-                            labelPreset: "pbx",
-                            labelOther: "",
-                            pbxAreaPreset: "otro",
-                            pbxAreaOther,
-                            label: resolvedLabel.label ?? row.label
-                          };
-                        })
-                      )
-                    }
-                    disabled={disabled}
-                    placeholder="Área PBX (máx 60)"
-                    className={cn(GENERAL_ROW_INPUT_CLASSNAME, "md:col-span-1 lg:col-span-3")}
-                  />
-                ) : (
-                  <div className="hidden lg:block lg:col-span-3" />
-                )}
-
-                <PhoneNumberField
-                  label=""
-                  value={channel.value}
-                  preferredGeoCountryId={preferredGeoCountryId ?? null}
-                  preferredCountryText={channel.countryIso2 || null}
-                  localOnly
-                  onChange={(nextValue, meta) =>
-                    updateGeneralChannels(
-                      value.generalChannels.map((row) =>
-                        row.id === channel.id
-                          ? {
-                              ...row,
-                              value: nextValue,
-                              countryIso2: meta.selectedIso2 ?? row.countryIso2,
-                              countryCode: meta.selectedDialCode ?? row.countryCode
-                            }
-                          : row
-                      )
-                    )
-                  }
-                  disabled={disabled}
-                  placeholder="Número PBX"
-                  className="min-w-0 space-y-0 md:col-span-2 lg:col-span-4"
-                />
-
-                <label className="inline-flex h-11 min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 md:col-span-2 lg:col-span-2">
-                  <input
-                    type="radio"
-                    name="company-pbx-default"
-                    checked={channel.isPrimary}
-                    onChange={() => setPbxDefault(channel.id)}
-                    disabled={disabled || !hasPeerPbx}
-                    className="h-4 w-4 border-slate-300 text-[#4aa59c] focus:ring-[#4aa59c]"
-                  />
-                  PBX por defecto
-                </label>
-              </div>
-
-              <p className="text-[11px] text-slate-600">{buildPbxOptionLabel(channel)}</p>
-            </article>
-          );
-        })}
-
-        <p className="rounded-lg border border-[#4aa59c]/20 bg-[#4aa59c]/5 px-3 py-2 text-xs text-slate-600">
-          {hasDefinedPbxNumber
-            ? "Modo Extensión PBX disponible para personas de contacto."
-            : "Define al menos un PBX con número para habilitar extensiones en C2."}
-        </p>
-      </div>
-
-      <div className="order-3 space-y-2">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">C1) Canales de comunicación</p>
-          <p className="text-xs text-slate-500">Directorio único de canales, asignables a Empresa o a Personas de C2.</p>
-        </div>
         <div className="flex justify-end">
           <button
             type="button"
@@ -1099,24 +918,41 @@ export default function CompanyContactsEditor({
             )}
           >
             <PlusCircle size={14} />
-            Agregar canal
+            Agregar contacto general
           </button>
         </div>
         <p className="rounded-lg border border-[#4aa59c]/20 bg-[#4aa59c]/5 px-3 py-2 text-xs text-slate-600">
-          Si asignas un canal a persona y la persona se elimina, el canal pasa automáticamente a Empresa.
+          El Contacto #1 corresponde al canal general principal de la empresa.
         </p>
 
         {complementaryChannels.map((channel, rowIndex) => {
+          const contactType = resolveGeneralContactType(channel);
           const hasSameKindPeers = complementaryChannels.some((row) => row.kind === channel.kind && row.id !== channel.id);
-          const canChangePrimary = !disabled && hasSameKindPeers && channel.kind !== "PHONE";
+          const canChangePrimary = !disabled && hasSameKindPeers && (channel.kind !== "PHONE" || contactType === "PBX");
           const canRemove = !disabled && !channel.isPrimary;
           const selectableLabelOptions = COMPANY_GENERAL_CHANNEL_LABEL_PRESET_OPTIONS.filter((option) => option.value !== "pbx");
-          const ownerValue = channel.ownerType === "PERSON" && channel.ownerPersonId ? `PERSON:${channel.ownerPersonId}` : "COMPANY";
+          const selectedCategory = pbxCategoryById.get(channel.pbxAreaPreset) ?? null;
+          const selectedInactiveCategory = selectedCategory && !selectedCategory.isActive ? selectedCategory : null;
+          const legacySelectedCategory =
+            !selectedCategory && channel.pbxAreaPreset.trim()
+              ? {
+                  id: channel.pbxAreaPreset,
+                  label: channel.pbxAreaOther.trim() || channel.pbxAreaPreset,
+                  isActive: false
+                }
+              : null;
+          const selectedOption = selectedInactiveCategory ?? legacySelectedCategory;
+          const pbxAreaOptions = selectedOption
+            ? [selectedOption, ...activePbxCategoryOptions]
+            : activePbxCategoryOptions;
+          const showExtension = contactType === "PBX" || contactType === "FIJO";
 
           return (
             <article key={channel.id} className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-slate-600">Canal #{rowIndex + 1}</p>
+                <p className="text-xs font-semibold text-slate-600">
+                  {rowIndex === 0 ? "Contacto #1 (empresa)" : `Contacto #${rowIndex + 1}`}
+                </p>
                 <button
                   type="button"
                   onClick={() => updateGeneralChannels(value.generalChannels.filter((row) => row.id !== channel.id))}
@@ -1134,96 +970,105 @@ export default function CompanyContactsEditor({
 
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-12">
                 <select
-                  value={channel.kind}
+                  value={contactType}
                   onChange={(event) => {
-                    const nextKind = event.target.value as CompanyGeneralChannelKind;
-                    const nextCountryCode = normalizeCountryCode(channel.countryCode || "+502");
+                    const nextType = event.target.value as GeneralContactType;
                     updateGeneralChannels(
                       value.generalChannels.map((row) => {
                         if (row.id !== channel.id) return row;
-                        return {
-                          ...row,
-                          kind: nextKind,
-                          phoneLineType: nextKind === "PHONE" ? row.phoneLineType : "movil",
-                          countryCode: nextKind === "EMAIL" ? "" : nextCountryCode,
-                          countryIso2: nextKind === "EMAIL" ? "" : toCountryIso2FromCode(nextCountryCode, row.countryIso2),
-                          extension: nextKind === "PHONE" ? row.extension : ""
-                        };
+                        return applyGeneralContactType(row, nextType, { defaultPbxAreaPreset });
                       })
                     );
                   }}
                   disabled={disabled}
                   className={cn(GENERAL_ROW_INPUT_CLASSNAME, "md:col-span-1 lg:col-span-2")}
                 >
-                  {GENERAL_KIND_OPTIONS.map((option) => (
+                  {GENERAL_CONTACT_TYPE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
                   ))}
                 </select>
 
-                <select
-                  value={channel.labelPreset}
-                  onChange={(event) => {
-                    const nextPreset = event.target.value as CompanyGeneralChannelLabelPreset;
-                    updateGeneralChannels(
-                      value.generalChannels.map((row) => {
-                        if (row.id !== channel.id) return row;
-                        const resolvedLabel = resolveCompanyGeneralChannelLabel({
-                          labelPreset: nextPreset,
-                          labelOther: nextPreset === "otro" ? row.labelOther : null
-                        }, {
-                          pbxCategoryOptions: pbxCategoryResolverOptions
-                        });
-                        return {
-                          ...row,
-                          labelPreset: nextPreset,
-                          labelOther: nextPreset === "otro" ? row.labelOther : "",
-                          pbxAreaPreset: defaultPbxAreaPreset,
-                          pbxAreaOther: "",
-                          label: resolvedLabel.label ?? row.label
-                        };
-                      })
-                    );
-                  }}
-                  disabled={disabled}
-                  className={cn(GENERAL_ROW_INPUT_CLASSNAME, "md:col-span-1 lg:col-span-2")}
-                >
-                  {selectableLabelOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="min-w-0 md:col-span-2 lg:col-span-3">
-                  <SearchableSelect
-                    value={ownerValue}
-                    onChange={(nextValue) => {
+                {contactType === "PBX" ? (
+                  <select
+                    value={channel.pbxAreaPreset}
+                    onChange={(event) => {
+                      const nextPreset = event.target.value as CompanyPbxAreaPreset;
                       updateGeneralChannels(
                         value.generalChannels.map((row) => {
                           if (row.id !== channel.id) return row;
-                          if (nextValue.startsWith("PERSON:")) {
-                            const ownerPersonId = nextValue.slice("PERSON:".length);
-                            return {
-                              ...row,
-                              ownerType: "PERSON",
-                              ownerPersonId: ownerPersonId || null
-                            };
-                          }
+                          const resolvedLabel = resolveCompanyGeneralChannelLabel({
+                            labelPreset: "pbx",
+                            pbxAreaPreset: nextPreset,
+                            pbxAreaOther: nextPreset === "otro" ? row.pbxAreaOther : null
+                          }, {
+                            pbxCategoryOptions: pbxCategoryResolverOptions
+                          });
                           return {
                             ...row,
-                            ownerType: "COMPANY",
-                            ownerPersonId: null
+                            kind: "PHONE",
+                            phoneLineType: "fijo",
+                            labelPreset: "pbx",
+                            labelOther: "",
+                            pbxAreaPreset: resolvedLabel.pbxAreaPreset ?? nextPreset,
+                            pbxAreaOther: resolvedLabel.pbxAreaPreset === "otro" ? resolvedLabel.pbxAreaOther ?? row.pbxAreaOther : "",
+                            label: resolvedLabel.label ?? row.label
                           };
                         })
                       );
                     }}
-                    options={ownerSelectOptions}
-                    placeholder="Pertenece a"
                     disabled={disabled}
-                  />
-                </div>
+                    className={cn(GENERAL_ROW_INPUT_CLASSNAME, "md:col-span-1 lg:col-span-3")}
+                  >
+                    {pbxAreaOptions.map((option) => (
+                      <option key={option.id} value={option.id} disabled={option.isActive === false && option.id !== channel.pbxAreaPreset}>
+                        {option.label}
+                        {option.isActive === false ? " (Inactiva)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <select
+                    value={channel.labelPreset}
+                    onChange={(event) => {
+                      const nextPreset = event.target.value as CompanyGeneralChannelLabelPreset;
+                      updateGeneralChannels(
+                        value.generalChannels.map((row) => {
+                          if (row.id !== channel.id) return row;
+                          const resolvedLabel = resolveCompanyGeneralChannelLabel({
+                            labelPreset: nextPreset,
+                            labelOther: nextPreset === "otro" ? row.labelOther : null
+                          }, {
+                            pbxCategoryOptions: pbxCategoryResolverOptions
+                          });
+                          return {
+                            ...row,
+                            labelPreset: nextPreset,
+                            labelOther: nextPreset === "otro" ? row.labelOther : "",
+                            pbxAreaPreset: defaultPbxAreaPreset,
+                            pbxAreaOther: "",
+                            label: resolvedLabel.label ?? row.label
+                          };
+                        })
+                      );
+                    }}
+                    disabled={disabled}
+                    className={cn(GENERAL_ROW_INPUT_CLASSNAME, "md:col-span-1 lg:col-span-3")}
+                  >
+                    {selectableLabelOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                {contactType === "PBX" && selectedOption ? (
+                  <p className="md:col-span-2 lg:col-span-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                    Categoría PBX inactiva (se conserva por compatibilidad).
+                  </p>
+                ) : null}
 
                 {channel.kind === "EMAIL" ? (
                   <input
@@ -1271,32 +1116,61 @@ export default function CompanyContactsEditor({
                   />
                 )}
 
-                {channel.kind === "PHONE" ? (
-                  channel.phoneLineType === "fijo" ? (
+                {showExtension ? (
+                  <input
+                    value={channel.extension}
+                    onChange={(event) =>
+                      updateGeneralChannels(
+                        value.generalChannels.map((row) =>
+                          row.id === channel.id
+                            ? {
+                                ...row,
+                                extension: event.target.value
+                              }
+                            : row
+                        )
+                      )
+                    }
+                    disabled={disabled}
+                    placeholder="Extensión"
+                    className={cn(GENERAL_ROW_INPUT_CLASSNAME, "md:col-span-1 lg:col-span-2")}
+                  />
+                ) : null}
+
+                {contactType === "PBX" && channel.pbxAreaPreset === "otro" ? (
+                  <div className="space-y-1 md:col-span-2 lg:col-span-12">
                     <input
-                      value={channel.extension}
+                      value={channel.pbxAreaOther}
                       onChange={(event) =>
                         updateGeneralChannels(
-                          value.generalChannels.map((row) =>
-                            row.id === channel.id
-                              ? {
-                                  ...row,
-                                  extension: event.target.value
-                                }
-                              : row
-                          )
+                          value.generalChannels.map((row) => {
+                            if (row.id !== channel.id) return row;
+                            const pbxAreaOther = event.target.value.slice(0, 60);
+                            const resolvedLabel = resolveCompanyGeneralChannelLabel({
+                              labelPreset: "pbx",
+                              pbxAreaPreset: "otro",
+                              pbxAreaOther
+                            }, {
+                              pbxCategoryOptions: pbxCategoryResolverOptions
+                            });
+                            return {
+                              ...row,
+                              pbxAreaPreset: "otro",
+                              pbxAreaOther,
+                              label: resolvedLabel.label ?? row.label
+                            };
+                          })
                         )
                       }
                       disabled={disabled}
-                      placeholder="Extensión"
-                      className={cn(GENERAL_ROW_INPUT_CLASSNAME, "md:col-span-1 lg:col-span-1")}
+                      placeholder="Especificar área (máx 60)"
+                      className={GENERAL_ROW_INPUT_CLASSNAME}
                     />
-                  ) : (
-                    <div className="hidden lg:block lg:col-span-1" />
-                  )
+                    <p className="text-right text-[11px] text-slate-500">{channel.pbxAreaOther.length}/60</p>
+                  </div>
                 ) : null}
 
-                {channel.labelPreset === "otro" ? (
+                {contactType !== "PBX" && channel.labelPreset === "otro" ? (
                   <div className="space-y-1 md:col-span-2 lg:col-span-12">
                     <input
                       value={channel.labelOther}
@@ -1331,31 +1205,6 @@ export default function CompanyContactsEditor({
 
               <div className="mt-2 flex items-center justify-between gap-2">
                 <div className="inline-flex items-center gap-2">
-                  {channel.kind === "PHONE" ? (
-                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
-                      Línea
-                      <select
-                        value={channel.phoneLineType}
-                        onChange={(event) =>
-                          updateGeneralChannels(
-                            value.generalChannels.map((row) =>
-                              row.id === channel.id
-                                ? {
-                                    ...row,
-                                    phoneLineType: event.target.value as "movil" | "fijo"
-                                  }
-                                : row
-                            )
-                          )
-                        }
-                        disabled={disabled}
-                        className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-700"
-                      >
-                        <option value="movil">Móvil</option>
-                        <option value="fijo">Fijo</option>
-                      </select>
-                    </label>
-                  ) : null}
                   <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
                     <input
                       type="radio"
@@ -1370,7 +1219,9 @@ export default function CompanyContactsEditor({
                 </div>
                 <p className="text-[11px] font-semibold text-slate-500">
                   {channel.kind === "PHONE"
-                    ? "PBX principal y extensiones se administran en C0/C2."
+                    ? contactType === "PBX"
+                      ? "Canal principal de telefonía de la empresa."
+                      : "Extensión disponible solo para PBX o fijo."
                     : hasSameKindPeers
                       ? "Marca un único principal para este tipo."
                       : "Canal único: principal automático por tipo."}
@@ -1379,11 +1230,16 @@ export default function CompanyContactsEditor({
             </article>
           );
         })}
+        <p className="rounded-lg border border-[#4aa59c]/20 bg-[#4aa59c]/5 px-3 py-2 text-xs text-slate-600">
+          {hasDefinedPbxNumber
+            ? "Modo Extensión PBX disponible para personas de contacto."
+            : "Define al menos un contacto tipo PBX con número para habilitar extensiones en C1."}
+        </p>
       </div>
 
-      <div className="order-2 space-y-2">
+      <div className="space-y-2">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">C2) Personas de contacto</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">C1) Personas de contacto de la empresa</p>
           <p className="text-xs text-slate-500">Contactos profesionales por área/departamento con teléfonos y correos.</p>
         </div>
         <div className="flex justify-end">
@@ -1403,7 +1259,7 @@ export default function CompanyContactsEditor({
 
         {!value.people.length ? (
           <p className="rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2 text-xs text-slate-500">
-            Sin personas de contacto. Puedes guardar solo con C1 o agregar responsables por área.
+            Sin personas de contacto. Puedes guardar solo con C0 o agregar responsables por área.
           </p>
         ) : null}
 

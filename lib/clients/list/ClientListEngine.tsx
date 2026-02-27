@@ -20,6 +20,7 @@ import ClientRowActions from "@/components/clients/ClientRowActions";
 import { buildClientListHref, mergeHrefQuery, type HrefQuery } from "@/lib/clients/list/href";
 import { parseClientListSearchParams, toSearchParamsObject, type ClientListSearchParams } from "@/lib/clients/list/searchParams";
 import { getClientDocumentPermissions } from "@/lib/clients/permissions";
+import { tenantIdFromUser } from "@/lib/tenant";
 import { cn } from "@/lib/utils";
 
 export type ClientListKind = "PERSON" | "COMPANY" | "INSURER" | "INSTITUTION";
@@ -56,7 +57,7 @@ export type ClientListConfig<Row> = {
     pageSizeOptions?: number[];
   };
   columns: ColumnDef<Row>[];
-  fetcher: (params: ClientListSearchParams) => Promise<ClientListFetchResult<Row>>;
+  fetcher: (params: ClientListSearchParams, context?: { tenantId?: string }) => Promise<ClientListFetchResult<Row>>;
 };
 
 function kindToProfileType(kind: ClientListKind) {
@@ -68,6 +69,11 @@ function kindToProfileType(kind: ClientListKind) {
 
 function buildBaseColumns(kind: ClientListKind): ColumnDef<ClientListItem>[] {
   return [
+    {
+      header: "Código",
+      width: "w-[110px]",
+      render: (row) => <span className="font-mono text-xs font-semibold text-slate-700">{row.clientCode ?? "—"}</span>
+    },
     {
       header: kind === "PERSON" ? "Persona" : kind === "COMPANY" ? "Empresa" : kind === "INSURER" ? "Aseguradora" : "Institución",
       render: (row) =>
@@ -198,8 +204,13 @@ function buildSelectionColumn(): ColumnDef<ClientListItem> {
   };
 }
 
-async function defaultFetcher(type: ClientProfileType, params: ClientListSearchParams): Promise<ClientListFetchResult<ClientListItem>> {
+async function defaultFetcher(
+  type: ClientProfileType,
+  params: ClientListSearchParams,
+  context?: { tenantId?: string }
+): Promise<ClientListFetchResult<ClientListItem>> {
   const result = await listClients({
+    tenantId: context?.tenantId,
     type,
     q: params.q,
     statusId: params.status || undefined,
@@ -226,7 +237,7 @@ export function createClientListConfig(kind: ClientListKind): ClientListConfig<C
       basePath: "/admin/clientes/personas",
       createPath: "/admin/clientes/personas/nuevo",
       createLabel: "Crear persona",
-      searchPlaceholder: "Nombre, DPI o teléfono…",
+      searchPlaceholder: "Nombre, DPI, correlativo o teléfono…",
       emptyTitle: "Sin personas"
     },
     COMPANY: {
@@ -234,7 +245,7 @@ export function createClientListConfig(kind: ClientListKind): ClientListConfig<C
       basePath: "/admin/clientes/empresas",
       createPath: "/admin/clientes/empresas/nuevo",
       createLabel: "Crear empresa",
-      searchPlaceholder: "Nombre, NIT, email o teléfono…",
+      searchPlaceholder: "Nombre, NIT, correlativo, email o teléfono…",
       emptyTitle: "Sin empresas"
     },
     INSURER: {
@@ -242,7 +253,7 @@ export function createClientListConfig(kind: ClientListKind): ClientListConfig<C
       basePath: "/admin/clientes/aseguradoras",
       createPath: "/admin/clientes/aseguradoras/nuevo",
       createLabel: "Crear aseguradora",
-      searchPlaceholder: "Nombre, NIT, email o teléfono…",
+      searchPlaceholder: "Nombre, NIT, correlativo, email o teléfono…",
       emptyTitle: "Sin aseguradoras"
     },
     INSTITUTION: {
@@ -250,7 +261,7 @@ export function createClientListConfig(kind: ClientListKind): ClientListConfig<C
       basePath: "/admin/clientes/instituciones",
       createPath: "/admin/clientes/instituciones/nuevo",
       createLabel: "Crear institución",
-      searchPlaceholder: "Nombre, NIT, email o teléfono…",
+      searchPlaceholder: "Nombre, NIT, correlativo, email o teléfono…",
       emptyTitle: "Sin instituciones"
     }
   }[kind];
@@ -271,7 +282,7 @@ export function createClientListConfig(kind: ClientListKind): ClientListConfig<C
       pageSizeOptions: [10, 25, 50]
     },
     columns: buildBaseColumns(kind),
-    fetcher: (params) => defaultFetcher(profileType, params)
+    fetcher: (params, context) => defaultFetcher(profileType, params, context)
   };
 }
 
@@ -284,6 +295,8 @@ export async function ClientListEngine({
 }) {
   const parsed = parseClientListSearchParams(searchParams);
   const pageSizeOptions = config.filters?.pageSizeOptions ?? [10, 25, 50];
+  const currentUser = await getSessionUserFromCookies(cookies());
+  const tenantId = tenantIdFromUser(currentUser);
 
   const queryObject = toSearchParamsObject(parsed);
   const queryForTabs: HrefQuery = {
@@ -300,9 +313,8 @@ export async function ClientListEngine({
       orderBy: { name: "asc" },
       select: { id: true, name: true }
     }),
-    config.fetcher(parsed)
+    config.fetcher(parsed, { tenantId })
   ]);
-  const currentUser = await getSessionUserFromCookies(cookies());
   const canBulkMutate = Boolean(currentUser && isAdmin(currentUser));
   const docPermissions = getClientDocumentPermissions(currentUser);
   const columns = [

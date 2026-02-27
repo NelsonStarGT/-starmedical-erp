@@ -43,26 +43,29 @@ function displayName(row: {
 
 export default async function ClientesDashboardPage() {
   const currentUser = await getSessionUserFromCookies(cookies());
-  const dateFormat = await getClientsDateFormat(tenantIdFromUser(currentUser));
+  const tenantId = tenantIdFromUser(currentUser);
+  const dateFormat = await getClientsDateFormat(tenantId);
   const now = new Date();
   const todayStart = startOfDay(now);
   const since7 = subDays(now, 7);
   const since30 = subDays(now, 30);
 
   const [kpis, newToday, recentRows, sourceGroups] = await Promise.all([
-    getClientsHomeKpis(),
+    getClientsHomeKpis({ tenantId }),
     prisma.clientProfile.count({
       where: {
+        tenantId,
         deletedAt: null,
         createdAt: { gte: todayStart }
       }
     }),
     prisma.clientProfile.findMany({
-      where: { deletedAt: null },
+      where: { tenantId, deletedAt: null },
       orderBy: { createdAt: "desc" },
       take: 10,
       select: {
         id: true,
+        clientCode: true,
         type: true,
         createdAt: true,
         firstName: true,
@@ -87,6 +90,7 @@ export default async function ClientesDashboardPage() {
     prisma.clientProfile.groupBy({
       by: ["acquisitionSourceId"],
       where: {
+        tenantId,
         deletedAt: null,
         createdAt: { gte: since30 }
       },
@@ -245,7 +249,7 @@ export default async function ClientesDashboardPage() {
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">Últimos clientes creados</p>
           <Link
-            href="/admin/clientes/personas"
+            href="/admin/clientes/lista?view=operativa"
             className="inline-flex items-center gap-1 text-xs font-semibold text-[#2e75ba] hover:text-[#4aadf5]"
           >
             Ver listados
@@ -258,6 +262,7 @@ export default async function ClientesDashboardPage() {
             <thead className="bg-[#f8fafc] text-[#2e75ba]">
               <tr>
                 <th className="px-3 py-2 text-left font-semibold">Fecha</th>
+                <th className="px-3 py-2 text-left font-semibold">Código</th>
                 <th className="px-3 py-2 text-left font-semibold">Cliente</th>
                 <th className="px-3 py-2 text-left font-semibold">Tipo</th>
                 <th className="px-3 py-2 text-left font-semibold">Ubicación</th>
@@ -268,7 +273,7 @@ export default async function ClientesDashboardPage() {
             <tbody>
               {recentRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-3 text-center text-slate-500">
+                  <td colSpan={7} className="px-3 py-3 text-center text-slate-500">
                     Aún no hay clientes registrados.
                   </td>
                 </tr>
@@ -276,6 +281,7 @@ export default async function ClientesDashboardPage() {
                 recentRows.map((row, index) => (
                   <tr key={row.id} className={index % 2 ? "bg-slate-50/60" : "bg-white"}>
                     <td className="px-3 py-2">{formatDateForClients(row.createdAt, dateFormat)}</td>
+                    <td className="px-3 py-2 font-mono text-xs font-semibold text-slate-700">{row.clientCode ?? "—"}</td>
                     <td className="px-3 py-2 font-semibold text-slate-900">{displayName(row) || "Cliente"}</td>
                     <td className="px-3 py-2">{row.type}</td>
                     <td className="px-3 py-2">{[row.city, row.country].filter(Boolean).join(", ") || "—"}</td>

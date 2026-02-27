@@ -71,6 +71,8 @@ model User {
   clientDocumentsRejected      ClientDocument[]             @relation("ClientDocRejectedBy")
   clientAuditEvents            ClientAuditEvent[]           @relation("ClientAuditActor")
   clientNotes                  ClientNote[]                 @relation("ClientNoteActor")
+  registrationInvitesCreated   ClientRegistrationInvite[]   @relation("ClientRegistrationInviteCreatedBy")
+  selfRegistrationsReviewed    ClientSelfRegistration[]     @relation("ClientSelfRegistrationReviewedBy")
   branchAccesses               UserBranchAccess[]
   visitsCreated                Visit[]                      @relation("VisitCreatedBy")
   visitsUpdated                Visit[]                      @relation("VisitUpdatedBy")
@@ -1064,6 +1066,8 @@ model CrmLead {
 
 model ClientProfile {
   id                                  String                                @id @default(cuid())
+  tenantId                            String                                @default("global")
+  clientCode                          String?
   type                                ClientProfileType
   companyName                         String?
   tradeName                           String?
@@ -1139,6 +1143,7 @@ model ClientProfile {
   clientIdentifiers                   ClientIdentifier[]
   clientPhones                        ClientPhone[]
   clientEmails                        ClientEmail[]
+  selfRegistrations                   ClientSelfRegistration[]               @relation("ClientSelfRegistrationAssignedClient")
   photoAsset                          FileAsset?                            @relation("ClientProfilePhotoAsset", fields: [photoAssetId], references: [id])
   MembershipContract                  MembershipContract[]
   MembershipDependent                 MembershipDependent[]
@@ -1165,9 +1170,88 @@ model ClientProfile {
   @@index([acquisitionDetailOptionId])
   @@index([birthDate])
   @@index([country])
-  @@index([type, deletedAt])
+  @@unique([tenantId, clientCode])
+  @@index([tenantId, type, deletedAt])
   @@index([photoAssetId])
   @@index([partyId])
+}
+
+model ClientSequenceCounter {
+  id         String            @id @default(cuid())
+  tenantId   String
+  clientType ClientProfileType
+  prefix     String
+  nextNumber Int               @default(1)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@unique([tenantId, clientType])
+  @@index([tenantId, prefix])
+}
+
+model ClientRegistrationSequenceCounter {
+  id         String            @id @default(cuid())
+  tenantId   String
+  clientType ClientProfileType
+  prefix     String
+  nextNumber Int               @default(1)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@unique([tenantId, clientType])
+  @@index([tenantId, prefix])
+}
+
+model ClientRegistrationInvite {
+  id              String                  @id @default(cuid())
+  tenantId        String
+  clientType      ClientProfileType
+  tokenHash       String                  @unique
+  note            String?
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdByUserId String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  createdByUser   User?                   @relation("ClientRegistrationInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  registrations   ClientSelfRegistration[]
+
+  @@index([tenantId, clientType, revokedAt, expiresAt])
+  @@index([createdByUserId, createdAt])
+}
+
+model ClientSelfRegistration {
+  id                       String                       @id @default(cuid())
+  tenantId                 String
+  inviteId                 String
+  status                   ClientSelfRegistrationStatus @default(PENDING)
+  clientType               ClientProfileType
+  provisionalCode          String
+  payloadJson              Json
+  displayName              String?
+  documentRef              String?
+  email                    String?
+  phone                    String?
+  submittedFromIpHash      String?
+  submittedFromUserAgent   String?
+  rejectedReason           String?
+  reviewNotes              String?
+  reviewedByUserId         String?
+  reviewedAt               DateTime?
+  assignedClientId         String?
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
+  invite                   ClientRegistrationInvite     @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  reviewedByUser           User?                        @relation("ClientSelfRegistrationReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  assignedClient           ClientProfile?               @relation("ClientSelfRegistrationAssignedClient", fields: [assignedClientId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, provisionalCode])
+  @@index([tenantId, status, createdAt])
+  @@index([inviteId, createdAt])
+  @@index([documentRef])
+  @@index([email])
+  @@index([phone])
+  @@index([assignedClientId])
 }
 
 model ClientAffiliation {
@@ -1256,6 +1340,23 @@ model ClientContactJobTitleDirectory {
 }
 
 model ClientPbxCategoryDirectory {
+  id          String   @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  description String?
+  sortOrder   Int      @default(100)
+  isActive    Boolean  @default(true)
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive, sortOrder, name])
+}
+
+model ClientInsurerLineDirectory {
   id          String   @id @default(cuid())
   tenantId    String
   code        String
@@ -5730,6 +5831,12 @@ enum ClientBloodType {
 }
 
 enum ClientDocumentApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ClientSelfRegistrationStatus {
   PENDING
   APPROVED
   REJECTED

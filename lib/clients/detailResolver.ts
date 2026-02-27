@@ -102,14 +102,16 @@ function buildCandidateSlugs(row: {
   return candidates;
 }
 
-export async function resolveClientIdFromRef(clientRefRaw: string) {
+export async function resolveClientIdFromRef(clientRefRaw: string, input?: { tenantId?: string | null }) {
   const clientRef = normalizeClientRef(clientRefRaw);
   if (!clientRef) return null;
+  const tenantId = input?.tenantId?.trim() || null;
 
   const directCandidateIds = Array.from(new Set([clientRef, ...extractEmbeddedClientIds(clientRefRaw)]));
 
   const direct = await prisma.clientProfile.findFirst({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       id: { in: directCandidateIds },
       deletedAt: null
     },
@@ -120,8 +122,10 @@ export async function resolveClientIdFromRef(clientRefRaw: string) {
   const identifierCandidates = Array.from(new Set([clientRefRaw.trim(), clientRef])).filter(Boolean);
   const byIdentifier = await prisma.clientProfile.findFirst({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       deletedAt: null,
       OR: [
+        { clientCode: { in: identifierCandidates } },
         { dpi: { in: identifierCandidates } },
         { nit: { in: identifierCandidates } }
       ]
@@ -142,6 +146,7 @@ export async function resolveClientIdFromRef(clientRefRaw: string) {
 
   const candidates = await prisma.clientProfile.findMany({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       deletedAt: null,
       OR: searchChunks.flatMap((chunk) => [
         { firstName: { contains: chunk, mode: "insensitive" as const } },

@@ -5,6 +5,7 @@ import { uploadBufferToSupabase } from "@/lib/storage/supabase";
 
 const DEFAULT_MAX_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
 const CLIENT_PHOTO_MAX_SIZE_BYTES = 3 * 1024 * 1024; // 3 MB
+const CLIENT_LOGO_MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 const DEFAULT_ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"]);
 const CLIENT_PHOTO_ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
 
@@ -16,9 +17,14 @@ export async function POST(req: NextRequest) {
     const file = formData.get("file") as File | null;
     const scope = String(formData.get("scope") ?? "").trim().toLowerCase();
     const isClientPhotoScope = scope === "clients/photos";
-    const maxSizeBytes = isClientPhotoScope ? CLIENT_PHOTO_MAX_SIZE_BYTES : DEFAULT_MAX_SIZE_BYTES;
-    const allowedTypes = isClientPhotoScope ? CLIENT_PHOTO_ALLOWED_TYPES : DEFAULT_ALLOWED_TYPES;
-    const maxSizeLabel = isClientPhotoScope ? "3MB" : "25MB";
+    const isClientLogoScope = scope === "clients/logos";
+    const maxSizeBytes = isClientPhotoScope
+      ? CLIENT_PHOTO_MAX_SIZE_BYTES
+      : isClientLogoScope
+        ? CLIENT_LOGO_MAX_SIZE_BYTES
+        : DEFAULT_MAX_SIZE_BYTES;
+    const allowedTypes = isClientPhotoScope || isClientLogoScope ? CLIENT_PHOTO_ALLOWED_TYPES : DEFAULT_ALLOWED_TYPES;
+    const maxSizeLabel = isClientPhotoScope ? "3MB" : isClientLogoScope ? "10MB" : "25MB";
 
     const contentLengthHeader = req.headers.get("content-length");
     const contentLength = contentLengthHeader ? Number(contentLengthHeader) : Number.NaN;
@@ -35,7 +41,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
-          error: isClientPhotoScope ? "Solo se permiten JPG, PNG o WEBP" : "Solo se permiten JPG, PNG, WEBP o PDF"
+          error:
+            isClientPhotoScope || isClientLogoScope
+              ? "Solo se permiten JPG, PNG o WEBP"
+              : "Solo se permiten JPG, PNG, WEBP o PDF"
         },
         { status: 400 }
       );
@@ -54,7 +63,7 @@ export async function POST(req: NextRequest) {
             ? "webp"
             : "jpg";
     const filename = `${crypto.randomUUID()}.${ext}`;
-    const folder = isClientPhotoScope ? "clients/photos" : "uploads";
+    const folder = isClientPhotoScope ? "clients/photos" : isClientLogoScope ? "clients/logos" : "uploads";
     const path = `${folder}/${filename}`;
     const uploaded = await uploadBufferToSupabase(path, buffer, file.type);
 

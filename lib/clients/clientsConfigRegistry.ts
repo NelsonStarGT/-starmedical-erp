@@ -101,7 +101,7 @@ export const CLIENTS_CONFIG_REGISTRY: ReadonlyArray<ClientsConfigRegistryEntry> 
   },
   {
     key: "catalog_institution_category",
-    label: "Categorías de institución",
+    label: "Régimen institucional",
     section: "catalogos",
     scope: "shared",
     usedBy: ["/admin/clientes/instituciones/nuevo"],
@@ -111,7 +111,7 @@ export const CLIENTS_CONFIG_REGISTRY: ReadonlyArray<ClientsConfigRegistryEntry> 
   },
   {
     key: "catalog_institution_type",
-    label: "Tipos de institución",
+    label: "Tipo de institución",
     section: "catalogos",
     scope: "shared",
     usedBy: ["/admin/clientes/instituciones/nuevo"],
@@ -180,6 +180,17 @@ export const CLIENTS_CONFIG_REGISTRY: ReadonlyArray<ClientsConfigRegistryEntry> 
     usedBy: ["/admin/clientes/empresas/nuevo (C0)"],
     dependsOn: [],
     managerComponentId: "directories:pbx_categories",
+    canDeprecate: false
+  },
+  {
+    key: "directory_insurer_lines",
+    label: "Ramos de seguro",
+    summary: "Clasifica aseguradoras por ramo (Médico, Vida, Auto, Funerario…).",
+    section: "directorios",
+    scope: "tenant",
+    usedBy: ["Aseguradoras → Perfil"],
+    dependsOn: [],
+    managerComponentId: "directories:insurer_lines",
     canDeprecate: false
   },
   {

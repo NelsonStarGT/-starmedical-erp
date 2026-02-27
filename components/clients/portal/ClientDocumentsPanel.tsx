@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Calendar, CheckCircle2, FileText, History, PencilLine, PlusCircle, RefreshCw, XCircle } from "lucide-react";
+import { ClientProfileType } from "@prisma/client";
+import { Calendar, CheckCircle2, History, PencilLine, PlusCircle, RefreshCw, XCircle } from "lucide-react";
 import UploadField from "@/components/ui/UploadField";
+import DateField from "@/components/ui/DateField";
+import SearchableMultiSelect from "@/components/ui/SearchableMultiSelect";
 import {
   actionAddClientDocument,
   actionApproveClientDocument,
@@ -12,6 +15,7 @@ import {
   actionRejectClientDocument,
   actionUpdateClientDocument
 } from "@/app/admin/clientes/actions";
+import { mapCompanyDocumentTypeLabel } from "@/lib/clients/companyDocumentTypes";
 import { cn } from "@/lib/utils";
 
 type Option = { id: string; name: string };
@@ -89,9 +93,9 @@ function formatHistoryAction(action: string) {
   return map[action] ?? action;
 }
 
-function expirationTone(status: "Vencido" | "Por vencer" | "Vigente" | "Faltante") {
+function expirationTone(status: "Vencido" | "Vence pronto" | "Vigente" | "Faltante" | "Sin vencimiento") {
   if (status === "Vencido") return "border-rose-200 bg-rose-50 text-rose-700";
-  if (status === "Por vencer") return "border-amber-200 bg-amber-50 text-amber-800";
+  if (status === "Vence pronto") return "border-amber-200 bg-amber-50 text-amber-800";
   if (status === "Vigente") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   return "border-slate-200 bg-slate-50 text-slate-700";
 }
@@ -124,6 +128,24 @@ function requiredLabel(status: RequiredChecklistItem["status"]) {
   return "Pendiente";
 }
 
+type ExpiryFilterValue = "all" | "valid" | "expiring" | "expired" | "no_expiry";
+
+function getExpiryStatus(params: { expiresAt: string | null; today: Date; expiringUntil: Date }) {
+  if (!params.expiresAt) return "no_expiry" as const;
+  const expiresAt = new Date(params.expiresAt);
+  if (Number.isNaN(expiresAt.getTime())) return "no_expiry" as const;
+  if (expiresAt < params.today) return "expired" as const;
+  if (expiresAt <= params.expiringUntil) return "expiring" as const;
+  return "valid" as const;
+}
+
+function getExpiryLabel(status: ReturnType<typeof getExpiryStatus>) {
+  if (status === "expired") return "Vencido";
+  if (status === "expiring") return "Vence pronto";
+  if (status === "valid") return "Vigente";
+  return "Sin vencimiento";
+}
+
 function summarizeHistoryMetadata(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   const meta = value as Record<string, unknown>;
@@ -145,6 +167,7 @@ function summarizeHistoryMetadata(value: unknown) {
 
 export default function ClientDocumentsPanel({
   clientId,
+  clientType,
   documents,
   historyByDocument,
   requiredChecklist = [],
@@ -154,6 +177,7 @@ export default function ClientDocumentsPanel({
   canApproveDocs = false
 }: {
   clientId: string;
+  clientType: ClientProfileType;
   documents: ClientDocumentRow[];
   historyByDocument?: Record<string, DocumentHistoryEntry[]>;
   requiredChecklist?: RequiredChecklistItem[];
@@ -190,12 +214,60 @@ export default function ClientDocumentsPanel({
     fileAssetId: "",
     originalName: ""
   }));
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTypeFilters, setSelectedTypeFilters] = useState<string[]>([]);
+  const [expiryFilter, setExpiryFilter] = useState<ExpiryFilterValue>("all");
 
   const today = useMemo(() => startOfDay(new Date()), []);
   const expiringUntil = useMemo(() => addDays(today, 30), [today]);
   const versionByDocumentId = useMemo(() => {
     return new Map(documents.map((doc) => [doc.id, doc.version] as const));
   }, [documents]);
+  const effectiveDocumentTypeOptions = useMemo(() => {
+    if (clientType !== ClientProfileType.COMPANY) return documentTypeOptions;
+    const grouped = new Map<string, Option>();
+    for (const option of documentTypeOptions) {
+      const mapped = mapCompanyDocumentTypeLabel(option.name);
+      if (!grouped.has(mapped)) {
+        grouped.set(mapped, { id: option.id, name: mapped });
+      }
+    }
+    return Array.from(grouped.values());
+  }, [clientType, documentTypeOptions]);
+  const filterTypeOptions = useMemo(() => {
+    if (clientType !== ClientProfileType.COMPANY) {
+      return effectiveDocumentTypeOptions.map((option) => ({ id: option.id, label: option.name }));
+    }
+    return effectiveDocumentTypeOptions.map((option) => ({ id: option.name, label: option.name }));
+  }, [clientType, effectiveDocumentTypeOptions]);
+  const documentTypeNameById = useMemo(
+    () => new Map(effectiveDocumentTypeOptions.map((option) => [option.id, option.name] as const)),
+    [effectiveDocumentTypeOptions]
+  );
+  const filteredDocuments = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return documents.filter((doc) => {
+      const displayTypeName = clientType === ClientProfileType.COMPANY
+        ? mapCompanyDocumentTypeLabel(doc.documentTypeName ?? "")
+        : (doc.documentTypeName ?? "Sin tipo");
+      const matchesQuery =
+        !query ||
+        doc.title.toLowerCase().includes(query) ||
+        displayTypeName.toLowerCase().includes(query);
+      if (!matchesQuery) return false;
+      if (selectedTypeFilters.length > 0) {
+        if (clientType === ClientProfileType.COMPANY) {
+          const canonicalLabel = mapCompanyDocumentTypeLabel(doc.documentTypeName ?? "");
+          if (!selectedTypeFilters.includes(canonicalLabel)) return false;
+        } else if (!doc.documentTypeId || !selectedTypeFilters.includes(doc.documentTypeId)) {
+          return false;
+        }
+      }
+      const status = getExpiryStatus({ expiresAt: doc.expiresAt, today, expiringUntil });
+      if (expiryFilter !== "all" && status !== expiryFilter) return false;
+      return true;
+    });
+  }, [clientType, documents, expiringUntil, expiryFilter, searchQuery, selectedTypeFilters, today]);
   const requiredSummary = useMemo(() => {
     return {
       total: requiredChecklist.length,
@@ -233,10 +305,20 @@ export default function ClientDocumentsPanel({
   }
 
   function beginEdit(doc: ClientDocumentRow) {
+    const normalizedTypeId =
+      doc.documentTypeId && documentTypeNameById.has(doc.documentTypeId)
+        ? doc.documentTypeId
+        : effectiveDocumentTypeOptions.find(
+            (option) =>
+              option.name ===
+              (clientType === ClientProfileType.COMPANY
+                ? mapCompanyDocumentTypeLabel(doc.documentTypeName ?? "")
+                : (doc.documentTypeName ?? "Sin tipo"))
+          )?.id ?? "";
     setEditingDocId(doc.id);
     setEditForm({
       title: doc.title,
-      documentTypeId: doc.documentTypeId ?? "",
+      documentTypeId: normalizedTypeId,
       expiresAt: toDateInputValue(doc.expiresAt)
     });
     setVersioningDocId(null);
@@ -266,10 +348,20 @@ export default function ClientDocumentsPanel({
   }
 
   function beginVersion(doc: ClientDocumentRow) {
+    const normalizedTypeId =
+      doc.documentTypeId && documentTypeNameById.has(doc.documentTypeId)
+        ? doc.documentTypeId
+        : effectiveDocumentTypeOptions.find(
+            (option) =>
+              option.name ===
+              (clientType === ClientProfileType.COMPANY
+                ? mapCompanyDocumentTypeLabel(doc.documentTypeName ?? "")
+                : (doc.documentTypeName ?? "Sin tipo"))
+          )?.id ?? "";
     setVersioningDocId(doc.id);
     setVersionForm({
       title: doc.title,
-      documentTypeId: doc.documentTypeId ?? "",
+      documentTypeId: normalizedTypeId,
       expiresAt: toDateInputValue(doc.expiresAt),
       newFileUrl: "",
       newFileAssetId: "",
@@ -348,10 +440,22 @@ export default function ClientDocumentsPanel({
 
   function createMissingDocument(item: RequiredChecklistItem) {
     if (!canEditDocs) return;
+    const normalizedTypeId =
+      item.documentTypeId && documentTypeNameById.has(item.documentTypeId)
+        ? item.documentTypeId
+        : effectiveDocumentTypeOptions.find(
+            (option) =>
+              option.name ===
+              (clientType === ClientProfileType.COMPANY
+                ? mapCompanyDocumentTypeLabel(item.documentTypeName)
+                : item.documentTypeName)
+          )?.id ?? "";
     setForm((prev) => ({
       ...prev,
-      title: prev.title.trim() ? prev.title : item.documentTypeName,
-      documentTypeId: item.documentTypeId
+      title:
+        prev.title.trim() ||
+        (clientType === ClientProfileType.COMPANY ? mapCompanyDocumentTypeLabel(item.documentTypeName) : item.documentTypeName),
+      documentTypeId: normalizedTypeId
     }));
   }
 
@@ -399,7 +503,9 @@ export default function ClientDocumentsPanel({
                 <article key={item.ruleId} className="rounded-lg border border-slate-200 bg-white p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">{item.documentTypeName}</p>
+                      <p className="truncate text-sm font-semibold text-slate-900">
+                        {clientType === ClientProfileType.COMPANY ? mapCompanyDocumentTypeLabel(item.documentTypeName) : item.documentTypeName}
+                      </p>
                       <p className="text-xs text-slate-500">
                         Peso {item.weight} · Aprobación {item.requiresApproval ? "sí" : "no"} · Vencimiento {item.requiresExpiry ? "sí" : "no"}
                       </p>
@@ -428,320 +534,380 @@ export default function ClientDocumentsPanel({
           </section>
         )}
 
-        {canViewDocs && documents.length > 0 && (
+        {canViewDocs && (
           <div className="mt-4 space-y-3">
-            {documents.map((doc) => {
-              const expiresAt = doc.expiresAt ? new Date(doc.expiresAt) : null;
-              const isExpired = expiresAt ? expiresAt < today : false;
-              const isExpiring = expiresAt ? expiresAt >= today && expiresAt <= expiringUntil : false;
-              const hasFile = Boolean(doc.fileUrl || doc.fileAssetId);
-              const expirationStatus = !hasFile ? "Faltante" : isExpired ? "Vencido" : isExpiring ? "Por vencer" : "Vigente";
-              const history = (historyByDocument?.[doc.id] ?? []).slice(0, 5);
-              const isEditing = editingDocId === doc.id;
-              const isVersioning = versioningDocId === doc.id;
-              const isRejecting = rejectingDocId === doc.id;
+            <div className="grid gap-3 rounded-xl border border-slate-200 bg-[#F8FAFC] p-3 md:grid-cols-2 lg:grid-cols-12">
+              <div className="space-y-1 lg:col-span-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Buscar</p>
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Buscar por título o tipo..."
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25"
+                />
+              </div>
+              <div className="space-y-1 lg:col-span-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Tipo de documento</p>
+                <SearchableMultiSelect
+                  value={selectedTypeFilters}
+                  onChange={setSelectedTypeFilters}
+                  options={filterTypeOptions}
+                  placeholder="Filtrar por tipo"
+                />
+              </div>
+              <div className="space-y-1 lg:col-span-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Estado</p>
+                <select
+                  value={expiryFilter}
+                  onChange={(event) => setExpiryFilter(event.target.value as ExpiryFilterValue)}
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25"
+                >
+                  <option value="all">Todos</option>
+                  <option value="valid">Vigente</option>
+                  <option value="expiring">Vence pronto</option>
+                  <option value="expired">Vencido</option>
+                  <option value="no_expiry">Sin vencimiento</option>
+                </select>
+              </div>
+            </div>
 
-              return (
-                <article key={doc.id} className="rounded-xl border border-slate-200 bg-white p-4">
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">
-                        {doc.title} <span className="text-xs font-medium text-slate-500">v{doc.version}</span>
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {doc.documentTypeName ? `${doc.documentTypeName} · ` : ""}
-                        {expiresAt ? `Vence: ${expiresAt.toLocaleDateString()}` : "Sin vencimiento"} · Creado {" "}
-                        {new Date(doc.createdAt).toLocaleDateString()}
-                      </p>
-                      {doc.supersededAt && (
-                        <p className="mt-1 text-xs text-slate-500">
-                          Reemplazado el {new Date(doc.supersededAt).toLocaleString()}
-                          {doc.supersededByDocumentId
-                            ? ` · Reemplazado por v${versionByDocumentId.get(doc.supersededByDocumentId) ?? "?"}`
-                            : ""}
-                        </p>
-                      )}
-                      {doc.approvalStatus === "REJECTED" && doc.rejectionReason && (
-                        <p className="mt-1 text-xs text-rose-700">Motivo rechazo: {doc.rejectionReason}</p>
-                      )}
-                    </div>
+            {filteredDocuments.length > 0 ? (
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-[#F8FAFC] text-xs uppercase tracking-[0.2em] text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Título</th>
+                        <th className="px-3 py-2 text-left">Tipo</th>
+                        <th className="px-3 py-2 text-left">Vencimiento</th>
+                        <th className="px-3 py-2 text-left">Estado</th>
+                        <th className="px-3 py-2 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredDocuments.map((doc) => {
+                        const expiresAt = doc.expiresAt ? new Date(doc.expiresAt) : null;
+                        const expiryStatus = getExpiryStatus({ expiresAt: doc.expiresAt, today, expiringUntil });
+                        const hasFile = Boolean(doc.fileUrl || doc.fileAssetId);
+                        const displayTypeName =
+                          clientType === ClientProfileType.COMPANY
+                            ? mapCompanyDocumentTypeLabel(doc.documentTypeName ?? "")
+                            : (doc.documentTypeName ?? "Sin tipo");
+                        const history = (historyByDocument?.[doc.id] ?? []).slice(0, 5);
+                        const isEditing = editingDocId === doc.id;
+                        const isVersioning = versioningDocId === doc.id;
+                        const isRejecting = rejectingDocId === doc.id;
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold", expirationTone(expirationStatus))}>
-                        {expirationStatus}
-                      </span>
-                      <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold", approvalTone(doc.approvalStatus))}>
-                        {approvalLabel(doc.approvalStatus)}
-                      </span>
+                        return (
+                          <Fragment key={doc.id}>
+                            <tr className="border-t border-slate-100">
+                              <td className="px-3 py-3 align-top">
+                                <p className="font-semibold text-slate-900">
+                                  {doc.title} <span className="text-xs font-medium text-slate-500">v{doc.version}</span>
+                                </p>
+                                {doc.supersededAt ? (
+                                  <p className="text-xs text-slate-500">
+                                    Reemplazado el {new Date(doc.supersededAt).toLocaleDateString()}
+                                  </p>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-3 align-top">
+                                <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                  {displayTypeName}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 align-top text-slate-700">
+                                {expiresAt ? expiresAt.toLocaleDateString() : "Sin vencimiento"}
+                              </td>
+                              <td className="px-3 py-3 align-top">
+                                <div className="flex flex-wrap gap-1">
+                                  <span className={cn("rounded-full border px-2.5 py-1 text-xs font-semibold", expirationTone(hasFile ? getExpiryLabel(expiryStatus) : "Faltante"))}>
+                                    {hasFile ? getExpiryLabel(expiryStatus) : "Faltante"}
+                                  </span>
+                                  <span className={cn("rounded-full border px-2.5 py-1 text-xs font-semibold", approvalTone(doc.approvalStatus))}>
+                                    {approvalLabel(doc.approvalStatus)}
+                                  </span>
+                                </div>
+                                {doc.approvalStatus === "REJECTED" && doc.rejectionReason ? (
+                                  <p className="mt-1 text-xs text-rose-700">Motivo: {doc.rejectionReason}</p>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-3 align-top">
+                                <div className="flex flex-wrap justify-end gap-1">
+                                  {doc.fileUrl ? (
+                                    <Link
+                                      href={doc.fileUrl}
+                                      target="_blank"
+                                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                                    >
+                                      Ver
+                                    </Link>
+                                  ) : (
+                                    <span className="px-2 text-xs text-slate-500">Sin archivo</span>
+                                  )}
 
-                      {doc.fileUrl ? (
-                        <Link
-                          href={doc.fileUrl}
-                          target="_blank"
-                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-diagnostics-secondary hover:text-diagnostics-corporate"
-                        >
-                          Ver archivo
-                        </Link>
-                      ) : (
-                        <span className="text-xs text-slate-500">Sin archivo</span>
-                      )}
+                                  {canEditDocs && !doc.supersededAt ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => beginEdit(doc)}
+                                      disabled={isPending}
+                                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                                    >
+                                      <PencilLine size={13} />
+                                      Editar
+                                    </button>
+                                  ) : null}
+                                  {canEditDocs && !doc.supersededAt ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => beginVersion(doc)}
+                                      disabled={isPending}
+                                      className="inline-flex items-center gap-1 rounded-full border border-[#4aadf5] bg-[#f1f8ff] px-3 py-1 text-xs font-semibold text-[#2e75ba] hover:bg-[#e3f1ff]"
+                                    >
+                                      <RefreshCw size={13} />
+                                      Versión
+                                    </button>
+                                  ) : null}
+                                  {canApproveDocs && !doc.supersededAt && doc.approvalStatus !== "APPROVED" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => approveDocument(doc.id)}
+                                      disabled={isPending}
+                                      className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                                    >
+                                      <CheckCircle2 size={13} />
+                                      Aprobar
+                                    </button>
+                                  ) : null}
+                                  {canApproveDocs && !doc.supersededAt && doc.approvalStatus !== "REJECTED" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => beginReject(doc.id)}
+                                      disabled={isPending}
+                                      className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                    >
+                                      <XCircle size={13} />
+                                      Rechazar
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>
 
-                      {canEditDocs && !doc.supersededAt && (
-                        <button
-                          type="button"
-                          onClick={() => beginEdit(doc)}
-                          disabled={isPending}
-                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-                        >
-                          <PencilLine size={13} />
-                          Editar
-                        </button>
-                      )}
+                            {(isEditing || isVersioning || isRejecting || history.length > 0) && (
+                              <tr className="border-t border-slate-100 bg-[#F8FAFC]">
+                                <td colSpan={5} className="px-3 py-3">
+                                  {isEditing && canEditDocs ? (
+                                    <div className="space-y-3 rounded-lg border border-[#dce7f5] bg-white p-3">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Editar metadata</p>
+                                      <input
+                                        value={editForm.title}
+                                        onChange={(e) => setEditForm((prev) => ({ ...prev, title: e.target.value }))}
+                                        placeholder="Título *"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+                                      />
 
-                      {canEditDocs && !doc.supersededAt && (
-                        <button
-                          type="button"
-                          onClick={() => beginVersion(doc)}
-                          disabled={isPending}
-                          className="inline-flex items-center gap-1 rounded-full border border-[#4aadf5] bg-[#f1f8ff] px-3 py-1 text-xs font-semibold text-[#2e75ba] hover:bg-[#e3f1ff]"
-                        >
-                          <RefreshCw size={13} />
-                          Reemplazar versión
-                        </button>
-                      )}
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <select
+                                          value={editForm.documentTypeId}
+                                          onChange={(e) => setEditForm((prev) => ({ ...prev, documentTypeId: e.target.value }))}
+                                          disabled={doc.approvalStatus === "APPROVED"}
+                                          className={cn(
+                                            "h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700",
+                                            doc.approvalStatus === "APPROVED" && "cursor-not-allowed bg-slate-100 text-slate-500"
+                                          )}
+                                        >
+                                          <option value="">Sin tipo</option>
+                                          {effectiveDocumentTypeOptions.map((opt) => (
+                                            <option key={opt.id} value={opt.id}>
+                                              {opt.name}
+                                            </option>
+                                          ))}
+                                        </select>
 
-                      {canApproveDocs && !doc.supersededAt && doc.approvalStatus !== "APPROVED" && (
-                        <button
-                          type="button"
-                          onClick={() => approveDocument(doc.id)}
-                          disabled={isPending}
-                          className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                        >
-                          <CheckCircle2 size={13} />
-                          Aprobar
-                        </button>
-                      )}
+                                        <DateField
+                                          value={editForm.expiresAt}
+                                          onChange={(value) => setEditForm((prev) => ({ ...prev, expiresAt: value }))}
+                                          disabled={doc.approvalStatus === "APPROVED"}
+                                          inputClassName={cn(
+                                            "h-11",
+                                            doc.approvalStatus === "APPROVED" && "cursor-not-allowed bg-slate-100 text-slate-500"
+                                          )}
+                                        />
+                                      </div>
 
-                      {canApproveDocs && !doc.supersededAt && doc.approvalStatus !== "REJECTED" && (
-                        <button
-                          type="button"
-                          onClick={() => beginReject(doc.id)}
-                          disabled={isPending}
-                          className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                        >
-                          <XCircle size={13} />
-                          Rechazar
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                                      {doc.approvalStatus === "APPROVED" ? (
+                                        <p className="text-xs text-[#2e75ba]">
+                                          Documento aprobado: para cambiar archivo/tipo/vencimiento usa &quot;Reemplazar versión&quot;.
+                                        </p>
+                                      ) : null}
 
-                  {isEditing && canEditDocs && (
-                    <div className="mt-3 space-y-3 rounded-lg border border-[#dce7f5] bg-[#f8fafc] p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Editar metadata</p>
-                      <input
-                        value={editForm.title}
-                        onChange={(e) => setEditForm((prev) => ({ ...prev, title: e.target.value }))}
-                        placeholder="Título *"
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-                      />
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => saveEdit(doc)}
+                                          disabled={!editForm.title.trim() || isPending}
+                                          className={cn(
+                                            "rounded-full bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white",
+                                            (!editForm.title.trim() || isPending) && "cursor-not-allowed opacity-60"
+                                          )}
+                                        >
+                                          Guardar cambios
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingDocId(null)}
+                                          disabled={isPending}
+                                          className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                                        >
+                                          Cancelar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : null}
 
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <select
-                          value={editForm.documentTypeId}
-                          onChange={(e) => setEditForm((prev) => ({ ...prev, documentTypeId: e.target.value }))}
-                          disabled={doc.approvalStatus === "APPROVED"}
-                          className={cn(
-                            "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700",
-                            doc.approvalStatus === "APPROVED" && "cursor-not-allowed bg-slate-100 text-slate-500"
-                          )}
-                        >
-                          <option value="">Sin tipo</option>
-                          {documentTypeOptions.map((opt) => (
-                            <option key={opt.id} value={opt.id}>
-                              {opt.name}
-                            </option>
-                          ))}
-                        </select>
+                                  {isVersioning && canEditDocs ? (
+                                    <div className="space-y-3 rounded-lg border border-[#4aadf5]/40 bg-white p-3">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Nueva versión (trazable)</p>
 
-                        <input
-                          type="date"
-                          value={editForm.expiresAt}
-                          onChange={(e) => setEditForm((prev) => ({ ...prev, expiresAt: e.target.value }))}
-                          disabled={doc.approvalStatus === "APPROVED"}
-                          className={cn(
-                            "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700",
-                            doc.approvalStatus === "APPROVED" && "cursor-not-allowed bg-slate-100 text-slate-500"
-                          )}
-                        />
-                      </div>
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <input
+                                          value={versionForm.title}
+                                          onChange={(e) => setVersionForm((prev) => ({ ...prev, title: e.target.value }))}
+                                          placeholder="Título"
+                                          className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+                                        />
+                                        <select
+                                          value={versionForm.documentTypeId}
+                                          onChange={(e) => setVersionForm((prev) => ({ ...prev, documentTypeId: e.target.value }))}
+                                          className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+                                        >
+                                          <option value="">Sin tipo</option>
+                                          {effectiveDocumentTypeOptions.map((opt) => (
+                                            <option key={opt.id} value={opt.id}>
+                                              {opt.name}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <DateField
+                                          value={versionForm.expiresAt}
+                                          onChange={(value) => setVersionForm((prev) => ({ ...prev, expiresAt: value }))}
+                                          inputClassName="h-11"
+                                        />
+                                      </div>
 
-                      {doc.approvalStatus === "APPROVED" && (
-                        <p className="text-xs text-[#2e75ba]">
-                          Documento aprobado: para cambiar archivo/tipo/vencimiento usa &quot;Reemplazar versión&quot;.
-                        </p>
-                      )}
+                                      <UploadField
+                                        value={versionForm.newFileUrl || undefined}
+                                        onChange={(url, info) => {
+                                          setVersionForm((prev) => ({
+                                            ...prev,
+                                            newFileUrl: url,
+                                            newFileAssetId: info?.assetId ?? "",
+                                            newOriginalName: info?.name ?? ""
+                                          }));
+                                        }}
+                                        helperText="Adjunta el archivo de la nueva versión (obligatorio)."
+                                        disabled={isPending}
+                                      />
 
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => saveEdit(doc)}
-                          disabled={!editForm.title.trim() || isPending}
-                          className={cn(
-                            "rounded-full bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white",
-                            (!editForm.title.trim() || isPending) && "cursor-not-allowed opacity-60"
-                          )}
-                        >
-                          Guardar cambios
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingDocId(null)}
-                          disabled={isPending}
-                          className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={saveVersion}
+                                          disabled={isPending || (!versionForm.newFileUrl && !versionForm.newFileAssetId)}
+                                          className={cn(
+                                            "rounded-full bg-[#2e75ba] px-4 py-2 text-sm font-semibold text-white",
+                                            (isPending || (!versionForm.newFileUrl && !versionForm.newFileAssetId)) && "cursor-not-allowed opacity-60"
+                                          )}
+                                        >
+                                          Crear versión
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setVersioningDocId(null)}
+                                          disabled={isPending}
+                                          className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                                        >
+                                          Cancelar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : null}
 
-                  {isVersioning && canEditDocs && (
-                    <div className="mt-3 space-y-3 rounded-lg border border-[#4aadf5]/40 bg-[#f1f8ff] p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Nueva versión (trazable)</p>
+                                  {isRejecting && canApproveDocs ? (
+                                    <div className="space-y-3 rounded-lg border border-rose-200 bg-rose-50 p-3">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Motivo de rechazo (obligatorio)</p>
+                                      <textarea
+                                        value={rejectReason}
+                                        onChange={(e) => setRejectReason(e.target.value)}
+                                        placeholder="Escribe el motivo (mínimo 5 caracteres)..."
+                                        className="min-h-[88px] w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                      />
 
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <input
-                          value={versionForm.title}
-                          onChange={(e) => setVersionForm((prev) => ({ ...prev, title: e.target.value }))}
-                          placeholder="Título"
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-                        />
-                        <select
-                          value={versionForm.documentTypeId}
-                          onChange={(e) => setVersionForm((prev) => ({ ...prev, documentTypeId: e.target.value }))}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-                        >
-                          <option value="">Sin tipo</option>
-                          {documentTypeOptions.map((opt) => (
-                            <option key={opt.id} value={opt.id}>
-                              {opt.name}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="date"
-                          value={versionForm.expiresAt}
-                          onChange={(e) => setVersionForm((prev) => ({ ...prev, expiresAt: e.target.value }))}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                        />
-                      </div>
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={rejectDocument}
+                                          disabled={isPending || rejectReason.trim().length < 5}
+                                          className={cn(
+                                            "rounded-full border border-rose-300 bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-700",
+                                            (isPending || rejectReason.trim().length < 5) && "cursor-not-allowed opacity-60"
+                                          )}
+                                        >
+                                          Confirmar rechazo
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setRejectingDocId(null)}
+                                          disabled={isPending}
+                                          className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                                        >
+                                          Cancelar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : null}
 
-                      <UploadField
-                        value={versionForm.newFileUrl || undefined}
-                        onChange={(url, info) => {
-                          setVersionForm((prev) => ({
-                            ...prev,
-                            newFileUrl: url,
-                            newFileAssetId: info?.assetId ?? "",
-                            newOriginalName: info?.name ?? ""
-                          }));
-                        }}
-                        helperText="Adjunta el archivo de la nueva versión (obligatorio)."
-                        disabled={isPending}
-                      />
-
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={saveVersion}
-                          disabled={isPending || (!versionForm.newFileUrl && !versionForm.newFileAssetId)}
-                          className={cn(
-                            "rounded-full bg-[#2e75ba] px-4 py-2 text-sm font-semibold text-white",
-                            (isPending || (!versionForm.newFileUrl && !versionForm.newFileAssetId)) && "cursor-not-allowed opacity-60"
-                          )}
-                        >
-                          Crear versión
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setVersioningDocId(null)}
-                          disabled={isPending}
-                          className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {isRejecting && canApproveDocs && (
-                    <div className="mt-3 space-y-3 rounded-lg border border-rose-200 bg-rose-50 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Motivo de rechazo (obligatorio)</p>
-                      <textarea
-                        value={rejectReason}
-                        onChange={(e) => setRejectReason(e.target.value)}
-                        placeholder="Escribe el motivo (mínimo 5 caracteres)..."
-                        className="min-h-[88px] w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm text-slate-700"
-                      />
-
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={rejectDocument}
-                          disabled={isPending || rejectReason.trim().length < 5}
-                          className={cn(
-                            "rounded-full border border-rose-300 bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-700",
-                            (isPending || rejectReason.trim().length < 5) && "cursor-not-allowed opacity-60"
-                          )}
-                        >
-                          Confirmar rechazo
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRejectingDocId(null)}
-                          disabled={isPending}
-                          className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <p className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      <History size={12} />
-                      Historial
-                    </p>
-                    {history.length ? (
-                      <div className="mt-1 space-y-1">
-                        {history.map((entry) => {
-                          const details = summarizeHistoryMetadata(entry.metadata);
-                          return (
-                            <p key={entry.id} className="text-xs text-slate-600">
-                              <span className="font-semibold text-slate-800">{formatHistoryAction(entry.action)}</span> · {" "}
-                              {entry.actorLabel ?? "Sistema"} · {new Date(entry.timestamp).toLocaleString()}
-                              {details ? ` · ${details}` : ""}
-                            </p>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="mt-1 text-xs text-slate-500">Sin movimientos auditados para este documento.</p>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
+                                  <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                                    <p className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                      <History size={12} />
+                                      Historial
+                                    </p>
+                                    {history.length ? (
+                                      <div className="mt-1 space-y-1">
+                                        {history.map((entry) => {
+                                          const details = summarizeHistoryMetadata(entry.metadata);
+                                          return (
+                                            <p key={entry.id} className="text-xs text-slate-600">
+                                              <span className="font-semibold text-slate-800">{formatHistoryAction(entry.action)}</span> · {" "}
+                                              {entry.actorLabel ?? "Sistema"} · {new Date(entry.timestamp).toLocaleString()}
+                                              {details ? ` · ${details}` : ""}
+                                            </p>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <p className="mt-1 text-xs text-slate-500">Sin movimientos auditados para este documento.</p>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-diagnostics-background px-4 py-3 text-sm text-slate-700">
+                {documents.length === 0 ? "No hay documentos cargados todavía." : "No hay documentos que coincidan con los filtros seleccionados."}
+              </div>
+            )}
           </div>
         )}
 
-        {canViewDocs && documents.length === 0 && (
-          <div className="mt-4 rounded-xl border border-slate-200 bg-diagnostics-background px-4 py-3 text-sm text-slate-700">
-            No hay documentos cargados todavía.
-          </div>
-        )}
       </section>
 
       {!canEditDocs && canViewDocs && (
@@ -758,8 +924,8 @@ export default function ClientDocumentsPanel({
             <input
               value={form.title}
               onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
-              placeholder="Escribe el título del documento (ej. DPI, RTU, Recibo de luz...)"
-              className="md:col-span-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
+              placeholder="Título del documento (ej. Patente de comercio, RTU, Licencia sanitaria)"
+              className="h-11 md:col-span-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/30"
             />
 
             <div className="space-y-2">
@@ -767,10 +933,10 @@ export default function ClientDocumentsPanel({
               <select
                 value={form.documentTypeId}
                 onChange={(e) => setForm((prev) => ({ ...prev, documentTypeId: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/30"
               >
                 <option value="">Sin tipo</option>
-                {documentTypeOptions.map((opt) => (
+                {effectiveDocumentTypeOptions.map((opt) => (
                   <option key={opt.id} value={opt.id}>
                     {opt.name}
                   </option>
@@ -784,11 +950,10 @@ export default function ClientDocumentsPanel({
                 <Calendar size={14} className="text-diagnostics-secondary" />
                 Vencimiento (opcional)
               </p>
-              <input
-                type="date"
+              <DateField
                 value={form.expiresAt}
-                onChange={(e) => setForm((prev) => ({ ...prev, expiresAt: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
+                onChange={(value) => setForm((prev) => ({ ...prev, expiresAt: value }))}
+                inputClassName="h-11"
               />
             </div>
           </div>

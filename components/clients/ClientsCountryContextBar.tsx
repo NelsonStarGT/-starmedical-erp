@@ -21,7 +21,14 @@ type ApiResponse<T> = {
 
 export default function ClientsCountryContextBar() {
   const pathname = usePathname();
-  const hideForCreate = Boolean(pathname?.includes("/personas/nuevo") || pathname?.endsWith("/nuevo"));
+  const normalizedPath = pathname ?? "";
+  const detailSegment = normalizedPath.split("/").filter(Boolean)[2] ?? "";
+  const isClientDetailRoute =
+    normalizedPath.startsWith("/admin/clientes/") &&
+    !["dashboard", "lista", "personas", "empresas", "instituciones", "aseguradoras", "configuracion", "reportes", "buscar"].includes(detailSegment) &&
+    !normalizedPath.endsWith("/nuevo");
+  const hideForCreate = Boolean(normalizedPath.includes("/personas/nuevo") || normalizedPath.endsWith("/nuevo"));
+  const hideBar = hideForCreate || isClientDetailRoute;
   const [countries, setCountries] = useState<CountryApiItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +36,7 @@ export default function ClientsCountryContextBar() {
 
   useEffect(() => {
     let cancelled = false;
-    if (hideForCreate) return () => undefined;
+    if (hideBar) return () => undefined;
 
     async function loadCountries() {
       setLoading(true);
@@ -63,7 +70,7 @@ export default function ClientsCountryContextBar() {
     return () => {
       cancelled = true;
     };
-  }, [country?.countryId, hideForCreate, setCountry]);
+  }, [country?.countryId, hideBar, setCountry]);
 
   const currentCountryId = country?.countryId || "";
   const helper = useMemo(() => {
@@ -74,7 +81,7 @@ export default function ClientsCountryContextBar() {
   }, [countries.length, error, loading]);
 
   // En formularios de alta (".../nuevo") el contexto visual duplica país de identidad/residencia.
-  if (hideForCreate) return null;
+  if (hideBar) return null;
 
   return (
     <section className="rounded-2xl border border-[#dce7f5] bg-white px-4 py-3 shadow-sm">

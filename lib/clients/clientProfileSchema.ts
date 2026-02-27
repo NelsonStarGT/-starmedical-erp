@@ -6,6 +6,8 @@ const warnedPhotoColumnContexts = new Set<string>();
 
 const CLIENT_PROFILE_SELECT_BASE = {
   id: true,
+  tenantId: true,
+  clientCode: true,
   type: true,
   companyName: true,
   tradeName: true,

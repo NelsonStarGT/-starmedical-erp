@@ -59,9 +59,10 @@ async function safeClientDocumentCount(args: unknown): Promise<number> {
   }
 }
 
-function buildIncompleteWhereSafe(type: ClientProfileType) {
+function buildIncompleteWhereSafe(type: ClientProfileType, tenantId?: string) {
   if (type === ClientProfileType.PERSON) {
     return {
+      ...(tenantId ? { tenantId } : {}),
       deletedAt: null,
       type: ClientProfileType.PERSON,
       OR: [{ firstName: null }, { lastName: null }, { dpi: null }, { phone: null }]
@@ -70,6 +71,7 @@ function buildIncompleteWhereSafe(type: ClientProfileType) {
 
   if (type === ClientProfileType.COMPANY) {
     return {
+      ...(tenantId ? { tenantId } : {}),
       deletedAt: null,
       type: ClientProfileType.COMPANY,
       OR: [{ companyName: null }, { nit: null }, { address: null }]
@@ -78,6 +80,7 @@ function buildIncompleteWhereSafe(type: ClientProfileType) {
 
   if (type === ClientProfileType.INSURER) {
     return {
+      ...(tenantId ? { tenantId } : {}),
       deletedAt: null,
       type: ClientProfileType.INSURER,
       OR: [{ companyName: null }, { nit: null }]
@@ -85,24 +88,26 @@ function buildIncompleteWhereSafe(type: ClientProfileType) {
   }
 
   return {
+    ...(tenantId ? { tenantId } : {}),
     deletedAt: null,
     type: ClientProfileType.INSTITUTION,
     OR: [{ companyName: null }, { address: null }]
   };
 }
 
-function buildAnyIncompleteWhereSafe() {
+function buildAnyIncompleteWhereSafe(tenantId?: string) {
   return {
     OR: [
-      buildIncompleteWhereSafe(ClientProfileType.PERSON),
-      buildIncompleteWhereSafe(ClientProfileType.COMPANY),
-      buildIncompleteWhereSafe(ClientProfileType.INSURER),
-      buildIncompleteWhereSafe(ClientProfileType.INSTITUTION)
+      buildIncompleteWhereSafe(ClientProfileType.PERSON, tenantId),
+      buildIncompleteWhereSafe(ClientProfileType.COMPANY, tenantId),
+      buildIncompleteWhereSafe(ClientProfileType.INSURER, tenantId),
+      buildIncompleteWhereSafe(ClientProfileType.INSTITUTION, tenantId)
     ]
   };
 }
 
-export async function getClientsHomeKpis(): Promise<ClientsHomeKpis> {
+export async function getClientsHomeKpis(input?: { tenantId?: string }): Promise<ClientsHomeKpis> {
+  const tenantId = input?.tenantId?.trim() || undefined;
   const now = new Date();
   const todayStart = startOfDay(now);
   const expiringUntil = addDays(todayStart, 30);
@@ -133,72 +138,72 @@ export async function getClientsHomeKpis(): Promise<ClientsHomeKpis> {
     insurerDocsExpiring,
     institutionDocsExpiring
   ] = await Promise.all([
-    prisma.clientProfile.count({ where: { deletedAt: null } }),
-    safeClientProfileCount({ where: buildAnyIncompleteWhereSafe() }, "clients.dashboard.incompleteClients"),
-    safeClientDocumentCount({ where: { expiresAt: { lt: todayStart }, client: { deletedAt: null } } }),
+    prisma.clientProfile.count({ where: { ...(tenantId ? { tenantId } : {}), deletedAt: null } }),
+    safeClientProfileCount({ where: buildAnyIncompleteWhereSafe(tenantId) }, "clients.dashboard.incompleteClients"),
+    safeClientDocumentCount({ where: { expiresAt: { lt: todayStart }, client: { ...(tenantId ? { tenantId } : {}), deletedAt: null } } }),
     safeClientDocumentCount({
-      where: { expiresAt: { gte: todayStart, lte: expiringUntil }, client: { deletedAt: null } }
+      where: { expiresAt: { gte: todayStart, lte: expiringUntil }, client: { ...(tenantId ? { tenantId } : {}), deletedAt: null } }
     }),
-    prisma.clientProfile.count({ where: { deletedAt: null, createdAt: { gte: since7 } } }),
-    prisma.clientProfile.count({ where: { deletedAt: null, createdAt: { gte: since30 } } }),
+    prisma.clientProfile.count({ where: { ...(tenantId ? { tenantId } : {}), deletedAt: null, createdAt: { gte: since7 } } }),
+    prisma.clientProfile.count({ where: { ...(tenantId ? { tenantId } : {}), deletedAt: null, createdAt: { gte: since30 } } }),
 
-    prisma.clientProfile.count({ where: { deletedAt: null, type: ClientProfileType.PERSON } }),
-    prisma.clientProfile.count({ where: { deletedAt: null, type: ClientProfileType.COMPANY } }),
-    prisma.clientProfile.count({ where: { deletedAt: null, type: ClientProfileType.INSURER } }),
-    prisma.clientProfile.count({ where: { deletedAt: null, type: ClientProfileType.INSTITUTION } }),
+    prisma.clientProfile.count({ where: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.PERSON } }),
+    prisma.clientProfile.count({ where: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.COMPANY } }),
+    prisma.clientProfile.count({ where: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.INSURER } }),
+    prisma.clientProfile.count({ where: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.INSTITUTION } }),
 
     safeClientProfileCount(
-      { where: buildIncompleteWhereSafe(ClientProfileType.PERSON) },
+      { where: buildIncompleteWhereSafe(ClientProfileType.PERSON, tenantId) },
       "clients.dashboard.incomplete.person"
     ),
     safeClientProfileCount(
-      { where: buildIncompleteWhereSafe(ClientProfileType.COMPANY) },
+      { where: buildIncompleteWhereSafe(ClientProfileType.COMPANY, tenantId) },
       "clients.dashboard.incomplete.company"
     ),
     safeClientProfileCount(
-      { where: buildIncompleteWhereSafe(ClientProfileType.INSURER) },
+      { where: buildIncompleteWhereSafe(ClientProfileType.INSURER, tenantId) },
       "clients.dashboard.incomplete.insurer"
     ),
     safeClientProfileCount(
-      { where: buildIncompleteWhereSafe(ClientProfileType.INSTITUTION) },
+      { where: buildIncompleteWhereSafe(ClientProfileType.INSTITUTION, tenantId) },
       "clients.dashboard.incomplete.institution"
     ),
 
     safeClientDocumentCount({
-      where: { expiresAt: { lt: todayStart }, client: { deletedAt: null, type: ClientProfileType.PERSON } }
+      where: { expiresAt: { lt: todayStart }, client: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.PERSON } }
     }),
     safeClientDocumentCount({
-      where: { expiresAt: { lt: todayStart }, client: { deletedAt: null, type: ClientProfileType.COMPANY } }
+      where: { expiresAt: { lt: todayStart }, client: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.COMPANY } }
     }),
     safeClientDocumentCount({
-      where: { expiresAt: { lt: todayStart }, client: { deletedAt: null, type: ClientProfileType.INSURER } }
+      where: { expiresAt: { lt: todayStart }, client: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.INSURER } }
     }),
     safeClientDocumentCount({
-      where: { expiresAt: { lt: todayStart }, client: { deletedAt: null, type: ClientProfileType.INSTITUTION } }
+      where: { expiresAt: { lt: todayStart }, client: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.INSTITUTION } }
     }),
 
     safeClientDocumentCount({
       where: {
         expiresAt: { gte: todayStart, lte: expiringUntil },
-        client: { deletedAt: null, type: ClientProfileType.PERSON }
+        client: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.PERSON }
       }
     }),
     safeClientDocumentCount({
       where: {
         expiresAt: { gte: todayStart, lte: expiringUntil },
-        client: { deletedAt: null, type: ClientProfileType.COMPANY }
+        client: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.COMPANY }
       }
     }),
     safeClientDocumentCount({
       where: {
         expiresAt: { gte: todayStart, lte: expiringUntil },
-        client: { deletedAt: null, type: ClientProfileType.INSURER }
+        client: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.INSURER }
       }
     }),
     safeClientDocumentCount({
       where: {
         expiresAt: { gte: todayStart, lte: expiringUntil },
-        client: { deletedAt: null, type: ClientProfileType.INSTITUTION }
+        client: { ...(tenantId ? { tenantId } : {}), deletedAt: null, type: ClientProfileType.INSTITUTION }
       }
     })
   ]);

@@ -251,7 +251,7 @@ export default function DashboardClient({ siteId, capabilities, initialSnapshot 
         <section className="rounded-xl border border-[#e5edf8] bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-[#2e75ba]">Top 10 más tiempo esperando</h3>
-            <Link href="/admin/reception" className="text-xs font-semibold text-[#2e75ba] hover:text-[#4aadf5]">
+            <Link href="/admin/recepcion" className="text-xs font-semibold text-[#2e75ba] hover:text-[#4aadf5]">
               Ver lista operativa
             </Link>
           </div>
@@ -288,7 +288,7 @@ export default function DashboardClient({ siteId, capabilities, initialSnapshot 
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-2">
                           <Link
-                            href={`/admin/reception/visit/${row.visitId}`}
+                            href={`/admin/recepcion/visit/${row.visitId}`}
                             className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
                           >
                             Ver

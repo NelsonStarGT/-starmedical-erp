@@ -71,7 +71,7 @@ export const navSections: NavSection[] = [
     sectionLabel: "Administración",
     items: [
       { label: "Usuarios", href: "/admin/usuarios", icon: Users },
-      { label: "Recepción", href: "/admin/reception", icon: ListChecks, requiresReception: true },
+      { label: "Recepción", href: "/admin/recepcion", icon: ListChecks, requiresReception: true },
       { label: "RRHH", href: "/hr", icon: Users2 },
       { label: "Inventario", href: "/admin/inventario", icon: LayoutGrid },
       { label: "Finanzas", href: "/admin/finanzas", icon: Banknote },

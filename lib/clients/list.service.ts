@@ -31,6 +31,7 @@ export type ClientListAlertFilter =
   | "";
 
 export type ClientListQuery = {
+  tenantId?: string;
   type: ClientProfileType;
   q?: string;
   statusId?: string;
@@ -42,6 +43,7 @@ export type ClientListQuery = {
 
 export type ClientListItem = {
   id: string;
+  clientCode: string | null;
   type: ClientProfileType;
   displayName: string;
   identifier: string | null;
@@ -217,6 +219,7 @@ function buildSearchWhere(type: ClientProfileType, q: string): Prisma.ClientProf
     return {
       type,
       OR: [
+        { clientCode: { contains: needle, mode: "insensitive" } },
         { firstName: { contains: needle, mode: "insensitive" } },
         { middleName: { contains: needle, mode: "insensitive" } },
         { lastName: { contains: needle, mode: "insensitive" } },
@@ -242,6 +245,7 @@ function buildSearchWhere(type: ClientProfileType, q: string): Prisma.ClientProf
     return {
       type,
       OR: [
+        { clientCode: { contains: needle, mode: "insensitive" } },
         { companyName: { contains: needle, mode: "insensitive" } },
         { tradeName: { contains: needle, mode: "insensitive" } },
         { nit: { contains: needle, mode: "insensitive" } },
@@ -265,6 +269,7 @@ function buildSearchWhere(type: ClientProfileType, q: string): Prisma.ClientProf
     return {
       type,
       OR: [
+        { clientCode: { contains: needle, mode: "insensitive" } },
         { companyName: { contains: needle, mode: "insensitive" } },
         { tradeName: { contains: needle, mode: "insensitive" } },
         { nit: { contains: needle, mode: "insensitive" } },
@@ -287,6 +292,7 @@ function buildSearchWhere(type: ClientProfileType, q: string): Prisma.ClientProf
   return {
     type,
     OR: [
+      { clientCode: { contains: needle, mode: "insensitive" } },
       { companyName: { contains: needle, mode: "insensitive" } },
       { nit: { contains: needle, mode: "insensitive" } },
       { clientEmails: { some: { isActive: true, valueNormalized: { contains: needle.toLowerCase() } } } },
@@ -351,6 +357,7 @@ export async function listClients(query: ClientListQuery): Promise<ClientListRes
 
   const baseWhere: Prisma.ClientProfileWhereInput = {
     ...buildSearchWhere(query.type, q),
+    ...(query.tenantId ? { tenantId: query.tenantId } : {}),
     ...(query.includeArchived ? {} : { deletedAt: null }),
     ...(query.statusId ? { statusId: query.statusId } : {})
   };
@@ -528,6 +535,7 @@ export async function listClients(query: ClientListQuery): Promise<ClientListRes
     ...(isRequiredAlert ? {} : { skip: offset, take: pageSize }),
     select: {
       id: true,
+      clientCode: true,
       type: true,
       companyName: true,
       tradeName: true,
@@ -662,6 +670,7 @@ export async function listClients(query: ClientListQuery): Promise<ClientListRes
 
     return {
       id: row.id,
+      clientCode: row.clientCode,
       type: row.type,
       displayName,
       identifier,

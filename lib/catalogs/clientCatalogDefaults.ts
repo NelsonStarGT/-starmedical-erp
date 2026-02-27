@@ -1,5 +1,7 @@
 import { ClientCatalogType } from "@prisma/client";
 import { ECONOMIC_ACTIVITIES } from "@/lib/catalogs/economicActivities";
+import { INSTITUTION_TYPES } from "@/lib/catalogs/institutionTypes";
+import { INSTITUTIONAL_REGIMES } from "@/lib/catalogs/institutionalRegimes";
 
 type DefaultCatalogItem = {
   id?: string;
@@ -34,22 +36,6 @@ const BASE_COMPANY_CATEGORIES = ["Corporativo", "PyME", "Operador", "ONG", "Gobi
 const BASE_RELATION_TYPES = ["Cliente", "Proveedor", "Aliado", "Socio comercial", "Otro"] as const;
 const BASE_RELATIONSHIP_TYPES = ["Padre", "Madre", "Tutor", "Encargado", "Conyuge", "Hermano", "Otro"] as const;
 const BASE_SOCIAL_NETWORKS = ["Facebook", "Instagram", "TikTok", "LinkedIn", "X", "YouTube", "Otra red"] as const;
-const BASE_INSTITUTION_CATEGORIES = [
-  "Colegio",
-  "Universidad",
-  "Hospital",
-  "Laboratorio",
-  "Clinica",
-  "Centro medico",
-  "ONG",
-  "Fundacion",
-  "Gobierno",
-  "Iglesia",
-  "Cooperativa",
-  "Asociacion",
-  "Institucion"
-] as const;
-const BASE_INSTITUTION_TYPES = ["Privada", "Publica", "Internacional"] as const;
 const BASE_PROFESSIONS = ["Medico", "Ingeniero", "Docente", "Abogado", "Contador", "Administrativo"] as const;
 const BASE_CLIENT_STATUS = ["Activo"] as const;
 
@@ -64,8 +50,8 @@ const CATALOG_DEFAULTS: Partial<Record<ClientCatalogType, ReadonlyArray<DefaultC
   [ClientCatalogType.RELATIONSHIP_TYPE]: BASE_RELATIONSHIP_TYPES.map((label) => ({ label })),
   [ClientCatalogType.SOCIAL_NETWORK]: BASE_SOCIAL_NETWORKS.map((label) => ({ label })),
   [ClientCatalogType.SECTOR]: ECONOMIC_ACTIVITIES.map((item) => ({ id: item.id, label: item.label })),
-  [ClientCatalogType.INSTITUTION_CATEGORY]: BASE_INSTITUTION_CATEGORIES.map((label) => ({ label })),
-  [ClientCatalogType.INSTITUTION_TYPE]: BASE_INSTITUTION_TYPES.map((label) => ({ label })),
+  [ClientCatalogType.INSTITUTION_CATEGORY]: INSTITUTIONAL_REGIMES.map((item) => ({ id: item.id, label: item.label })),
+  [ClientCatalogType.INSTITUTION_TYPE]: INSTITUTION_TYPES.map((item) => ({ id: item.id, label: item.label })),
   [ClientCatalogType.PERSON_PROFESSION]: BASE_PROFESSIONS.map((label) => ({ label })),
   [ClientCatalogType.CLIENT_STATUS]: BASE_CLIENT_STATUS.map((label) => ({ label }))
 };

@@ -49,6 +49,7 @@ export const MODULE_TABS_VISUAL = {
     { key: "agenda", label: "Agenda / Citas" },
     { key: "operativa", label: "Lista operativa" },
     { key: "colas", label: "Colas" },
+    { key: "registros", label: "Registros" },
     { key: "configuracion", label: "Configuración" }
   ],
   rrhh: [

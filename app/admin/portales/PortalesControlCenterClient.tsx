@@ -1764,7 +1764,7 @@ export default function PortalesControlCenterClient({ userName, capabilities, ac
           </div>
           <div className="flex items-end justify-end">
             <Link
-              href="/admin/reception/solicitudes-portal"
+              href="/admin/recepcion/solicitudes-portal"
               className="inline-flex rounded-xl border border-[#d2e2f6] bg-white px-4 py-2 text-sm font-semibold text-[#2e75ba]"
             >
               Ir a Recepción
@@ -1819,7 +1819,7 @@ export default function PortalesControlCenterClient({ userName, capabilities, ac
                   <td className="px-3 py-2 text-slate-700">{row.reason}</td>
                   <td className="px-3 py-2">
                     <Link
-                      href="/admin/reception/solicitudes-portal"
+                      href="/admin/recepcion/solicitudes-portal"
                       className="rounded-full border border-[#d2e2f6] bg-white px-3 py-1 text-xs font-semibold text-[#2e75ba]"
                     >
                       Abrir en Recepción

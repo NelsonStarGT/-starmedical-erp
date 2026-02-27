@@ -3,6 +3,7 @@ import { ClientProfileType } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
 import { listClients, type ClientListAlertFilter, type ClientListItem } from "@/lib/clients/list.service";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 
@@ -55,6 +56,7 @@ function parseSelectedIds(qs: URLSearchParams) {
 }
 
 async function fetchAllItems(params: {
+  tenantId: string;
   type: ClientProfileType;
   q: string;
   statusId?: string;
@@ -67,6 +69,7 @@ async function fetchAllItems(params: {
 
   while (true) {
     const current = await listClients({
+      tenantId: params.tenantId,
       type: params.type,
       q: params.q,
       statusId: params.statusId,
@@ -101,10 +104,12 @@ export async function GET(req: NextRequest) {
   const alert = sanitizeAlert(qs.get("alert"));
   const includeArchived = qs.get("includeArchived") === "1";
   const selectedIds = parseSelectedIds(qs);
+  const tenantId = tenantIdFromUser(auth.user);
 
   const items = selectedIds.length
     ? (() => {
         return fetchAllItems({
+          tenantId,
           type,
           q,
           statusId,
@@ -116,6 +121,7 @@ export async function GET(req: NextRequest) {
         });
       })()
     : fetchAllItems({
+        tenantId,
         type,
         q,
         statusId,
@@ -126,6 +132,7 @@ export async function GET(req: NextRequest) {
 
   const header = [
     "ID",
+    "Correlativo",
     "Tipo",
     "Nombre",
     "Identificador",
@@ -145,6 +152,7 @@ export async function GET(req: NextRequest) {
 
   const rows = resolvedItems.map((item) => [
     item.id,
+    item.clientCode,
     item.type,
     item.displayName,
     item.identifier,

@@ -78,6 +78,8 @@ export type ClientsConfigManagerPayload = {
   jobTitlesSource: "db" | "fallback";
   pbxCategories: ConfigDirectoryRow[];
   pbxCategoriesSource: "db" | "fallback";
+  insurerLines: ConfigDirectoryRow[];
+  insurerLinesSource: "db" | "fallback";
   correlations: ConfigCorrelationRow[];
   rulesConfig: {
     alertDays30: number;
@@ -101,8 +103,8 @@ const CATALOG_TITLE_BY_TYPE: Record<ClientCatalogType, string> = {
   ACADEMIC_LEVEL: "Niveles académicos",
   COMPANY_CATEGORY: "Categorías de empresa",
   SECTOR: "Actividades económicas",
-  INSTITUTION_CATEGORY: "Categorías de institución",
-  INSTITUTION_TYPE: "Tipos de institución",
+  INSTITUTION_CATEGORY: "Régimen institucional",
+  INSTITUTION_TYPE: "Tipo de institución",
   CLIENT_STATUS: "Estados de cliente",
   DOCUMENT_TYPE: "Tipos de documento",
   LOCATION_TYPE: "Tipos de ubicación",
@@ -155,6 +157,8 @@ export default function ClientsConfigManagerRenderer({
         jobTitlesSource={payload.jobTitlesSource}
         pbxCategories={payload.pbxCategories}
         pbxCategoriesSource={payload.pbxCategoriesSource}
+        insurerLines={payload.insurerLines}
+        insurerLinesSource={payload.insurerLinesSource}
         correlations={payload.correlations}
         focusMode="department"
       />
@@ -170,6 +174,8 @@ export default function ClientsConfigManagerRenderer({
         jobTitlesSource={payload.jobTitlesSource}
         pbxCategories={payload.pbxCategories}
         pbxCategoriesSource={payload.pbxCategoriesSource}
+        insurerLines={payload.insurerLines}
+        insurerLinesSource={payload.insurerLinesSource}
         correlations={payload.correlations}
         focusMode="jobTitle"
       />
@@ -185,8 +191,27 @@ export default function ClientsConfigManagerRenderer({
         jobTitlesSource={payload.jobTitlesSource}
         pbxCategories={payload.pbxCategories}
         pbxCategoriesSource={payload.pbxCategoriesSource}
+        insurerLines={payload.insurerLines}
+        insurerLinesSource={payload.insurerLinesSource}
         correlations={payload.correlations}
         focusMode="pbxCategory"
+      />
+    );
+  }
+
+  if (managerComponentId === "directories:insurer_lines") {
+    return (
+      <ClientContactDirectoriesManager
+        departments={payload.departments}
+        departmentsSource={payload.departmentsSource}
+        jobTitles={payload.jobTitles}
+        jobTitlesSource={payload.jobTitlesSource}
+        pbxCategories={payload.pbxCategories}
+        pbxCategoriesSource={payload.pbxCategoriesSource}
+        insurerLines={payload.insurerLines}
+        insurerLinesSource={payload.insurerLinesSource}
+        correlations={payload.correlations}
+        focusMode="insurerLine"
       />
     );
   }
@@ -200,6 +225,8 @@ export default function ClientsConfigManagerRenderer({
         jobTitlesSource={payload.jobTitlesSource}
         pbxCategories={payload.pbxCategories}
         pbxCategoriesSource={payload.pbxCategoriesSource}
+        insurerLines={payload.insurerLines}
+        insurerLinesSource={payload.insurerLinesSource}
         correlations={payload.correlations}
         focusMode="correlation"
       />

@@ -20,7 +20,8 @@ export default function GeoSearchSelect({
   disabled,
   error,
   onChange,
-  className
+  className,
+  triggerId
 }: {
   label: string;
   value: string;
@@ -30,6 +31,7 @@ export default function GeoSearchSelect({
   error?: string;
   onChange: (value: string) => void;
   className?: string;
+  triggerId?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -100,6 +102,7 @@ export default function GeoSearchSelect({
     <div className={cn("space-y-1", className)} ref={containerRef}>
       <p className="text-xs font-semibold text-slate-500">{label}</p>
       <button
+        id={triggerId}
         ref={triggerRef}
         type="button"
         onClick={() => {

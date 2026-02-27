@@ -104,6 +104,8 @@ function createEmptyManagerPayload(): ClientsConfigManagerPayload {
     jobTitlesSource: "db",
     pbxCategories: [],
     pbxCategoriesSource: "db",
+    insurerLines: [],
+    insurerLinesSource: "db",
     correlations: [],
     rulesConfig: {
       alertDays30: 30,
@@ -163,6 +165,13 @@ function computeManagerCounts(managerComponentId: string, payload: ClientsConfig
     return {
       activeItems: payload.pbxCategories.filter((item) => item.isActive).length,
       inactiveItems: payload.pbxCategories.filter((item) => !item.isActive).length
+    };
+  }
+
+  if (managerComponentId === "directories:insurer_lines") {
+    return {
+      activeItems: payload.insurerLines.filter((item) => item.isActive).length,
+      inactiveItems: payload.insurerLines.filter((item) => !item.isActive).length
     };
   }
 
@@ -238,6 +247,7 @@ function computeManagerSource(managerComponentId: string, payload: ClientsConfig
   if (managerComponentId === "directories:departments") return payload.departmentsSource;
   if (managerComponentId === "directories:job_titles") return payload.jobTitlesSource;
   if (managerComponentId === "directories:pbx_categories") return payload.pbxCategoriesSource;
+  if (managerComponentId === "directories:insurer_lines") return payload.insurerLinesSource;
   if (managerComponentId === "directories:correlation") {
     return payload.departmentsSource === "db" && payload.jobTitlesSource === "db" ? "db" : "fallback";
   }
@@ -454,6 +464,8 @@ export default async function ClientesConfiguracionPage({
       jobTitlesSource: contactDirectories.jobTitlesSource,
       pbxCategories: contactDirectories.pbxCategories,
       pbxCategoriesSource: contactDirectories.pbxCategoriesSource,
+      insurerLines: contactDirectories.insurerLines,
+      insurerLinesSource: contactDirectories.insurerLinesSource,
       correlations: contactDirectories.correlations,
       rulesConfig,
       requiredRules: requiredRules.map((rule) => ({
@@ -574,13 +586,16 @@ export default async function ClientesConfiguracionPage({
       jobTitlesSource: contactDirectories.jobTitlesSource,
       pbxCategories: contactDirectories.pbxCategories,
       pbxCategoriesSource: contactDirectories.pbxCategoriesSource,
+      insurerLines: contactDirectories.insurerLines,
+      insurerLinesSource: contactDirectories.insurerLinesSource,
       correlations: contactDirectories.correlations
     };
 
     sectionSources = [
       { id: "departments", label: "Áreas", source: contactDirectories.departmentsSource },
       { id: "jobTitles", label: "Cargos", source: contactDirectories.jobTitlesSource },
-      { id: "pbxCategories", label: "Categorías PBX", source: contactDirectories.pbxCategoriesSource }
+      { id: "pbxCategories", label: "Categorías PBX", source: contactDirectories.pbxCategoriesSource },
+      { id: "insurerLines", label: "Ramos de seguro", source: contactDirectories.insurerLinesSource }
     ];
 
     const entries = visibleEntries.map((entry) => {

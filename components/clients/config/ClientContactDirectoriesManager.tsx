@@ -6,16 +6,20 @@ import { PlusCircle, Save } from "lucide-react";
 import {
   actionCreateClientContactDepartment,
   actionCreateClientContactJobTitle,
+  actionCreateClientInsurerLine,
   actionCreateClientPbxCategory,
   actionLoadClientContactDepartmentDefaults,
   actionLoadClientContactJobTitleDefaults,
+  actionLoadClientInsurerLineDefaults,
   actionLoadClientPbxCategoryDefaults,
   actionSaveClientContactDepartmentJobTitles,
   actionSetClientContactDepartmentActive,
   actionSetClientContactJobTitleActive,
+  actionSetClientInsurerLineActive,
   actionSetClientPbxCategoryActive,
   actionUpdateClientContactDepartment,
   actionUpdateClientContactJobTitle,
+  actionUpdateClientInsurerLine,
   actionUpdateClientPbxCategory
 } from "@/app/admin/clientes/actions";
 import ConfigDataTable, { type ConfigDataTableAction, type ConfigDataTableColumn } from "@/components/clients/config/ConfigDataTable";
@@ -37,7 +41,7 @@ type CorrelationRow = {
   jobTitleIds: string[];
 };
 
-type DirectoryPanelMode = "department" | "jobTitle" | "pbxCategory";
+type DirectoryPanelMode = "department" | "jobTitle" | "pbxCategory" | "insurerLine";
 type DirectoryAction = "edit" | "toggle";
 
 const DIRECTORY_COLUMNS: ConfigDataTableColumn<DirectoryRow>[] = [
@@ -135,6 +139,13 @@ function DirectoryPanel({
             description,
             sortOrder: Number(sortOrder)
           });
+        } else if (mode === "insurerLine") {
+          await actionCreateClientInsurerLine({
+            name,
+            code,
+            description,
+            sortOrder: Number(sortOrder)
+          });
         } else {
           await actionCreateClientPbxCategory({
             name,
@@ -169,6 +180,14 @@ function DirectoryPanel({
           });
         } else if (mode === "jobTitle") {
           await actionUpdateClientContactJobTitle({
+            id: editingId,
+            name: editDraft.name,
+            code: editDraft.code,
+            description: editDraft.description,
+            sortOrder: Number(editDraft.sortOrder)
+          });
+        } else if (mode === "insurerLine") {
+          await actionUpdateClientInsurerLine({
             id: editingId,
             name: editDraft.name,
             code: editDraft.code,
@@ -214,6 +233,8 @@ function DirectoryPanel({
             await actionSetClientContactDepartmentActive({ id: row.id, isActive: !row.isActive });
           } else if (mode === "jobTitle") {
             await actionSetClientContactJobTitleActive({ id: row.id, isActive: !row.isActive });
+          } else if (mode === "insurerLine") {
+            await actionSetClientInsurerLineActive({ id: row.id, isActive: !row.isActive });
           } else {
             await actionSetClientPbxCategoryActive({ id: row.id, isActive: !row.isActive });
           }
@@ -392,6 +413,8 @@ export default function ClientContactDirectoriesManager({
   jobTitlesSource = "db",
   pbxCategories,
   pbxCategoriesSource = "db",
+  insurerLines,
+  insurerLinesSource = "db",
   correlations,
   focusMode = "all"
 }: {
@@ -401,8 +424,10 @@ export default function ClientContactDirectoriesManager({
   jobTitlesSource?: "db" | "fallback";
   pbxCategories: DirectoryRow[];
   pbxCategoriesSource?: "db" | "fallback";
+  insurerLines: DirectoryRow[];
+  insurerLinesSource?: "db" | "fallback";
   correlations: CorrelationRow[];
-  focusMode?: "all" | "department" | "jobTitle" | "pbxCategory" | "correlation";
+  focusMode?: "all" | "department" | "jobTitle" | "pbxCategory" | "insurerLine" | "correlation";
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -496,7 +521,7 @@ export default function ClientContactDirectoriesManager({
         <div
           className={cn(
             "grid gap-4",
-            focusMode === "all" ? "xl:grid-cols-3" : "xl:grid-cols-1"
+            focusMode === "all" ? "xl:grid-cols-4" : "xl:grid-cols-1"
           )}
         >
           {focusMode === "all" || focusMode === "department" ? (
@@ -531,6 +556,17 @@ export default function ClientContactDirectoriesManager({
               onLoadDefaults={actionLoadClientPbxCategoryDefaults}
             />
           ) : null}
+
+          {focusMode === "all" || focusMode === "insurerLine" ? (
+            <DirectoryPanel
+              mode="insurerLine"
+              title="D) Ramos de seguro"
+              subtitle="Clasificación operativa para Aseguradoras (ramo principal/adicionales)."
+              rows={insurerLines}
+              source={insurerLinesSource}
+              onLoadDefaults={actionLoadClientInsurerLineDefaults}
+            />
+          ) : null}
         </div>
       ) : null}
 
@@ -539,7 +575,7 @@ export default function ClientContactDirectoriesManager({
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2e75ba]">Directorios</p>
 
           <ConfigDataTable
-            title="D) Correlación Área ↔ Cargo"
+            title="E) Correlación Área ↔ Cargo"
             subtitle="Si un área no tiene correlación activa, en formularios se muestran todos los cargos."
             columns={[
               {

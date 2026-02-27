@@ -83,7 +83,7 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
     const params = new URLSearchParams();
     params.set("mode", "existing");
     if (effectiveSearchQuery) params.set("q", effectiveSearchQuery);
-    return `/admin/reception/check-in?${params.toString()}`;
+    return `/admin/recepcion/check-in?${params.toString()}`;
   }, [effectiveSearchQuery]);
 
   useEffect(() => {
@@ -446,7 +446,7 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
               {vitalsSaved ? "Ver signos" : "Registrar signos (obligatorio)"}
             </button>
             <Link
-              href={`/admin/reception/visit/${visitId}`}
+              href={`/admin/recepcion/visit/${visitId}`}
               className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-[#2e75ba] hover:text-[#4aadf5]"
             >
               Ver detalle <ArrowUpRight size={16} />

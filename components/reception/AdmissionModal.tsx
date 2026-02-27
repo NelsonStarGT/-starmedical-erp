@@ -143,7 +143,7 @@ export default function AdmissionModal() {
           notes: notes.trim() || undefined
         });
         closeAdmission();
-        router.push(`/admin/reception/visit/${result.visitId}`);
+        router.push(`/admin/recepcion/visit/${result.visitId}`);
       } catch (err) {
         setError((err as Error)?.message || "No se pudo registrar la admisión.");
       }

@@ -1,12 +1,16 @@
 "use server";
 
+import crypto from "crypto";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import {
   AppointmentStatus,
+  ClientCatalogType,
+  ClientSelfRegistrationStatus,
   ClientProfileType,
   OperationalArea,
   PatientSex,
+  Prisma,
   VisitPriority,
   QueueItemStatus,
   VisitEventType,
@@ -16,6 +20,12 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies, type SessionUser } from "@/lib/auth";
 import { auditLog } from "@/lib/audit";
 import { isAdmin } from "@/lib/rbac";
+import {
+  actionCreateCompanyClient,
+  actionCreateInstitutionClient,
+  actionCreateInsurerClient,
+  actionCreatePersonClient
+} from "@/app/admin/clientes/actions";
 import { dpiSchema } from "@/lib/validation/identity";
 import { createVisitEvent } from "@/lib/reception/visit-events.service";
 import { createVisitFromAppointment, createWalkInVisit, transitionVisitStatus } from "@/lib/reception/visit.service";
@@ -55,9 +65,23 @@ import {
 import { RECEPTION_ACTIVE_BRANCH_COOKIE_NAME, resolveReceptionBranchId } from "@/lib/reception/active-branch";
 import { assertReceptionBranchSelectable, listReceptionBranchOptions } from "@/lib/reception/branches.service";
 import {
+  createClientRegistrationInviteToken,
+  hashClientRegistrationToken
+} from "@/lib/reception/clientRegistrationTokens";
+import {
+  getClientSelfRegistrationFormOptions,
+  getSelfRegistrationIdentityHints,
+  validateClientSelfRegistrationPayload,
+  type ClientSelfRegistrationPayload
+} from "@/lib/reception/clientSelfRegistration";
+import { INSTITUTIONAL_REGIMES } from "@/lib/catalogs/institutionalRegimes";
+import { INSTITUTION_TYPES } from "@/lib/catalogs/institutionTypes";
+import { tenantIdFromUser } from "@/lib/tenant";
+import {
   assertCapabilities,
   assertCapability,
   assertReceptionAccess,
+  assertRoleAtLeast,
   assertVisitTransitionPermission,
   buildReceptionContext
 } from "@/lib/reception/rbac";
@@ -219,6 +243,43 @@ export type PortalAppointmentRequestRow = {
   scheduledAt: string;
 };
 
+export type ClientSelfRegistrationQueueRow = {
+  id: string;
+  inviteId: string;
+  provisionalCode: string;
+  clientType: ClientProfileType;
+  status: ClientSelfRegistrationStatus;
+  displayName: string | null;
+  documentRef: string | null;
+  email: string | null;
+  phone: string | null;
+  createdAt: string;
+  inviteExpiresAt: string;
+  reviewedAt: string | null;
+  rejectedReason: string | null;
+  assignedClient: {
+    id: string;
+    clientCode: string | null;
+    label: string;
+  } | null;
+};
+
+export type ClientSelfRegistrationDuplicateRow = {
+  id: string;
+  clientCode: string | null;
+  type: ClientProfileType;
+  label: string;
+  nit: string | null;
+  dpi: string | null;
+  email: string | null;
+  phone: string | null;
+};
+
+export type ClientSelfRegistrationDetail = ClientSelfRegistrationQueueRow & {
+  payloadJson: unknown;
+  duplicates: ClientSelfRegistrationDuplicateRow[];
+};
+
 type PortalRequestsScope = "all" | "active";
 
 type ReceptionDashboardAppointmentRange = "today" | "next24h" | "next7d";
@@ -352,15 +413,16 @@ function normalizeFilters(filters?: WorklistFilters): WorklistFilters | undefine
 
 function revalidateReception(paths?: string[]) {
   const targets = paths && paths.length ? paths : [
-    "/admin/reception/dashboard",
-    "/admin/reception",
-    "/admin/reception/companies",
-    "/admin/reception/worklist",
-    "/admin/reception/queues",
-    "/admin/reception/check-in",
-    "/admin/reception/appointments",
-    "/admin/reception/solicitudes-portal",
-    "/admin/reception/settings"
+    "/admin/recepcion/dashboard",
+    "/admin/recepcion",
+    "/admin/recepcion/companies",
+    "/admin/recepcion/worklist",
+    "/admin/recepcion/queues",
+    "/admin/recepcion/check-in",
+    "/admin/recepcion/appointments",
+    "/admin/recepcion/solicitudes-portal",
+    "/admin/recepcion/registros",
+    "/admin/recepcion/settings"
   ];
   targets.forEach((path) => revalidatePath(path));
 }
@@ -1112,7 +1174,7 @@ export async function actionMarkAppointmentArrival(input: MarkAppointmentArrival
     };
   });
 
-  revalidateReception(["/admin/reception"]);
+  revalidateReception(["/admin/recepcion"]);
   return result;
 }
 
@@ -1229,6 +1291,107 @@ function formatDashboardPatientName(input: {
     secondLastName: input.secondLastName
   });
   return fallbackName || "Paciente";
+}
+
+function formatClientDisplayLabel(input: {
+  type: ClientProfileType;
+  clientCode: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  secondLastName: string | null;
+  companyName: string | null;
+  tradeName: string | null;
+}) {
+  const codeTag = input.clientCode ? `[${input.clientCode}] ` : "";
+  if (input.type === ClientProfileType.PERSON) {
+    const fullName = [input.firstName, input.middleName, input.lastName, input.secondLastName]
+      .map((part) => part?.trim() || "")
+      .filter(Boolean)
+      .join(" ");
+    return `${codeTag}${fullName || "Persona"}`;
+  }
+  const businessName = input.companyName?.trim() || input.tradeName?.trim() || "Cliente";
+  return `${codeTag}${businessName}`;
+}
+
+function normalizeClientSelfRegistrationStatusFilter(value?: string | null) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (!normalized || normalized === "ALL") return null;
+  if (
+    normalized === ClientSelfRegistrationStatus.PENDING ||
+    normalized === ClientSelfRegistrationStatus.APPROVED ||
+    normalized === ClientSelfRegistrationStatus.REJECTED
+  ) {
+    return normalized as ClientSelfRegistrationStatus;
+  }
+  throw new Error("Estado de registro inválido.");
+}
+
+function parseClientSelfRegistrationPayload(
+  clientType: ClientProfileType,
+  payloadJson: Prisma.JsonValue
+): ClientSelfRegistrationPayload {
+  return validateClientSelfRegistrationPayload({
+    clientType,
+    payload: payloadJson
+  });
+}
+
+async function ensureInstitutionCatalogIdForApproval(input: {
+  id: string | null;
+  type: "INSTITUTION_TYPE" | "INSTITUTION_CATEGORY";
+}) {
+  const targetId = String(input.id ?? "").trim();
+  if (!targetId) return null;
+
+  const current = await prisma.clientCatalogItem.findFirst({
+    where: {
+      id: targetId,
+      type: input.type
+    },
+    select: { id: true }
+  });
+  if (current) {
+    await prisma.clientCatalogItem.update({
+      where: { id: current.id },
+      data: { isActive: true }
+    });
+    return current.id;
+  }
+
+  const fallbackName =
+    input.type === ClientCatalogType.INSTITUTION_TYPE
+      ? INSTITUTION_TYPES.find((item) => item.id === targetId)?.label
+      : INSTITUTIONAL_REGIMES.find((item) => item.id === targetId)?.label;
+
+  if (!fallbackName) return null;
+
+  const byName = await prisma.clientCatalogItem.findFirst({
+    where: {
+      type: input.type,
+      name: fallbackName
+    },
+    select: { id: true }
+  });
+  if (byName) {
+    await prisma.clientCatalogItem.update({
+      where: { id: byName.id },
+      data: { isActive: true }
+    });
+    return byName.id;
+  }
+
+  const created = await prisma.clientCatalogItem.create({
+    data: {
+      id: targetId,
+      type: input.type,
+      name: fallbackName,
+      isActive: true
+    },
+    select: { id: true }
+  });
+  return created.id;
 }
 
 function resolvePortalRequestScope(inputScope?: string | null): PortalRequestsScope {
@@ -1487,7 +1650,7 @@ export async function actionCreateReceptionAppointment(input: CreateReceptionApp
   });
 
   // Revalidate agenda views in Recepción.
-  revalidateReception(["/admin/reception", "/admin/reception/appointments"]);
+  revalidateReception(["/admin/recepcion", "/admin/recepcion/appointments"]);
 
   const shouldArrive = Boolean(input.arrivedToday);
   if (!shouldArrive) {
@@ -1712,7 +1875,7 @@ export async function actionConfirmPortalAppointmentRequest(input: ConfirmPortal
     }
   });
 
-  revalidateReception(["/admin/reception/solicitudes-portal", "/admin/reception/appointments", "/admin/reception"]);
+  revalidateReception(["/admin/recepcion/solicitudes-portal", "/admin/recepcion/appointments", "/admin/recepcion"]);
   revalidatePath("/portal/app");
   revalidatePath("/portal/app/appointments");
   return {
@@ -1796,7 +1959,7 @@ export async function actionRejectPortalAppointmentRequest(input: RejectPortalAp
     }
   });
 
-  revalidateReception(["/admin/reception/solicitudes-portal", "/admin/reception/appointments", "/admin/reception"]);
+  revalidateReception(["/admin/recepcion/solicitudes-portal", "/admin/recepcion/appointments", "/admin/recepcion"]);
   revalidatePath("/portal/app");
   revalidatePath("/portal/app/appointments");
   return {
@@ -1924,7 +2087,7 @@ export async function actionSaveReceptionAppointmentVitals(input: SaveReceptionA
     }
   });
 
-  revalidateReception(["/admin/reception/appointments", "/admin/reception"]);
+  revalidateReception(["/admin/recepcion/appointments", "/admin/recepcion"]);
   return saved;
 }
 
@@ -1993,7 +2156,7 @@ export async function actionSaveReceptionVisitVitals(input: SaveReceptionVisitVi
     }
   });
 
-  revalidateReception(["/admin/reception", "/admin/reception/worklist", "/admin/reception/companies"]);
+  revalidateReception(["/admin/recepcion", "/admin/recepcion/worklist", "/admin/recepcion/companies"]);
   return saved;
 }
 
@@ -2084,7 +2247,7 @@ export async function actionCreatePatient(input: PatientCreateInput): Promise<Pa
     }
   });
 
-  revalidateReception(["/admin/reception/check-in"]);
+  revalidateReception(["/admin/recepcion/check-in"]);
   return saved;
 }
 
@@ -2124,7 +2287,7 @@ export async function actionSaveReceptionSlaSimple(input: ReceptionSlaSimpleInpu
     }
   });
 
-  revalidateReception(["/admin/reception/settings", "/admin/reception", "/admin/reception/dashboard"]);
+  revalidateReception(["/admin/recepcion/settings", "/admin/recepcion", "/admin/recepcion/dashboard"]);
   return result.after;
 }
 
@@ -2159,7 +2322,7 @@ export async function actionSaveReceptionSlaAdvanced(input: ReceptionSlaAdvanced
     }
   });
 
-  revalidateReception(["/admin/reception/settings", "/admin/reception", "/admin/reception/dashboard"]);
+  revalidateReception(["/admin/recepcion/settings", "/admin/recepcion", "/admin/recepcion/dashboard"]);
   return result.after;
 }
 
@@ -2187,7 +2350,7 @@ export async function actionRestoreReceptionSlaRecommended(siteId?: string) {
     }
   });
 
-  revalidateReception(["/admin/reception/settings", "/admin/reception", "/admin/reception/dashboard"]);
+  revalidateReception(["/admin/recepcion/settings", "/admin/recepcion", "/admin/recepcion/dashboard"]);
   return result.after;
 }
 
@@ -2259,12 +2422,507 @@ export async function actionSetReceptionActiveBranch(branchId: string) {
     httpOnly: false,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    path: "/admin/reception",
+    path: "/admin/recepcion",
     maxAge: 60 * 60 * 24 * 30
   });
 
   revalidateReception();
   return { ok: true, branchId: clean };
+}
+
+export async function actionCreateClientRegistrationInvite(input: {
+  clientType: ClientProfileType;
+  expiryDays?: number;
+  note?: string;
+}) {
+  const user = await requireUser();
+  assertCapability(user, "VISIT_CREATE");
+
+  const tenantId = tenantIdFromUser(user);
+  if (
+    input.clientType !== ClientProfileType.PERSON &&
+    input.clientType !== ClientProfileType.COMPANY &&
+    input.clientType !== ClientProfileType.INSTITUTION &&
+    input.clientType !== ClientProfileType.INSURER
+  ) {
+    throw new Error("Tipo de cliente inválido.");
+  }
+
+  const expiryDaysRaw = Number.isFinite(input.expiryDays) ? Number(input.expiryDays) : 7;
+  const expiryDays = Math.min(30, Math.max(1, Math.floor(expiryDaysRaw)));
+  const note = String(input.note ?? "").trim() || null;
+  if (note && note.length > 300) {
+    throw new Error("La nota no puede exceder 300 caracteres.");
+  }
+
+  const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
+
+  const created = await prisma.clientRegistrationInvite.create({
+    data: {
+      tenantId,
+      clientType: input.clientType,
+      tokenHash: `__pending__:${crypto.randomUUID()}`,
+      note,
+      expiresAt,
+      createdByUserId: user.id
+    },
+    select: {
+      id: true,
+      tenantId: true,
+      clientType: true,
+      note: true,
+      expiresAt: true
+    }
+  });
+
+  const token = createClientRegistrationInviteToken({
+    inviteId: created.id,
+    tenantId: created.tenantId,
+    clientType: created.clientType,
+    expiresAt: created.expiresAt
+  });
+  await prisma.clientRegistrationInvite.update({
+    where: { id: created.id },
+    data: {
+      tokenHash: hashClientRegistrationToken(token)
+    }
+  });
+
+  await auditLog({
+    action: "RECEPTION_CLIENT_REGISTRATION_INVITE_CREATED",
+    entityType: "ClientRegistrationInvite",
+    entityId: created.id,
+    user,
+    metadata: {
+      tenantId: created.tenantId,
+      clientType: created.clientType,
+      expiresAt: created.expiresAt.toISOString()
+    }
+  });
+
+  revalidateReception(["/admin/recepcion/registros"]);
+
+  return {
+    inviteId: created.id,
+    clientType: created.clientType,
+    note: created.note,
+    expiresAt: created.expiresAt.toISOString(),
+    token,
+    urlPath: `/r/registro/${encodeURIComponent(token)}`
+  };
+}
+
+export async function actionGetClientSelfRegistrationFormOptions() {
+  const user = await requireUser();
+  assertCapability(user, "VISIT_CREATE");
+  const tenantId = tenantIdFromUser(user);
+  return getClientSelfRegistrationFormOptions(tenantId);
+}
+
+export async function actionListClientSelfRegistrations(input?: {
+  status?: string;
+  q?: string;
+  take?: number;
+}) {
+  const user = await requireUser();
+  assertCapability(user, "VISIT_CREATE");
+  const tenantId = tenantIdFromUser(user);
+  const status = normalizeClientSelfRegistrationStatusFilter(input?.status);
+  const q = String(input?.q ?? "").trim();
+  const take = Math.min(200, Math.max(10, Math.floor(Number(input?.take ?? 80))));
+
+  const rows = await prisma.clientSelfRegistration.findMany({
+    where: {
+      tenantId,
+      ...(status ? { status } : {}),
+      ...(q
+        ? {
+            OR: [
+              { provisionalCode: { contains: q, mode: "insensitive" } },
+              { displayName: { contains: q, mode: "insensitive" } },
+              { documentRef: { contains: q, mode: "insensitive" } },
+              { email: { contains: q, mode: "insensitive" } },
+              { phone: { contains: q, mode: "insensitive" } }
+            ]
+          }
+        : {})
+    },
+    orderBy: [{ createdAt: "desc" }],
+    take,
+    select: {
+      id: true,
+      inviteId: true,
+      provisionalCode: true,
+      clientType: true,
+      status: true,
+      displayName: true,
+      documentRef: true,
+      email: true,
+      phone: true,
+      createdAt: true,
+      reviewedAt: true,
+      rejectedReason: true,
+      invite: { select: { expiresAt: true } },
+      assignedClient: {
+        select: {
+          id: true,
+          clientCode: true,
+          type: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          secondLastName: true,
+          companyName: true,
+          tradeName: true
+        }
+      }
+    }
+  });
+
+  return rows.map<ClientSelfRegistrationQueueRow>((row) => ({
+    id: row.id,
+    inviteId: row.inviteId,
+    provisionalCode: row.provisionalCode,
+    clientType: row.clientType,
+    status: row.status,
+    displayName: row.displayName,
+    documentRef: row.documentRef,
+    email: row.email,
+    phone: row.phone,
+    createdAt: row.createdAt.toISOString(),
+    inviteExpiresAt: row.invite.expiresAt.toISOString(),
+    reviewedAt: row.reviewedAt?.toISOString() ?? null,
+    rejectedReason: row.rejectedReason,
+    assignedClient: row.assignedClient
+      ? {
+          id: row.assignedClient.id,
+          clientCode: row.assignedClient.clientCode,
+          label: formatClientDisplayLabel({
+            type: row.assignedClient.type,
+            clientCode: row.assignedClient.clientCode,
+            firstName: row.assignedClient.firstName,
+            middleName: row.assignedClient.middleName,
+            lastName: row.assignedClient.lastName,
+            secondLastName: row.assignedClient.secondLastName,
+            companyName: row.assignedClient.companyName,
+            tradeName: row.assignedClient.tradeName
+          })
+        }
+      : null
+  }));
+}
+
+export async function actionGetClientSelfRegistrationDetail(registrationId: string): Promise<ClientSelfRegistrationDetail> {
+  const user = await requireUser();
+  assertCapability(user, "VISIT_CREATE");
+  const tenantId = tenantIdFromUser(user);
+  const id = String(registrationId || "").trim();
+  if (!id) throw new Error("Registro requerido.");
+
+  const row = await prisma.clientSelfRegistration.findFirst({
+    where: {
+      id,
+      tenantId
+    },
+    select: {
+      id: true,
+      inviteId: true,
+      provisionalCode: true,
+      clientType: true,
+      status: true,
+      displayName: true,
+      documentRef: true,
+      email: true,
+      phone: true,
+      payloadJson: true,
+      createdAt: true,
+      reviewedAt: true,
+      rejectedReason: true,
+      invite: { select: { expiresAt: true } },
+      assignedClient: {
+        select: {
+          id: true,
+          clientCode: true,
+          type: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          secondLastName: true,
+          companyName: true,
+          tradeName: true
+        }
+      }
+    }
+  });
+  if (!row) throw new Error("Registro no encontrado.");
+
+  const parsedPayload = parseClientSelfRegistrationPayload(row.clientType, row.payloadJson);
+  const hints = getSelfRegistrationIdentityHints(parsedPayload);
+
+  const duplicateWhere: Prisma.ClientProfileWhereInput[] = [];
+  if (hints.nit) duplicateWhere.push({ nit: hints.nit });
+  if (hints.dpi) duplicateWhere.push({ dpi: hints.dpi });
+  if (hints.email) duplicateWhere.push({ email: hints.email });
+  if (hints.phone) duplicateWhere.push({ phone: hints.phone });
+
+  const duplicates = duplicateWhere.length
+    ? await prisma.clientProfile.findMany({
+        where: {
+          tenantId,
+          deletedAt: null,
+          OR: duplicateWhere
+        },
+        orderBy: [{ updatedAt: "desc" }],
+        take: 12,
+        select: {
+          id: true,
+          clientCode: true,
+          type: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          secondLastName: true,
+          companyName: true,
+          tradeName: true,
+          nit: true,
+          dpi: true,
+          email: true,
+          phone: true
+        }
+      })
+    : [];
+
+  return {
+    id: row.id,
+    inviteId: row.inviteId,
+    provisionalCode: row.provisionalCode,
+    clientType: row.clientType,
+    status: row.status,
+    displayName: row.displayName,
+    documentRef: row.documentRef,
+    email: row.email,
+    phone: row.phone,
+    createdAt: row.createdAt.toISOString(),
+    inviteExpiresAt: row.invite.expiresAt.toISOString(),
+    reviewedAt: row.reviewedAt?.toISOString() ?? null,
+    rejectedReason: row.rejectedReason,
+    payloadJson: row.payloadJson,
+    assignedClient: row.assignedClient
+      ? {
+          id: row.assignedClient.id,
+          clientCode: row.assignedClient.clientCode,
+          label: formatClientDisplayLabel({
+            type: row.assignedClient.type,
+            clientCode: row.assignedClient.clientCode,
+            firstName: row.assignedClient.firstName,
+            middleName: row.assignedClient.middleName,
+            lastName: row.assignedClient.lastName,
+            secondLastName: row.assignedClient.secondLastName,
+            companyName: row.assignedClient.companyName,
+            tradeName: row.assignedClient.tradeName
+          })
+        }
+      : null,
+    duplicates: duplicates.map((item) => ({
+      id: item.id,
+      clientCode: item.clientCode,
+      type: item.type,
+      label: formatClientDisplayLabel({
+        type: item.type,
+        clientCode: item.clientCode,
+        firstName: item.firstName,
+        middleName: item.middleName,
+        lastName: item.lastName,
+        secondLastName: item.secondLastName,
+        companyName: item.companyName,
+        tradeName: item.tradeName
+      }),
+      nit: item.nit,
+      dpi: item.dpi,
+      email: item.email,
+      phone: item.phone
+    }))
+  };
+}
+
+export async function actionApproveClientSelfRegistration(input: { registrationId: string }) {
+  const user = await requireUser();
+  assertRoleAtLeast(user, "RECEPTION_SUPERVISOR", "aprobar registros");
+  const tenantId = tenantIdFromUser(user);
+  const registrationId = String(input.registrationId || "").trim();
+  if (!registrationId) throw new Error("Registro requerido.");
+
+  const registration = await prisma.clientSelfRegistration.findFirst({
+    where: {
+      id: registrationId,
+      tenantId
+    },
+    select: {
+      id: true,
+      tenantId: true,
+      status: true,
+      clientType: true,
+      payloadJson: true
+    }
+  });
+  if (!registration) throw new Error("Registro no encontrado.");
+  if (registration.status !== ClientSelfRegistrationStatus.PENDING) {
+    throw new Error("Solo se pueden aprobar registros pendientes.");
+  }
+
+  const payload = parseClientSelfRegistrationPayload(registration.clientType, registration.payloadJson);
+
+  let createdClientId: string;
+
+  if (payload.clientType === ClientProfileType.PERSON) {
+    const created = await actionCreatePersonClient({
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      dpi: payload.idValue,
+      phone: payload.phone,
+      email: payload.email ?? undefined,
+      addressGeneral: `${payload.address}, ${payload.city}, ${payload.department}, ${payload.country}`
+    });
+    createdClientId = created.id;
+  } else if (payload.clientType === ClientProfileType.COMPANY) {
+    const created = await actionCreateCompanyClient({
+      legalName: payload.legalName,
+      tradeName: payload.tradeName,
+      nit: payload.nit,
+      address: payload.address,
+      city: payload.city,
+      department: payload.department,
+      country: payload.country,
+      phone: payload.phone,
+      email: payload.email ?? undefined,
+      billingEmail: payload.email ?? undefined
+    });
+    createdClientId = created.id;
+  } else if (payload.clientType === ClientProfileType.INSTITUTION) {
+    const institutionTypeId = await ensureInstitutionCatalogIdForApproval({
+      id: payload.institutionTypeId,
+      type: ClientCatalogType.INSTITUTION_TYPE
+    });
+    if (!institutionTypeId) {
+      throw new Error("Tipo de institución inválido.");
+    }
+    const institutionRegimeId = await ensureInstitutionCatalogIdForApproval({
+      id: payload.institutionRegimeId,
+      type: ClientCatalogType.INSTITUTION_CATEGORY
+    });
+
+    const created = await actionCreateInstitutionClient({
+      name: payload.legalName,
+      tradeName: payload.publicName,
+      nit: payload.nit ?? undefined,
+      institutionTypeId,
+      institutionCategoryId: institutionRegimeId ?? undefined,
+      address: payload.address,
+      city: payload.city,
+      department: payload.department,
+      country: payload.country,
+      phone: payload.phone,
+      email: payload.email ?? undefined,
+      billingEmail: payload.email ?? undefined
+    });
+    createdClientId = created.id;
+  } else {
+    const created = await actionCreateInsurerClient({
+      legalName: payload.legalName,
+      tradeName: payload.tradeName ?? undefined,
+      nit: payload.nit,
+      address: payload.address,
+      city: payload.city,
+      department: payload.department,
+      country: payload.country,
+      phone: payload.phone,
+      email: payload.email ?? undefined,
+      billingEmail: payload.email ?? undefined,
+      insurerTypeId: payload.insurerTypeId,
+      insurerScope: payload.insurerScope ?? undefined,
+      insurerLinePrimaryCode: payload.insurerLinePrimaryCode
+    });
+    createdClientId = created.id;
+  }
+
+  await prisma.clientSelfRegistration.update({
+    where: { id: registration.id },
+    data: {
+      status: ClientSelfRegistrationStatus.APPROVED,
+      reviewedAt: new Date(),
+      reviewedByUserId: user.id,
+      assignedClientId: createdClientId,
+      rejectedReason: null
+    }
+  });
+
+  await auditLog({
+    action: "RECEPTION_CLIENT_SELF_REGISTRATION_APPROVED",
+    entityType: "ClientSelfRegistration",
+    entityId: registration.id,
+    user,
+    metadata: {
+      tenantId,
+      assignedClientId: createdClientId,
+      clientType: registration.clientType
+    }
+  });
+
+  revalidateReception(["/admin/recepcion/registros"]);
+  revalidatePath(`/admin/clientes/${createdClientId}`);
+  revalidatePath("/admin/clientes");
+
+  return {
+    registrationId: registration.id,
+    assignedClientId: createdClientId
+  };
+}
+
+export async function actionRejectClientSelfRegistration(input: {
+  registrationId: string;
+  reason: string;
+}) {
+  const user = await requireUser();
+  assertRoleAtLeast(user, "RECEPTION_SUPERVISOR", "rechazar registros");
+  const tenantId = tenantIdFromUser(user);
+  const registrationId = String(input.registrationId || "").trim();
+  const reason = String(input.reason || "").trim();
+  if (!registrationId) throw new Error("Registro requerido.");
+  if (reason.length < 5) throw new Error("Motivo de rechazo requerido (mínimo 5 caracteres).");
+
+  const updated = await prisma.clientSelfRegistration.updateMany({
+    where: {
+      id: registrationId,
+      tenantId,
+      status: ClientSelfRegistrationStatus.PENDING
+    },
+    data: {
+      status: ClientSelfRegistrationStatus.REJECTED,
+      rejectedReason: reason,
+      reviewedAt: new Date(),
+      reviewedByUserId: user.id
+    }
+  });
+  if (updated.count === 0) {
+    throw new Error("No se pudo rechazar: el registro no existe o ya fue procesado.");
+  }
+
+  await auditLog({
+    action: "RECEPTION_CLIENT_SELF_REGISTRATION_REJECTED",
+    entityType: "ClientSelfRegistration",
+    entityId: registrationId,
+    user,
+    metadata: {
+      tenantId,
+      reason
+    }
+  });
+
+  revalidateReception(["/admin/recepcion/registros"]);
+  return {
+    registrationId,
+    status: ClientSelfRegistrationStatus.REJECTED
+  };
 }
 
 async function getNextQueueByArea(siteId: string) {

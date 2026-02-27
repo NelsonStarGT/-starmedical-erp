@@ -21,24 +21,28 @@ export default function GeoCascadeFieldset({
   disabled,
   errors,
   className,
+  idPrefix,
   title = "Ubicación",
   subtitle = "Selecciona País → Departamento → Municipio",
   showPostalCode = true,
   requireCountry,
   requireAdmin1,
-  requireAdmin2
+  requireAdmin2,
+  onHasDivisionCatalogChange
 }: {
   value: GeoCascadeValue;
   onChange: (next: GeoCascadeValue) => void;
   disabled?: boolean;
   errors?: GeoCascadeErrors;
   className?: string;
+  idPrefix?: string;
   title?: string;
   subtitle?: string;
   showPostalCode?: boolean;
   requireCountry?: boolean;
   requireAdmin1?: boolean;
   requireAdmin2?: boolean;
+  onHasDivisionCatalogChange?: (hasDivisionCatalog: boolean) => void;
 }) {
   const locationValue: LocationPickerValue = {
     countryId: value.geoCountryId,
@@ -68,12 +72,14 @@ export default function GeoCascadeFieldset({
   return (
     <LocationPicker
       className={cn(className)}
+      idPrefix={idPrefix}
       value={locationValue}
       errors={locationErrors}
       disabled={disabled}
       title={title}
       subtitle={`${subtitle}${requiredSuffix}`}
       showPostalCode={showPostalCode}
+      onCatalogModeChange={onHasDivisionCatalogChange}
       onChange={(next) =>
         onChange({
           geoCountryId: next.countryId,

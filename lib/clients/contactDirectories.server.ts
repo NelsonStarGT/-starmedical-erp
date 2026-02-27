@@ -7,6 +7,7 @@ import {
   type ClientContactDirectoryCorrelation,
   type ClientContactDirectoryItem
 } from "@/lib/clients/contactDirectories";
+import { isMissingPbxTableError } from "@/lib/clients/companyCreate";
 import { prisma } from "@/lib/prisma";
 import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
 import { normalizeTenantId } from "@/lib/tenant";
@@ -48,6 +49,16 @@ type PbxCategoryRow = {
   isActive: boolean;
 };
 
+type InsurerLineRow = {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  isActive: boolean;
+};
+
 type ContactDirectoryDelegates = {
   department: {
     findMany: (args: unknown) => Promise<DepartmentRow[]>;
@@ -60,6 +71,9 @@ type ContactDirectoryDelegates = {
   } | null;
   pbxCategory: {
     findMany: (args: unknown) => Promise<PbxCategoryRow[]>;
+  } | null;
+  insurerLine: {
+    findMany: (args: unknown) => Promise<InsurerLineRow[]>;
   } | null;
 };
 
@@ -77,13 +91,17 @@ function getDelegates(): ContactDirectoryDelegates {
     clientPbxCategoryDirectory?: {
       findMany?: (args: unknown) => Promise<PbxCategoryRow[]>;
     };
+    clientInsurerLineDirectory?: {
+      findMany?: (args: unknown) => Promise<InsurerLineRow[]>;
+    };
   };
 
   return {
     department: source.clientContactDepartmentDirectory?.findMany ? { findMany: source.clientContactDepartmentDirectory.findMany } : null,
     jobTitle: source.clientContactJobTitleDirectory?.findMany ? { findMany: source.clientContactJobTitleDirectory.findMany } : null,
     correlation: source.clientContactDepartmentJobTitle?.findMany ? { findMany: source.clientContactDepartmentJobTitle.findMany } : null,
-    pbxCategory: source.clientPbxCategoryDirectory?.findMany ? { findMany: source.clientPbxCategoryDirectory.findMany } : null
+    pbxCategory: source.clientPbxCategoryDirectory?.findMany ? { findMany: source.clientPbxCategoryDirectory.findMany } : null,
+    insurerLine: source.clientInsurerLineDirectory?.findMany ? { findMany: source.clientInsurerLineDirectory.findMany } : null
   };
 }
 
@@ -169,7 +187,87 @@ export async function getClientContactDirectories(
   }
 
   try {
-    const [departmentRows, jobTitleRows, pbxCategoryRows] = await Promise.all([
+    const loadPbxCategoryRows = async () => {
+      if (!delegates.pbxCategory) return [] as PbxCategoryRow[];
+      try {
+        return await delegates.pbxCategory.findMany({
+          where: {
+            tenantId,
+            ...(includeInactive ? {} : { isActive: true }),
+            ...(q
+              ? {
+                  OR: [
+                    { name: { contains: q, mode: Prisma.QueryMode.insensitive } },
+                    { code: { contains: q, mode: Prisma.QueryMode.insensitive } }
+                  ]
+                }
+              : {})
+          },
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+          take: DIRECTORY_SEARCH_LIMIT,
+          select: {
+            id: true,
+            tenantId: true,
+            code: true,
+            name: true,
+            description: true,
+            sortOrder: true,
+            isActive: true
+          }
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error) || isMissingPbxTableError(error)) {
+          warnDevMissingTable("clients.contactDirectories.get.pbxCategories", error);
+          return [] as PbxCategoryRow[];
+        }
+        if (isPrismaSchemaMismatchError(error)) {
+          return [] as PbxCategoryRow[];
+        }
+        throw error;
+      }
+    };
+
+    const loadInsurerLineRows = async () => {
+      if (!delegates.insurerLine) return [] as InsurerLineRow[];
+      try {
+        return await delegates.insurerLine.findMany({
+          where: {
+            tenantId,
+            ...(includeInactive ? {} : { isActive: true }),
+            ...(q
+              ? {
+                  OR: [
+                    { name: { contains: q, mode: Prisma.QueryMode.insensitive } },
+                    { code: { contains: q, mode: Prisma.QueryMode.insensitive } }
+                  ]
+                }
+              : {})
+          },
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+          take: DIRECTORY_SEARCH_LIMIT,
+          select: {
+            id: true,
+            tenantId: true,
+            code: true,
+            name: true,
+            description: true,
+            sortOrder: true,
+            isActive: true
+          }
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) {
+          warnDevMissingTable("clients.contactDirectories.get.insurerLines", error);
+          return [] as InsurerLineRow[];
+        }
+        if (isPrismaSchemaMismatchError(error)) {
+          return [] as InsurerLineRow[];
+        }
+        throw error;
+      }
+    };
+
+    const [departmentRows, jobTitleRows, pbxCategoryRows, insurerLineRows] = await Promise.all([
       delegates.department.findMany({
         where: {
           tenantId,
@@ -220,44 +318,21 @@ export async function getClientContactDirectories(
           isActive: true
         }
       }),
-      delegates.pbxCategory
-        ? delegates.pbxCategory.findMany({
-            where: {
-              tenantId,
-              ...(includeInactive ? {} : { isActive: true }),
-              ...(q
-                ? {
-                    OR: [
-                      { name: { contains: q, mode: Prisma.QueryMode.insensitive } },
-                      { code: { contains: q, mode: Prisma.QueryMode.insensitive } }
-                    ]
-                  }
-                : {})
-            },
-            orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-            take: DIRECTORY_SEARCH_LIMIT,
-            select: {
-              id: true,
-              tenantId: true,
-              code: true,
-              name: true,
-              description: true,
-              sortOrder: true,
-              isActive: true
-            }
-          })
-        : Promise.resolve([])
+      loadPbxCategoryRows(),
+      loadInsurerLineRows()
     ]);
 
     const mappedDepartments = mapDirectoryRows(departmentRows);
     const mappedJobTitles = mapDirectoryRows(jobTitleRows);
     const mappedPbxCategories = mapDirectoryRows(pbxCategoryRows);
+    const mappedInsurerLines = mapDirectoryRows(insurerLineRows);
 
     const departmentsSource: "db" | "fallback" = mappedDepartments.length > 0 ? "db" : "fallback";
     const jobTitlesSource: "db" | "fallback" = mappedJobTitles.length > 0 ? "db" : "fallback";
     const pbxCategoriesSource: "db" | "fallback" = mappedPbxCategories.length > 0 ? "db" : "fallback";
+    const insurerLinesSource: "db" | "fallback" = mappedInsurerLines.length > 0 ? "db" : "fallback";
     const dataSource: "db" | "fallback" =
-      departmentsSource === "db" || jobTitlesSource === "db" || pbxCategoriesSource === "db"
+      departmentsSource === "db" || jobTitlesSource === "db" || pbxCategoriesSource === "db" || insurerLinesSource === "db"
         ? "db"
         : "fallback";
     const ensured = ensureOtherDirectoryItems({
@@ -266,6 +341,7 @@ export async function getClientContactDirectories(
       jobTitles: mappedJobTitles.length > 0 ? mappedJobTitles : fallback.jobTitles
     });
     const pbxCategories = mappedPbxCategories.length > 0 ? mappedPbxCategories : fallback.pbxCategories;
+    const insurerLines = mappedInsurerLines.length > 0 ? mappedInsurerLines : fallback.insurerLines;
 
     const correlationRows = await delegates.correlation.findMany({
       where: {
@@ -292,7 +368,9 @@ export async function getClientContactDirectories(
       jobTitlesSource,
       correlations: mapCorrelationRows(correlationRows),
       pbxCategories,
-      pbxCategoriesSource
+      pbxCategoriesSource,
+      insurerLines,
+      insurerLinesSource
     };
   } catch (error) {
     if (isPrismaMissingTableError(error)) {

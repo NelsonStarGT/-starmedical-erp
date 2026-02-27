@@ -1,19 +1,19 @@
 import { cookies } from "next/headers";
-import { ClientCatalogType } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import InstitutionCreateForm from "@/components/clients/InstitutionCreateForm";
 import { getSessionUserFromCookies } from "@/lib/auth";
+import { getClientContactDirectories } from "@/lib/clients/contactDirectories.server";
 import { getOperatingCountryDefaults } from "@/lib/clients/operatingCountryDefaults.server";
 import { tenantIdFromUser } from "@/lib/tenant";
 
 export default async function NuevaInstitucionPage() {
   const currentUser = await getSessionUserFromCookies(cookies());
-  const institutionTypes = await prisma.clientCatalogItem.findMany({
-    where: { type: ClientCatalogType.INSTITUTION_TYPE, isActive: true },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true }
-  });
-  const operatingDefaults = await getOperatingCountryDefaults(tenantIdFromUser(currentUser));
+  const tenantId = tenantIdFromUser(currentUser);
+  const [operatingDefaults, contactDirectories] = await Promise.all([
+    getOperatingCountryDefaults(tenantId),
+    getClientContactDirectories(tenantId, { includeInactive: true })
+  ]);
 
-  return <InstitutionCreateForm initialTypes={institutionTypes} initialOperatingDefaults={operatingDefaults} />;
+  return (
+    <InstitutionCreateForm initialOperatingDefaults={operatingDefaults} initialContactDirectories={contactDirectories} />
+  );
 }

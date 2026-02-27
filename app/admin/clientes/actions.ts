@@ -54,6 +54,7 @@ import { getClientContactDirectories } from "@/lib/clients/contactDirectories.se
 import {
   normalizeContactDirectoryCode,
   resolveMissingDepartmentDefaults,
+  resolveMissingInsurerLineDefaults,
   resolveMissingJobTitleDefaults,
   resolveMissingPbxCategoryDefaults,
   resolveUniqueContactDirectoryCode
@@ -68,6 +69,7 @@ import {
 import { COMPANY_CONTACT_DEPARTMENTS } from "@/lib/catalogs/departments";
 import { COMPANY_CONTACT_JOB_TITLES } from "@/lib/catalogs/jobTitles";
 import { COMPANY_PBX_CATEGORY_SEED } from "@/lib/catalogs/pbxCategories";
+import { INSURER_LINE_SEED, normalizeInsurerLineSelection } from "@/lib/catalogs/insurerLines";
 import { getClientCatalogDefaultsByType } from "@/lib/catalogs/clientCatalogDefaults";
 import {
   assertStrictLocalPhoneValue,
@@ -93,6 +95,13 @@ import {
   type NormalizedCompanyPersonContact
 } from "@/lib/clients/companyProfile";
 import {
+  normalizeCompanyBranchDrafts,
+  normalizeCompanyWebsite,
+  validateCompanyBranchDraft,
+  validateCompanyLogoAsset,
+  type CompanyBranchDraftInput
+} from "@/lib/clients/companyCreate";
+import {
   ECONOMIC_ACTIVITY_BY_ID,
   ECONOMIC_ACTIVITY_OTHER_ID,
   isEconomicActivityId,
@@ -100,7 +109,10 @@ import {
 } from "@/lib/catalogs/economicActivities";
 import { isCompanyEmployeeRangeId } from "@/lib/catalogs/companyEmployeeRanges";
 import { isCompanyLegalFormId, requiresCompanyLegalFormOther } from "@/lib/catalogs/legalForms";
+import { resolveCurrencyPreferenceSelection } from "@/lib/catalogs/currencies";
+import { reserveNextClientCodeTx } from "@/lib/clients/clientCode";
 import { tenantIdFromUser } from "@/lib/tenant";
+import { resolveReceptionRole } from "@/lib/reception/rbac";
 
 const CLIENT_PHOTO_MAX_SIZE_BYTES = 3 * 1024 * 1024;
 const CLIENT_PHOTO_ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
@@ -133,6 +145,18 @@ async function requireAdminUser(): Promise<SessionUser> {
   const user = await requireAuthenticatedUser();
   if (!isAdmin(user)) throw new Error("No autorizado.");
   return user;
+}
+
+async function requireClientCreatorUser(): Promise<SessionUser> {
+  const user = await requireAuthenticatedUser();
+  if (isAdmin(user)) return user;
+
+  const receptionRole = resolveReceptionRole(user.roles ?? []);
+  if (receptionRole === "RECEPTION_SUPERVISOR" || receptionRole === "RECEPTION_ADMIN") {
+    return user;
+  }
+
+  throw new Error("No autorizado para crear clientes.");
 }
 
 async function requireProfileEditorUser(): Promise<SessionUser> {
@@ -214,6 +238,13 @@ type ClientPbxCategoryDirectoryDelegate = {
   update: (args: unknown) => Promise<{ id: string }>;
 };
 
+type ClientInsurerLineDirectoryDelegate = {
+  findMany: (args: unknown) => Promise<Array<{ id: string; tenantId: string; code: string; name: string; description: string | null; sortOrder: number; isActive: boolean }>>;
+  findUnique: (args: unknown) => Promise<{ id: string; tenantId: string; isActive: boolean; name: string; code: string; description: string | null; sortOrder: number } | null>;
+  create: (args: unknown) => Promise<{ id: string }>;
+  update: (args: unknown) => Promise<{ id: string }>;
+};
+
 type ClientContactDirectoryCorrelationDelegate = {
   findMany: (args: unknown) => Promise<Array<{ id: string; jobTitleId: string; isActive: boolean }>>;
   upsert: (args: unknown) => Promise<{ id: string }>;
@@ -254,6 +285,18 @@ function getClientPbxCategoryDirectoryDelegateOrThrow() {
   }
 
   return delegate as ClientPbxCategoryDirectoryDelegate;
+}
+
+function getClientInsurerLineDirectoryDelegateOrThrow() {
+  const delegate = (prisma as unknown as {
+    clientInsurerLineDirectory?: Partial<ClientInsurerLineDirectoryDelegate>;
+  }).clientInsurerLineDirectory;
+
+  if (!delegate?.findMany || !delegate.findUnique || !delegate.create || !delegate.update) {
+    throw new Error("Ramos de seguro no disponibles. Ejecuta migraciones pendientes.");
+  }
+
+  return delegate as ClientInsurerLineDirectoryDelegate;
 }
 
 function getClientContactDirectoryCorrelationDelegateOrThrow() {
@@ -910,17 +953,23 @@ async function safeCreateCompanyCoreWithContacts(
   input: {
     tenantId: string;
     clientProfileId: string;
+    kind?: CompanyKind;
     legalName: string;
     tradeName: string | null;
     taxId: string | null;
+    website: string | null;
     billingEmail: string | null;
     billingPhone: string | null;
+    preferredCurrencyCode: string | null;
+    acceptedCurrencyCodes: string[];
+    commercialNote: string | null;
     companySizeRange: string | null;
     legalFormId: string | null;
     legalFormOther: string | null;
     activityPrimaryId: string | null;
     activitySecondaryIds: string[];
     legacyPbxExtensionNotes?: string[];
+    metadataExtra?: Prisma.InputJsonValue | null;
     generalChannels: NormalizedCompanyGeneralChannel[];
     contactPeople: NormalizedCompanyPersonContact[];
   }
@@ -928,13 +977,16 @@ async function safeCreateCompanyCoreWithContacts(
   if (!input.contactPeople.length && !input.generalChannels.length) return { companyId: null as string | null };
 
   try {
-    const companyMetadata: Prisma.InputJsonValue = {
+    const companyMetadata: Record<string, unknown> = {
       source: "clients.company.new-form.v2",
       companySizeRange: input.companySizeRange,
       legalForm: input.legalFormId,
       legalFormOther: input.legalFormOther,
+      website: input.website,
       economicActivityPrimaryId: input.activityPrimaryId,
       economicActivitySecondaryIds: input.activitySecondaryIds,
+      preferredCurrencyCode: input.preferredCurrencyCode,
+      acceptedCurrencyCodes: input.acceptedCurrencyCodes,
       legacyPbxExtensionNotes: input.legacyPbxExtensionNotes ?? [],
       generalChannels: input.generalChannels.map((row) => ({
         id: row.id,
@@ -953,6 +1005,9 @@ async function safeCreateCompanyCoreWithContacts(
         isPrimary: row.isPrimary
       }))
     };
+    if (input.metadataExtra && typeof input.metadataExtra === "object" && !Array.isArray(input.metadataExtra)) {
+      Object.assign(companyMetadata, input.metadataExtra as Record<string, unknown>);
+    }
 
     const company = await tx.company.upsert({
       where: { clientProfileId: input.clientProfileId },
@@ -960,21 +1015,25 @@ async function safeCreateCompanyCoreWithContacts(
         legalName: input.legalName,
         tradeName: input.tradeName,
         taxId: input.taxId,
+        website: input.website,
         billingEmail: input.billingEmail,
         billingPhone: input.billingPhone,
-        metadata: companyMetadata
+        notes: input.commercialNote,
+        metadata: companyMetadata as Prisma.InputJsonValue
       },
       create: {
         tenantId: input.tenantId,
         clientProfileId: input.clientProfileId,
-        kind: CompanyKind.COMPANY,
+        kind: input.kind ?? CompanyKind.COMPANY,
         status: CompanyStatus.ACTIVE,
         legalName: input.legalName,
         tradeName: input.tradeName,
         taxId: input.taxId,
+        website: input.website,
         billingEmail: input.billingEmail,
         billingPhone: input.billingPhone,
-        metadata: companyMetadata
+        notes: input.commercialNote,
+        metadata: companyMetadata as Prisma.InputJsonValue
       },
       select: { id: true }
     });
@@ -1494,6 +1553,7 @@ async function resolveDefaultActiveStatusId() {
 
 function formatClientLabel(input: {
   type: ClientProfileType;
+  clientCode?: string | null;
   firstName?: string | null;
   middleName?: string | null;
   lastName?: string | null;
@@ -1503,13 +1563,14 @@ function formatClientLabel(input: {
   nit?: string | null;
   dpi?: string | null;
 }) {
+  const codeTag = input.clientCode ? `[${input.clientCode}] ` : "";
   if (input.type === ClientProfileType.PERSON) {
     const name = [input.firstName, input.middleName, input.lastName, input.secondLastName].filter(Boolean).join(" ").trim();
-    if (name && input.dpi) return `${name} · DPI ${input.dpi}`;
-    return name || (input.dpi ? `DPI ${input.dpi}` : "Persona");
+    if (name && input.dpi) return `${codeTag}${name} · DPI ${input.dpi}`;
+    return codeTag + (name || (input.dpi ? `DPI ${input.dpi}` : "Persona"));
   }
   const name = input.companyName || input.tradeName || "Cliente";
-  return input.nit ? `${name} · NIT ${input.nit}` : name;
+  return input.nit ? `${codeTag}${name} · NIT ${input.nit}` : `${codeTag}${name}`;
 }
 
 type GeoSelectionInput = {
@@ -2012,7 +2073,8 @@ export async function actionCreatePersonClient(input: {
     isPrimaryPayer?: boolean;
   }>;
 }) {
-  const user = await requireAdminUser();
+  const user = await requireClientCreatorUser();
+  const tenantId = tenantIdFromUser(user);
 
   const firstName = normalizeRequired(input.firstName, "Primer nombre requerido.");
   const lastName = normalizeRequired(input.lastName, "Primer apellido requerido.");
@@ -2387,8 +2449,15 @@ export async function actionCreatePersonClient(input: {
         isActive: row.isActive
       }));
 
+      const reservedClientCode = await reserveNextClientCodeTx(tx, {
+        tenantId,
+        clientType: ClientProfileType.PERSON
+      });
+
       const created = await tx.clientProfile.create({
         data: {
+          tenantId,
+          clientCode: reservedClientCode.code,
           type: ClientProfileType.PERSON,
           firstName,
           middleName,
@@ -2626,6 +2695,7 @@ export async function actionCreatePersonClient(input: {
         action: "CLIENT_CREATED",
         metadata: {
           type: "PERSON",
+          clientCode: reservedClientCode.code,
           affiliationsCount: affiliations.length + 1,
           defaultAffiliation: "INTERNAL",
           acquisitionSourceId: acquisition.sourceId,
@@ -2666,6 +2736,10 @@ export async function actionCreateCompanyClient(input: {
   legalName: string;
   tradeName: string;
   nit: string;
+  website?: string;
+  logoUrl?: string;
+  logoAssetId?: string;
+  logoOriginalName?: string;
   address: string;
   city?: string;
   department?: string;
@@ -2693,13 +2767,18 @@ export async function actionCreateCompanyClient(input: {
   acquisitionDetailOptionId?: string;
   acquisitionOtherNote?: string;
   referredByClientId?: string;
+  preferredCurrencyCode?: string;
+  acceptedCurrencyCodes?: string[];
+  billingEmail?: string;
+  commercialNote?: string;
   phone?: string;
   phoneCountryIso2?: string;
   email?: string;
   phones?: ClientPhoneChannelInput[];
   emails?: ClientEmailChannelInput[];
+  branches?: CompanyBranchDraftInput[];
 }) {
-  const user = await requireAdminUser();
+  const user = await requireClientCreatorUser();
   const tenantId = tenantIdFromUser(user);
   const supportsContactExtendedColumns = await safeSupportsClientContactExtendedColumns("clients.actions.createCompany.contacts");
   const supportsNoteExtendedColumns = await safeSupportsClientNoteExtendedColumns("clients.actions.createCompany.notes");
@@ -2714,12 +2793,38 @@ export async function actionCreateCompanyClient(input: {
   const companyName = normalizeRequired(input.legalName, "Razón social requerida.");
   const tradeName = normalizeRequired(input.tradeName, "Nombre comercial requerido.");
   const nit = normalizeRequired(input.nit, "NIT requerido.");
+  const websiteSelection = normalizeCompanyWebsite(input.website);
+  if (websiteSelection.error) throw new Error(websiteSelection.error);
+  const website = websiteSelection.value;
+  const logoAssetId = normalizeOptional(input.logoAssetId);
+  const logoUrl = normalizeOptional(input.logoUrl) ?? (logoAssetId ? `/api/files/${logoAssetId}` : null);
+  const logoOriginalName = normalizeOptional(input.logoOriginalName);
+  if (logoUrl && !logoAssetId) {
+    throw new Error("Logo inválido.");
+  }
   const address = normalizeRequired(input.address, "Dirección requerida.");
   const companyCategoryId = normalizeOptional(input.companyTypeId ?? input.companyCategoryId);
   const companySizeRange = normalizeOptional(input.companySizeRange);
   const legalForm = normalizeOptional(input.legalForm);
   const legalFormOther = normalizeOptional(input.legalFormOther);
   const economicActivitySelection = normalizeOptional(input.economicActivityId ?? input.sectorId);
+  const currencySelection = resolveCurrencyPreferenceSelection({
+    preferredCurrencyCode: input.preferredCurrencyCode,
+    acceptedCurrencyCodes: input.acceptedCurrencyCodes
+  });
+  if (currencySelection.invalidPreferredCurrencyCode) {
+    throw new Error("Moneda preferida inválida.");
+  }
+  if (currencySelection.invalidAcceptedCurrencyCodes.length > 0) {
+    throw new Error("Monedas aceptadas inválidas.");
+  }
+  const preferredCurrencyCode = currencySelection.preferredCurrencyCode;
+  const acceptedCurrencyCodes = currencySelection.acceptedCurrencyCodes;
+  const explicitBillingEmail = normalizeOptional(input.billingEmail);
+  if (explicitBillingEmail && !isValidEmail(explicitBillingEmail)) {
+    throw new Error("Correo de facturación inválido.");
+  }
+  const commercialNote = normalizeOptional(input.commercialNote);
   if (companySizeRange && !isCompanyEmployeeRangeId(companySizeRange)) {
     throw new Error("Tamaño de empresa inválido.");
   }
@@ -2744,9 +2849,9 @@ export async function actionCreateCompanyClient(input: {
   const country = normalizeOptional(input.country) ?? geo.countryName;
   const department = normalizeOptional(input.department) ?? geo.admin1Name ?? geoFreeState;
   const city = normalizeOptional(input.city) ?? geo.admin2Name ?? geoFreeCity;
-  if (!country) throw new Error("País requerido.");
-  if (!department) throw new Error("Departamento/Estado requerido.");
-  if (!city) throw new Error("Ciudad/Municipio requerido.");
+  if (!country) throw new Error("Selecciona país.");
+  if (!department) throw new Error("Selecciona departamento.");
+  if (!city) throw new Error("Selecciona municipio.");
   const normalizedGeneralChannels = usesNewContactPayload
     ? normalizeCompanyGeneralChannels(input.generalChannels, { pbxCategoryOptions })
     : [];
@@ -2765,6 +2870,47 @@ export async function actionCreateCompanyClient(input: {
           return { ...person, notes };
         })
       : normalizedContactPeople;
+  const normalizedBranchDrafts = normalizeCompanyBranchDrafts(input.branches);
+  for (let index = 0; index < normalizedBranchDrafts.length; index += 1) {
+    const validationError = validateCompanyBranchDraft({
+      branch: normalizedBranchDrafts[index]!,
+      rowNumber: index + 1
+    });
+    if (validationError) throw new Error(validationError);
+  }
+
+  const resolvedBranchLocations = await Promise.all(
+    normalizedBranchDrafts.map(async (branch, index) => {
+      const branchGeo = await resolveGeoSelection({
+        geoCountryId: branch.geoCountryId,
+        geoAdmin1Id: branch.geoAdmin1Id,
+        geoAdmin2Id: branch.geoAdmin2Id,
+        geoAdmin3Id: branch.geoAdmin3Id
+      });
+      const branchCountry = branch.country ?? branchGeo.countryName;
+      const branchDepartment = branch.department ?? branchGeo.admin1Name ?? branch.geoFreeState;
+      const branchCity = branch.city ?? branchGeo.admin2Name ?? branch.geoFreeCity;
+      if (!branchCountry) throw new Error(`Sucursal #${index + 1}: selecciona país.`);
+      if (!branchDepartment) throw new Error(`Sucursal #${index + 1}: selecciona departamento.`);
+      if (!branchCity) throw new Error(`Sucursal #${index + 1}: selecciona municipio.`);
+
+      return {
+        rowNumber: index + 1,
+        name: branch.name,
+        address: branch.address ?? "",
+        country: branchCountry,
+        department: branchDepartment,
+        city: branchCity,
+        geoCountryId: branchGeo.geoCountryId,
+        geoAdmin1Id: branchGeo.geoAdmin1Id,
+        geoAdmin2Id: branchGeo.geoAdmin2Id,
+        geoAdmin3Id: branchGeo.geoAdmin3Id,
+        freeState: branch.geoFreeState,
+        freeCity: branch.geoFreeCity,
+        postalCode: branch.geoPostalCode
+      };
+    })
+  );
 
   if (usesNewContactPayload) {
     const generalDraftsError = validateCompanyGeneralChannelDrafts(input.generalChannels, {
@@ -2818,7 +2964,7 @@ export async function actionCreateCompanyClient(input: {
     normalizedGeneralChannels.find((row) => row.kind === "EMAIL") ??
     null;
   const billingPhone = primaryGeneralPhone ? formatPhoneWithExtension(primaryGeneralPhone.value, primaryGeneralPhone.extension) : phone;
-  const billingEmail = primaryGeneralEmail?.value ?? email;
+  const billingEmail = explicitBillingEmail ?? primaryGeneralEmail?.value ?? email;
 
   const defaultStatusId = await resolveDefaultActiveStatusId();
 
@@ -2835,6 +2981,24 @@ export async function actionCreateCompanyClient(input: {
           })
         : null;
       if (companyCategoryId && !category) throw new Error("Tipo de empresa inválido o inactivo.");
+      if (logoAssetId) {
+        const logoAsset = await tx.fileAsset.findUnique({
+          where: { id: logoAssetId },
+          select: {
+            id: true,
+            mimeType: true,
+            sizeBytes: true,
+            storageKey: true
+          }
+        });
+        if (!logoAsset) throw new Error("Logo inválido.");
+        const logoValidation = validateCompanyLogoAsset({
+          mimeType: logoAsset.mimeType,
+          sizeBytes: logoAsset.sizeBytes,
+          storageKey: logoAsset.storageKey
+        });
+        if (!logoValidation.ok) throw new Error(logoValidation.error);
+      }
       const resolvedEconomicActivity = await resolveEconomicActivityCatalogSelection(tx, {
         rawSelection: economicActivitySelection,
         otherNote: economicActivityOtherNote
@@ -2862,8 +3026,15 @@ export async function actionCreateCompanyClient(input: {
         acquisitionOtherNote: input.acquisitionOtherNote
       });
 
+      const reservedClientCode = await reserveNextClientCodeTx(tx, {
+        tenantId,
+        clientType: ClientProfileType.COMPANY
+      });
+
       const created = await tx.clientProfile.create({
         data: {
+          tenantId,
+          clientCode: reservedClientCode.code,
           type: ClientProfileType.COMPANY,
           companyName,
           tradeName,
@@ -2877,6 +3048,8 @@ export async function actionCreateCompanyClient(input: {
           acquisitionSourceId: acquisition.sourceId,
           acquisitionDetailOptionId: acquisition.detailOptionId,
           acquisitionOtherNote: acquisition.otherNote,
+          photoUrl: logoUrl,
+          photoAssetId: logoAssetId,
           phone,
           email,
           statusId: defaultStatusId
@@ -2941,8 +3114,12 @@ export async function actionCreateCompanyClient(input: {
         legalName: companyName,
         tradeName,
         taxId: nit,
+        website,
         billingEmail,
         billingPhone,
+        preferredCurrencyCode,
+        acceptedCurrencyCodes,
+        commercialNote,
         companySizeRange,
         legalFormId: legalForm,
         legalFormOther,
@@ -3007,6 +3184,35 @@ export async function actionCreateCompanyClient(input: {
         }
       });
 
+      if (resolvedBranchLocations.length) {
+        await tx.clientLocation.createMany({
+          data: resolvedBranchLocations.map((branch) => ({
+            clientId: created.id,
+            type: ClientLocationType.BRANCH,
+            name: branch.name,
+            label: branch.name,
+            code: `SUC_${String(branch.rowNumber).padStart(2, "0")}`,
+            address: branch.address,
+            addressLine1: branch.address,
+            city: branch.city,
+            department: branch.department,
+            country: branch.country,
+            geoCountryId: branch.geoCountryId,
+            geoAdmin1Id: branch.geoAdmin1Id,
+            geoAdmin2Id: branch.geoAdmin2Id,
+            geoAdmin3Id: branch.geoAdmin3Id,
+            freeState: branch.freeState,
+            freeCity: branch.freeCity,
+            postalCode: branch.postalCode,
+            isPrimary: false,
+            metadata: {
+              source: "clients.company.new-form.v2",
+              sequence: branch.rowNumber
+            }
+          }))
+        });
+      }
+
       await logClientAuditTx(tx, {
         actorUserId: user.id,
         actorRole: user.roles?.[0] ?? null,
@@ -3014,6 +3220,7 @@ export async function actionCreateCompanyClient(input: {
         action: "CLIENT_CREATED",
         metadata: {
           type: "COMPANY",
+          clientCode: reservedClientCode.code,
           companyCategoryId,
           companySizeRange,
           economicActivityId: resolvedEconomicActivity.catalogRow?.id ?? null,
@@ -3021,9 +3228,16 @@ export async function actionCreateCompanyClient(input: {
           economicActivitySecondaryIds: resolvedSecondaryActivityRows.map((item) => item.id),
           legalForm,
           legalFormOther,
+          website,
+          logoUrl,
+          logoAssetId,
+          logoOriginalName,
+          branchCount: resolvedBranchLocations.length,
           companyCoreId: companyCoreResult.companyId,
           generalChannelsCount: normalizedGeneralChannels.length,
           contactPeopleCount: normalizedContactPeopleWithLegacy.length,
+          preferredCurrencyCode,
+          acceptedCurrencyCodes,
           legacyPbxExtensionNotes,
           acquisitionSourceId: acquisition.sourceId,
           acquisitionSourceCode: acquisition.sourceCode,
@@ -3047,13 +3261,20 @@ export async function actionCreateCompanyClient(input: {
 
 export async function actionCreateInstitutionClient(input: {
   name: string;
+  tradeName?: string;
   institutionTypeId: string;
   institutionCategoryId?: string;
+  institutionCategorySecondaryIds?: string[];
+  institutionSector?: "publico" | "privado" | "mixto" | string;
   institutionIsPublic?: boolean | null;
   institutionIsPayer?: boolean;
   institutionIsGroupOrganizer?: boolean;
   institutionIsSponsor?: boolean;
   nit?: string;
+  website?: string;
+  logoUrl?: string;
+  logoAssetId?: string;
+  logoOriginalName?: string;
   address: string;
   city?: string;
   department?: string;
@@ -3069,23 +3290,63 @@ export async function actionCreateInstitutionClient(input: {
   acquisitionDetailOptionId?: string;
   acquisitionOtherNote?: string;
   referredByClientId?: string;
+  preferredCurrencyCode?: string;
+  acceptedCurrencyCodes?: string[];
+  billingEmail?: string;
+  commercialNote?: string;
   phone?: string;
   phoneCountryIso2?: string;
   email?: string;
   phones?: ClientPhoneChannelInput[];
   emails?: ClientEmailChannelInput[];
+  generalChannels?: CompanyGeneralChannelInput[];
+  contactPeople?: CompanyPersonContactInput[];
+  useSameAddressForFiscal?: boolean;
+  branches?: CompanyBranchDraftInput[];
 }) {
-  const user = await requireAdminUser();
+  const user = await requireClientCreatorUser();
+  const tenantId = tenantIdFromUser(user);
+  const supportsContactExtendedColumns = await safeSupportsClientContactExtendedColumns("clients.actions.createInstitution.contacts");
+  const usesNewContactPayload = Array.isArray(input.generalChannels) || Array.isArray(input.contactPeople);
+  const contactDirectories = usesNewContactPayload ? await getClientContactDirectories(tenantId, { includeInactive: true }) : null;
+  const pbxCategoryOptions = (contactDirectories?.pbxCategories ?? []).map((item) => ({
+    value: item.code.trim() || item.id.trim(),
+    label: item.name,
+    isActive: item.isActive
+  }));
 
   const companyName = normalizeRequired(input.name, "Nombre de institución requerido.");
+  const tradeName = normalizeOptional(input.tradeName);
   const institutionTypeId = normalizeRequired(input.institutionTypeId, "Tipo de institución requerido.");
   const institutionCategoryId = normalizeOptional(input.institutionCategoryId);
-  const institutionIsPublic = typeof input.institutionIsPublic === "boolean" ? input.institutionIsPublic : null;
+  const institutionCategorySecondaryIds = Array.isArray(input.institutionCategorySecondaryIds)
+    ? Array.from(new Set(input.institutionCategorySecondaryIds.map((item) => normalizeOptional(item)).filter(Boolean) as string[]))
+    : [];
+  const normalizedInstitutionSector = normalizeOptional(input.institutionSector)?.toLowerCase() ?? null;
+  if (normalizedInstitutionSector && !["publico", "privado", "mixto"].includes(normalizedInstitutionSector)) {
+    throw new Error("Sector institucional inválido.");
+  }
+  const institutionSector = normalizedInstitutionSector as "publico" | "privado" | "mixto" | null;
+  const institutionIsPublic =
+    typeof input.institutionIsPublic === "boolean"
+      ? input.institutionIsPublic
+      : institutionSector === "publico"
+        ? true
+        : institutionSector === "privado"
+          ? false
+          : null;
   const institutionIsPayer = Boolean(input.institutionIsPayer);
   const institutionIsGroupOrganizer = Boolean(input.institutionIsGroupOrganizer);
   const institutionIsSponsor = Boolean(input.institutionIsSponsor);
   const nit = normalizeOptional(input.nit);
   if (institutionIsPayer && !nit) throw new Error("NIT requerido para institución pagadora.");
+  const websiteSelection = normalizeCompanyWebsite(input.website);
+  if (websiteSelection.error) throw new Error(websiteSelection.error);
+  const website = websiteSelection.value;
+  const logoAssetId = normalizeOptional(input.logoAssetId);
+  const logoUrl = normalizeOptional(input.logoUrl) ?? (logoAssetId ? `/api/files/${logoAssetId}` : null);
+  const logoOriginalName = normalizeOptional(input.logoOriginalName);
+  if (logoUrl && !logoAssetId) throw new Error("Logo inválido.");
   const address = normalizeRequired(input.address, "Dirección requerida.");
   const geoPostalCode = normalizeOptional(input.geoPostalCode);
   const geoFreeState = normalizeOptional(input.geoFreeState);
@@ -3099,23 +3360,140 @@ export async function actionCreateInstitutionClient(input: {
   const country = normalizeOptional(input.country) ?? geo.countryName;
   const department = normalizeOptional(input.department) ?? geo.admin1Name ?? geoFreeState;
   const city = normalizeOptional(input.city) ?? geo.admin2Name ?? geoFreeCity;
-  if (!country) throw new Error("País requerido.");
-  if (!department) throw new Error("Departamento/Estado requerido.");
-  if (!city) throw new Error("Ciudad/Municipio requerido.");
+  if (!country) throw new Error("Selecciona país.");
+  if (!department) throw new Error("Selecciona departamento.");
+  if (!city) throw new Error("Selecciona municipio.");
+  const currencySelection = resolveCurrencyPreferenceSelection({
+    preferredCurrencyCode: input.preferredCurrencyCode,
+    acceptedCurrencyCodes: input.acceptedCurrencyCodes
+  });
+  if (currencySelection.invalidPreferredCurrencyCode) throw new Error("Moneda preferida inválida.");
+  if (currencySelection.invalidAcceptedCurrencyCodes.length > 0) throw new Error("Monedas aceptadas inválidas.");
+  const preferredCurrencyCode = currencySelection.preferredCurrencyCode;
+  const acceptedCurrencyCodes = currencySelection.acceptedCurrencyCodes;
+  const explicitBillingEmail = normalizeOptional(input.billingEmail);
+  if (explicitBillingEmail && !isValidEmail(explicitBillingEmail)) {
+    throw new Error("Correo de facturación inválido.");
+  }
+  const commercialNote = normalizeOptional(input.commercialNote);
+
+  const normalizedGeneralChannels = usesNewContactPayload
+    ? normalizeCompanyGeneralChannels(input.generalChannels, { pbxCategoryOptions })
+    : [];
+  const normalizedContactPeople = usesNewContactPayload
+    ? normalizeCompanyPersonContacts(input.contactPeople, { pbxChannels: normalizedGeneralChannels })
+    : [];
+  const legacyPbxExtensionNotes = usesNewContactPayload
+    ? collectLegacyPbxExtensions({ generalChannels: input.generalChannels, pbxCategoryOptions })
+    : [];
+  const normalizedContactPeopleWithLegacy =
+    legacyPbxExtensionNotes.length > 0 && normalizedContactPeople.length > 0
+      ? normalizedContactPeople.map((person, index) => {
+          if (index !== 0) return person;
+          const legacyBlock = legacyPbxExtensionNotes.join(" | ");
+          const notes = [person.notes, legacyBlock].filter(Boolean).join(" | ");
+          return { ...person, notes };
+        })
+      : normalizedContactPeople;
+
+  const normalizedBranchDrafts = normalizeCompanyBranchDrafts(input.branches);
+  for (let index = 0; index < normalizedBranchDrafts.length; index += 1) {
+    const validationError = validateCompanyBranchDraft({
+      branch: normalizedBranchDrafts[index]!,
+      rowNumber: index + 1
+    });
+    if (validationError) throw new Error(validationError);
+  }
+
+  const resolvedBranchLocations = await Promise.all(
+    normalizedBranchDrafts.map(async (branch, index) => {
+      const branchGeo = await resolveGeoSelection({
+        geoCountryId: branch.geoCountryId,
+        geoAdmin1Id: branch.geoAdmin1Id,
+        geoAdmin2Id: branch.geoAdmin2Id,
+        geoAdmin3Id: branch.geoAdmin3Id
+      });
+      const branchCountry = branch.country ?? branchGeo.countryName;
+      const branchDepartment = branch.department ?? branchGeo.admin1Name ?? branch.geoFreeState;
+      const branchCity = branch.city ?? branchGeo.admin2Name ?? branch.geoFreeCity;
+      if (!branchCountry) throw new Error(`Sucursal #${index + 1}: selecciona país.`);
+      if (!branchDepartment) throw new Error(`Sucursal #${index + 1}: selecciona departamento.`);
+      if (!branchCity) throw new Error(`Sucursal #${index + 1}: selecciona municipio.`);
+
+      return {
+        rowNumber: index + 1,
+        name: branch.name,
+        address: branch.address ?? "",
+        country: branchCountry,
+        department: branchDepartment,
+        city: branchCity,
+        geoCountryId: branchGeo.geoCountryId,
+        geoAdmin1Id: branchGeo.geoAdmin1Id,
+        geoAdmin2Id: branchGeo.geoAdmin2Id,
+        geoAdmin3Id: branchGeo.geoAdmin3Id,
+        freeState: branch.geoFreeState,
+        freeCity: branch.geoFreeCity,
+        postalCode: branch.geoPostalCode
+      };
+    })
+  );
+
+  if (usesNewContactPayload) {
+    const generalDraftsError = validateCompanyGeneralChannelDrafts(input.generalChannels, {
+      contactPeople: input.contactPeople,
+      pbxCategoryOptions
+    });
+    if (generalDraftsError) throw new Error(generalDraftsError);
+
+    const contactDraftsError = validateCompanyContactPeopleDrafts(input.contactPeople, {
+      generalChannels: input.generalChannels
+    });
+    if (contactDraftsError) throw new Error(contactDraftsError);
+
+    const generalChannelsError = validateCompanyGeneralChannels(normalizedGeneralChannels);
+    if (generalChannelsError) throw new Error(generalChannelsError);
+
+    const contactPeopleError = validateCompanyContactPeople(normalizedContactPeopleWithLegacy, {
+      generalChannels: normalizedGeneralChannels
+    });
+    if (contactPeopleError) throw new Error(contactPeopleError);
+
+    if (!hasAtLeastOneCompanyChannel({ generalChannels: normalizedGeneralChannels, contactPeople: normalizedContactPeopleWithLegacy })) {
+      throw new Error("Debes registrar al menos un canal general o un canal dentro de personas de contacto.");
+    }
+  }
+
+  const legacyFromGeneralChannels = usesNewContactPayload
+    ? mapCompanyGeneralChannelsToLegacy({ channels: normalizedGeneralChannels })
+    : { phoneChannels: input.phones ?? [], emailChannels: input.emails ?? [] };
+  const personFallbackPhone = usesNewContactPayload ? pickFirstPersonPhone(normalizedContactPeopleWithLegacy) : null;
+  const personFallbackEmail = usesNewContactPayload ? pickFirstPersonEmail(normalizedContactPeopleWithLegacy) : null;
+
   const phoneChannels = normalizeClientPhoneChannels({
-    channels: input.phones,
-    fallbackPhone: input.phone,
-    fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
+    channels: legacyFromGeneralChannels.phoneChannels,
+    fallbackPhone: input.phone ?? personFallbackPhone?.value ?? null,
+    fallbackCountryIso2: input.phoneCountryIso2 ?? personFallbackPhone?.countryIso2 ?? geo.countryIso2
   });
   const emailChannels = normalizeClientEmailChannels({
-    channels: input.emails,
-    fallbackEmail: input.email
+    channels: legacyFromGeneralChannels.emailChannels,
+    fallbackEmail: input.email ?? personFallbackEmail?.value ?? null
   });
   const primaryPhone = pickPrimaryPhoneChannel(phoneChannels);
   const primaryEmail = pickPrimaryEmailChannel(emailChannels);
   const phone = primaryPhone?.number ?? normalizeOptional(input.phone);
   const email = primaryEmail?.valueNormalized ?? normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
+
+  const primaryGeneralPhone =
+    normalizedGeneralChannels.find((row) => row.kind !== "EMAIL" && row.isPrimary) ??
+    normalizedGeneralChannels.find((row) => row.kind !== "EMAIL") ??
+    null;
+  const primaryGeneralEmail =
+    normalizedGeneralChannels.find((row) => row.kind === "EMAIL" && row.isPrimary) ??
+    normalizedGeneralChannels.find((row) => row.kind === "EMAIL") ??
+    null;
+  const billingPhone = primaryGeneralPhone ? formatPhoneWithExtension(primaryGeneralPhone.value, primaryGeneralPhone.extension) : phone;
+  const billingEmail = explicitBillingEmail ?? primaryGeneralEmail?.value ?? email;
 
   const institutionType = await prisma.clientCatalogItem.findFirst({
     where: { id: institutionTypeId, type: ClientCatalogType.INSTITUTION_TYPE, isActive: true },
@@ -3127,6 +3505,25 @@ export async function actionCreateInstitutionClient(input: {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      if (logoAssetId) {
+        const logoAsset = await tx.fileAsset.findUnique({
+          where: { id: logoAssetId },
+          select: {
+            id: true,
+            mimeType: true,
+            sizeBytes: true,
+            storageKey: true
+          }
+        });
+        if (!logoAsset) throw new Error("Logo inválido.");
+        const logoValidation = validateCompanyLogoAsset({
+          mimeType: logoAsset.mimeType,
+          sizeBytes: logoAsset.sizeBytes,
+          storageKey: logoAsset.storageKey
+        });
+        if (!logoValidation.ok) throw new Error(logoValidation.error);
+      }
+
       if (institutionCategoryId) {
         const category = await tx.clientCatalogItem.findFirst({
           where: {
@@ -3136,7 +3533,24 @@ export async function actionCreateInstitutionClient(input: {
           },
           select: { id: true }
         });
-        if (!category) throw new Error("Categoría de institución inválida o inactiva.");
+        if (!category) throw new Error("Régimen institucional inválido o inactivo.");
+      }
+
+      const institutionSecondaryCategories: Array<{ id: string; name: string }> = [];
+      if (institutionCategorySecondaryIds.length) {
+        for (const secondaryId of institutionCategorySecondaryIds) {
+          if (!secondaryId || secondaryId === institutionCategoryId) continue;
+          const category = await tx.clientCatalogItem.findFirst({
+            where: {
+              id: secondaryId,
+              type: ClientCatalogType.INSTITUTION_CATEGORY,
+              isActive: true
+            },
+            select: { id: true, name: true }
+          });
+          if (!category) throw new Error("Régimen institucional secundario inválido o inactivo.");
+          institutionSecondaryCategories.push(category);
+        }
       }
 
       const acquisition = await resolveAcquisitionInput(tx, {
@@ -3145,10 +3559,18 @@ export async function actionCreateInstitutionClient(input: {
         acquisitionOtherNote: input.acquisitionOtherNote
       });
 
+      const reservedClientCode = await reserveNextClientCodeTx(tx, {
+        tenantId,
+        clientType: ClientProfileType.INSTITUTION
+      });
+
       const created = await tx.clientProfile.create({
         data: {
+          tenantId,
+          clientCode: reservedClientCode.code,
           type: ClientProfileType.INSTITUTION,
           companyName,
+          tradeName,
           institutionTypeId,
           institutionCategoryId,
           institutionIsPublic,
@@ -3163,6 +3585,8 @@ export async function actionCreateInstitutionClient(input: {
           acquisitionSourceId: acquisition.sourceId,
           acquisitionDetailOptionId: acquisition.detailOptionId,
           acquisitionOtherNote: acquisition.otherNote,
+          photoUrl: logoUrl,
+          photoAssetId: logoAssetId,
           phone,
           email,
           statusId: defaultStatusId
@@ -3177,12 +3601,78 @@ export async function actionCreateInstitutionClient(input: {
         countryId,
         preferredDocumentTypeTokens: ["NIT", "RFC", "RUC", "CUIT", "TAX_ID"]
       });
+
       await createClientContactChannelsSafe(tx, {
         clientId: created.id,
         phoneChannels,
         emailChannels,
         fallbackPhone: phone,
         fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
+      });
+
+      if (normalizedContactPeopleWithLegacy.length) {
+        for (let index = 0; index < normalizedContactPeopleWithLegacy.length; index += 1) {
+          const person = normalizedContactPeopleWithLegacy[index];
+          const primaryPersonPhone = person.phones.find((row) => row.isPrimary) ?? person.phones[0] ?? null;
+          const primaryPersonEmail = person.emails.find((row) => row.isPrimary) ?? person.emails[0] ?? null;
+          const role = buildLegacyCompanyPersonRole({
+            department: person.department,
+            role: person.role
+          });
+          const name = `${person.firstName} ${person.lastName}`.trim();
+
+          await tx.clientContact.create({
+            data: supportsContactExtendedColumns
+              ? {
+                  clientId: created.id,
+                  name,
+                  relationType: "WORK",
+                  role,
+                  phone: primaryPersonPhone ? formatPhoneWithExtension(primaryPersonPhone.value, primaryPersonPhone.extension) : null,
+                  email: primaryPersonEmail?.value ?? null,
+                  isEmergencyContact: false,
+                  isPrimary: index === 0
+                }
+              : {
+                  clientId: created.id,
+                  name,
+                  role,
+                  phone: primaryPersonPhone ? formatPhoneWithExtension(primaryPersonPhone.value, primaryPersonPhone.extension) : null,
+                  email: primaryPersonEmail?.value ?? null,
+                  isPrimary: index === 0
+                }
+          });
+        }
+      }
+
+      const companyCoreResult = await safeCreateCompanyCoreWithContacts(tx, {
+        tenantId,
+        clientProfileId: created.id,
+        kind: CompanyKind.INSTITUTION,
+        legalName: companyName,
+        tradeName,
+        taxId: nit,
+        website,
+        billingEmail,
+        billingPhone,
+        preferredCurrencyCode,
+        acceptedCurrencyCodes,
+        commercialNote,
+        companySizeRange: null,
+        legalFormId: null,
+        legalFormOther: null,
+        activityPrimaryId: institutionCategoryId,
+        activitySecondaryIds: institutionSecondaryCategories.map((item) => item.id),
+        legacyPbxExtensionNotes,
+        metadataExtra: {
+          institutionTypeId,
+          institutionRegimePrimaryId: institutionCategoryId,
+          institutionRegimeSecondaryIds: institutionSecondaryCategories.map((item) => item.id),
+          institutionRegimeSecondaryNames: institutionSecondaryCategories.map((item) => item.name),
+          institutionSector
+        },
+        generalChannels: normalizedGeneralChannels,
+        contactPeople: normalizedContactPeopleWithLegacy
       });
 
       const referralResult = await createReferralIfNeeded(tx, {
@@ -3211,6 +3701,35 @@ export async function actionCreateInstitutionClient(input: {
         }
       });
 
+      if (resolvedBranchLocations.length) {
+        await tx.clientLocation.createMany({
+          data: resolvedBranchLocations.map((branch) => ({
+            clientId: created.id,
+            type: ClientLocationType.BRANCH,
+            name: branch.name,
+            label: branch.name,
+            code: `SUC_${String(branch.rowNumber).padStart(2, "0")}`,
+            address: branch.address,
+            addressLine1: branch.address,
+            city: branch.city,
+            department: branch.department,
+            country: branch.country,
+            geoCountryId: branch.geoCountryId,
+            geoAdmin1Id: branch.geoAdmin1Id,
+            geoAdmin2Id: branch.geoAdmin2Id,
+            geoAdmin3Id: branch.geoAdmin3Id,
+            freeState: branch.freeState,
+            freeCity: branch.freeCity,
+            postalCode: branch.postalCode,
+            isPrimary: false,
+            metadata: {
+              source: "clients.institution.new-form.v2",
+              sequence: branch.rowNumber
+            }
+          }))
+        });
+      }
+
       await logClientAuditTx(tx, {
         actorUserId: user.id,
         actorRole: user.roles?.[0] ?? null,
@@ -3218,12 +3737,27 @@ export async function actionCreateInstitutionClient(input: {
         action: "CLIENT_CREATED",
         metadata: {
           type: "INSTITUTION",
+          clientCode: reservedClientCode.code,
           institutionTypeId,
           institutionCategoryId,
           institutionIsPublic,
           institutionIsPayer,
           institutionIsGroupOrganizer,
           institutionIsSponsor,
+          institutionSector,
+          institutionCategorySecondaryIds: institutionSecondaryCategories.map((item) => item.id),
+          tradeName,
+          website,
+          logoUrl,
+          logoAssetId,
+          logoOriginalName,
+          branchCount: resolvedBranchLocations.length,
+          companyCoreId: companyCoreResult.companyId,
+          generalChannelsCount: normalizedGeneralChannels.length,
+          contactPeopleCount: normalizedContactPeopleWithLegacy.length,
+          preferredCurrencyCode,
+          acceptedCurrencyCodes,
+          legacyPbxExtensionNotes,
           acquisitionSourceId: acquisition.sourceId,
           acquisitionSourceCode: acquisition.sourceCode,
           acquisitionDetailOptionId: acquisition.detailOptionId,
@@ -3243,13 +3777,16 @@ export async function actionCreateInstitutionClient(input: {
     throw err;
   }
 }
-
 export async function actionCreateInsurerClient(input: {
   name?: string;
   legalName?: string;
   tradeName?: string;
   nit: string;
-  address?: string;
+  website?: string;
+  logoUrl?: string;
+  logoAssetId?: string;
+  logoOriginalName?: string;
+  address: string;
   city?: string;
   department?: string;
   country?: string;
@@ -3264,6 +3801,29 @@ export async function actionCreateInsurerClient(input: {
   acquisitionDetailOptionId?: string;
   acquisitionOtherNote?: string;
   referredByClientId?: string;
+  preferredCurrencyCode?: string;
+  acceptedCurrencyCodes?: string[];
+  billingEmail?: string;
+  commercialNote?: string;
+  companySizeRange?: string;
+  legalForm?: string;
+  legalFormOther?: string;
+  economicActivityId?: string;
+  insurerLinePrimaryCode?: string;
+  insurerLineSecondaryCodes?: string[];
+  insurerTypeId?: string;
+  insurerScope?: "local" | "regional" | "internacional" | string;
+  insurerCode?: string;
+  hasActiveAgreement?: boolean;
+  agreementStartDate?: string;
+  agreementEndDate?: string;
+  billingMethod?: "direct" | "reimbursement" | "mixed" | string;
+  typicalPaymentTermsDays?: number | string;
+  authorizationPortalUrl?: string;
+  authorizationEmail?: string;
+  claimsEmail?: string;
+  providerSupportPhone?: string;
+  providerSupportWhatsApp?: string;
   insurerCutoffMode?: InsurerBillingCutoffMode | null;
   insurerCutoffDay?: number | null;
   insurerBillingType?: InsurerBillingType | null;
@@ -3274,13 +3834,39 @@ export async function actionCreateInsurerClient(input: {
   email?: string;
   phones?: ClientPhoneChannelInput[];
   emails?: ClientEmailChannelInput[];
+  generalChannels?: CompanyGeneralChannelInput[];
+  contactPeople?: CompanyPersonContactInput[];
+  useSameAddressForFiscal?: boolean;
+  branches?: CompanyBranchDraftInput[];
 }) {
-  const user = await requireAdminUser();
+  const user = await requireClientCreatorUser();
+  const tenantId = tenantIdFromUser(user);
+  const supportsContactExtendedColumns = await safeSupportsClientContactExtendedColumns("clients.actions.createInsurer.contacts");
+  const usesNewContactPayload = Array.isArray(input.generalChannels) || Array.isArray(input.contactPeople);
+  const contactDirectories = await getClientContactDirectories(tenantId, { includeInactive: true });
+  const pbxCategoryOptions = contactDirectories.pbxCategories.map((item) => ({
+    value: item.code.trim() || item.id.trim(),
+    label: item.name,
+    isActive: item.isActive
+  }));
+  const insurerLineOptions = contactDirectories.insurerLines.map((item) => ({
+    value: item.code.trim() || item.id.trim(),
+    label: item.name,
+    isActive: item.isActive
+  }));
+  const insurerLineCodes = new Set(insurerLineOptions.map((item) => item.value).filter(Boolean));
 
   const companyName = normalizeRequired(input.legalName ?? input.name, "Razón social requerida.");
   const tradeName = normalizeOptional(input.tradeName);
   const nit = normalizeRequired(input.nit, "Documento fiscal requerido.");
-  const address = normalizeOptional(input.address);
+  const websiteSelection = normalizeCompanyWebsite(input.website);
+  if (websiteSelection.error) throw new Error(websiteSelection.error);
+  const website = websiteSelection.value;
+  const logoAssetId = normalizeOptional(input.logoAssetId);
+  const logoUrl = normalizeOptional(input.logoUrl) ?? (logoAssetId ? `/api/files/${logoAssetId}` : null);
+  const logoOriginalName = normalizeOptional(input.logoOriginalName);
+  if (logoUrl && !logoAssetId) throw new Error("Logo inválido.");
+  const address = normalizeRequired(input.address, "Dirección requerida.");
   const geoPostalCode = normalizeOptional(input.geoPostalCode);
   const geoFreeState = normalizeOptional(input.geoFreeState);
   const geoFreeCity = normalizeOptional(input.geoFreeCity);
@@ -3293,7 +3879,185 @@ export async function actionCreateInsurerClient(input: {
   const country = normalizeOptional(input.country) ?? geo.countryName;
   const department = normalizeOptional(input.department) ?? geo.admin1Name ?? geoFreeState;
   const city = normalizeOptional(input.city) ?? geo.admin2Name ?? geoFreeCity;
-  if (!country) throw new Error("País requerido.");
+  if (!country) throw new Error("Selecciona país.");
+  if (!department) throw new Error("Selecciona departamento.");
+  if (!city) throw new Error("Selecciona municipio.");
+
+  const companySizeRange = normalizeOptional(input.companySizeRange);
+  if (companySizeRange && !isCompanyEmployeeRangeId(companySizeRange)) {
+    throw new Error("Tamaño de empresa inválido.");
+  }
+
+  const legalForm = normalizeOptional(input.legalForm);
+  const legalFormOther = normalizeOptional(input.legalFormOther);
+  if (usesNewContactPayload && !legalForm) throw new Error("Forma jurídica requerida.");
+  if (legalForm && !isCompanyLegalFormId(legalForm)) throw new Error("Forma jurídica inválida.");
+  if (requiresCompanyLegalFormOther(legalForm) && !legalFormOther) throw new Error("Forma jurídica: debes especificar el detalle para 'Otro'.");
+  if (legalFormOther && legalFormOther.length > 60) throw new Error("Forma jurídica: el detalle no puede exceder 60 caracteres.");
+
+  const legacyEconomicActivitySelection = normalizeOptional(input.economicActivityId);
+  let insurerLinePrimaryCode = normalizeOptional(input.insurerLinePrimaryCode);
+  if (!insurerLinePrimaryCode && legacyEconomicActivitySelection) {
+    insurerLinePrimaryCode = insurerLineCodes.has("otro") ? "otro" : null;
+  }
+  const insurerLineSelection = normalizeInsurerLineSelection({
+    primaryCode: insurerLinePrimaryCode,
+    secondaryCodes: Array.isArray(input.insurerLineSecondaryCodes) ? input.insurerLineSecondaryCodes : []
+  });
+  insurerLinePrimaryCode = insurerLineSelection.primaryCode;
+  const insurerLineSecondaryCodes = insurerLineSelection.secondaryCodes;
+  if (usesNewContactPayload && !insurerLinePrimaryCode) {
+    throw new Error("Ramo principal del seguro requerido.");
+  }
+  if (insurerLinePrimaryCode && insurerLineCodes.size > 0 && !insurerLineCodes.has(insurerLinePrimaryCode)) {
+    throw new Error("Ramo principal inválido o inactivo.");
+  }
+  for (const secondaryCode of insurerLineSecondaryCodes) {
+    if (!insurerLineCodes.has(secondaryCode)) {
+      throw new Error("Ramo adicional inválido o inactivo.");
+    }
+  }
+
+  const insurerTypeId = normalizeRequired(input.insurerTypeId, "Tipo de aseguradora requerido.");
+  const insurerScopeRaw = normalizeOptional(input.insurerScope)?.toLowerCase() ?? null;
+  if (insurerScopeRaw && !["local", "regional", "internacional"].includes(insurerScopeRaw)) {
+    throw new Error("Alcance de aseguradora inválido.");
+  }
+  const insurerScope = insurerScopeRaw as "local" | "regional" | "internacional" | null;
+  const insurerCode = normalizeOptional(input.insurerCode);
+  const hasActiveAgreement = Boolean(input.hasActiveAgreement);
+  const agreementStartDate = parseOptionalDate(input.agreementStartDate);
+  const agreementEndDate = parseOptionalDate(input.agreementEndDate);
+  if (agreementStartDate && agreementEndDate && agreementEndDate.getTime() < agreementStartDate.getTime()) {
+    throw new Error("La fecha fin de convenio no puede ser anterior al inicio.");
+  }
+  const billingMethodRaw = normalizeOptional(input.billingMethod)?.toLowerCase() ?? null;
+  if (billingMethodRaw && !["direct", "reimbursement", "mixed"].includes(billingMethodRaw)) {
+    throw new Error("Método de facturación inválido.");
+  }
+  const billingMethod = billingMethodRaw as "direct" | "reimbursement" | "mixed" | null;
+  const typicalPaymentTermsDaysRaw =
+    typeof input.typicalPaymentTermsDays === "number" ? input.typicalPaymentTermsDays : Number(normalizeOptional(String(input.typicalPaymentTermsDays ?? "")) ?? NaN);
+  const typicalPaymentTermsDays = Number.isFinite(typicalPaymentTermsDaysRaw) ? Math.floor(typicalPaymentTermsDaysRaw) : null;
+  if (typicalPaymentTermsDays !== null && (typicalPaymentTermsDays < 0 || typicalPaymentTermsDays > 365)) {
+    throw new Error("Días de pago inválidos (0-365).");
+  }
+  const authorizationPortalSelection = normalizeCompanyWebsite(input.authorizationPortalUrl);
+  if (authorizationPortalSelection.error) throw new Error(authorizationPortalSelection.error);
+  const authorizationPortalUrl = authorizationPortalSelection.value;
+  const authorizationEmail = normalizeOptional(input.authorizationEmail);
+  if (authorizationEmail && !isValidEmail(authorizationEmail)) throw new Error("Correo de autorizaciones inválido.");
+  const claimsEmail = normalizeOptional(input.claimsEmail);
+  if (claimsEmail && !isValidEmail(claimsEmail)) throw new Error("Correo de siniestros inválido.");
+  const providerSupportPhone = normalizeOptional(input.providerSupportPhone);
+  const providerSupportWhatsApp = normalizeOptional(input.providerSupportWhatsApp);
+
+  const currencySelection = resolveCurrencyPreferenceSelection({
+    preferredCurrencyCode: input.preferredCurrencyCode,
+    acceptedCurrencyCodes: input.acceptedCurrencyCodes
+  });
+  if (currencySelection.invalidPreferredCurrencyCode) throw new Error("Moneda preferida inválida.");
+  if (currencySelection.invalidAcceptedCurrencyCodes.length > 0) throw new Error("Monedas aceptadas inválidas.");
+  const preferredCurrencyCode = currencySelection.preferredCurrencyCode;
+  const acceptedCurrencyCodes = currencySelection.acceptedCurrencyCodes;
+  const explicitBillingEmail = normalizeOptional(input.billingEmail);
+  if (explicitBillingEmail && !isValidEmail(explicitBillingEmail)) {
+    throw new Error("Correo de facturación inválido.");
+  }
+  const commercialNote = normalizeOptional(input.commercialNote);
+
+  const normalizedGeneralChannels = usesNewContactPayload
+    ? normalizeCompanyGeneralChannels(input.generalChannels, { pbxCategoryOptions })
+    : [];
+  const normalizedContactPeople = usesNewContactPayload
+    ? normalizeCompanyPersonContacts(input.contactPeople, { pbxChannels: normalizedGeneralChannels })
+    : [];
+  const legacyPbxExtensionNotes = usesNewContactPayload
+    ? collectLegacyPbxExtensions({ generalChannels: input.generalChannels, pbxCategoryOptions })
+    : [];
+  const normalizedContactPeopleWithLegacy =
+    legacyPbxExtensionNotes.length > 0 && normalizedContactPeople.length > 0
+      ? normalizedContactPeople.map((person, index) => {
+          if (index !== 0) return person;
+          const legacyBlock = legacyPbxExtensionNotes.join(" | ");
+          const notes = [person.notes, legacyBlock].filter(Boolean).join(" | ");
+          return { ...person, notes };
+        })
+      : normalizedContactPeople;
+
+  const normalizedBranchDrafts = normalizeCompanyBranchDrafts(input.branches);
+  for (let index = 0; index < normalizedBranchDrafts.length; index += 1) {
+    const validationError = validateCompanyBranchDraft({
+      branch: normalizedBranchDrafts[index]!,
+      rowNumber: index + 1
+    });
+    if (validationError) throw new Error(validationError);
+  }
+
+  const resolvedBranchLocations = await Promise.all(
+    normalizedBranchDrafts.map(async (branch, index) => {
+      const branchGeo = await resolveGeoSelection({
+        geoCountryId: branch.geoCountryId,
+        geoAdmin1Id: branch.geoAdmin1Id,
+        geoAdmin2Id: branch.geoAdmin2Id,
+        geoAdmin3Id: branch.geoAdmin3Id
+      });
+      const branchCountry = branch.country ?? branchGeo.countryName;
+      const branchDepartment = branch.department ?? branchGeo.admin1Name ?? branch.geoFreeState;
+      const branchCity = branch.city ?? branchGeo.admin2Name ?? branch.geoFreeCity;
+      if (!branchCountry) throw new Error(`Sucursal #${index + 1}: selecciona país.`);
+      if (!branchDepartment) throw new Error(`Sucursal #${index + 1}: selecciona departamento.`);
+      if (!branchCity) throw new Error(`Sucursal #${index + 1}: selecciona municipio.`);
+
+      return {
+        rowNumber: index + 1,
+        name: branch.name,
+        address: branch.address ?? "",
+        country: branchCountry,
+        department: branchDepartment,
+        city: branchCity,
+        geoCountryId: branchGeo.geoCountryId,
+        geoAdmin1Id: branchGeo.geoAdmin1Id,
+        geoAdmin2Id: branchGeo.geoAdmin2Id,
+        geoAdmin3Id: branchGeo.geoAdmin3Id,
+        freeState: branch.geoFreeState,
+        freeCity: branch.geoFreeCity,
+        postalCode: branch.geoPostalCode
+      };
+    })
+  );
+
+  if (usesNewContactPayload) {
+    const generalDraftsError = validateCompanyGeneralChannelDrafts(input.generalChannels, {
+      contactPeople: input.contactPeople,
+      pbxCategoryOptions
+    });
+    if (generalDraftsError) throw new Error(generalDraftsError);
+
+    const contactDraftsError = validateCompanyContactPeopleDrafts(input.contactPeople, {
+      generalChannels: input.generalChannels
+    });
+    if (contactDraftsError) throw new Error(contactDraftsError);
+
+    const generalChannelsError = validateCompanyGeneralChannels(normalizedGeneralChannels);
+    if (generalChannelsError) throw new Error(generalChannelsError);
+
+    const contactPeopleError = validateCompanyContactPeople(normalizedContactPeopleWithLegacy, {
+      generalChannels: normalizedGeneralChannels
+    });
+    if (contactPeopleError) throw new Error(contactPeopleError);
+
+    if (!hasAtLeastOneCompanyChannel({ generalChannels: normalizedGeneralChannels, contactPeople: normalizedContactPeopleWithLegacy })) {
+      throw new Error("Debes registrar al menos un canal general o un canal dentro de personas de contacto.");
+    }
+  }
+
+  const legacyFromGeneralChannels = usesNewContactPayload
+    ? mapCompanyGeneralChannelsToLegacy({ channels: normalizedGeneralChannels })
+    : { phoneChannels: input.phones ?? [], emailChannels: input.emails ?? [] };
+  const personFallbackPhone = usesNewContactPayload ? pickFirstPersonPhone(normalizedContactPeopleWithLegacy) : null;
+  const personFallbackEmail = usesNewContactPayload ? pickFirstPersonEmail(normalizedContactPeopleWithLegacy) : null;
+
   const insurerCutoffMode = input.insurerCutoffMode ?? null;
   const insurerCutoffDay = input.insurerCutoffDay ?? null;
   const insurerBillingType = input.insurerBillingType ?? null;
@@ -3305,13 +4069,13 @@ export async function actionCreateInsurerClient(input: {
     }
   }
   const phoneChannels = normalizeClientPhoneChannels({
-    channels: input.phones,
-    fallbackPhone: input.phone,
-    fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
+    channels: legacyFromGeneralChannels.phoneChannels,
+    fallbackPhone: input.phone ?? personFallbackPhone?.value ?? null,
+    fallbackCountryIso2: input.phoneCountryIso2 ?? personFallbackPhone?.countryIso2 ?? geo.countryIso2
   });
   const emailChannels = normalizeClientEmailChannels({
-    channels: input.emails,
-    fallbackEmail: input.email
+    channels: legacyFromGeneralChannels.emailChannels,
+    fallbackEmail: input.email ?? personFallbackEmail?.value ?? null
   });
   const primaryPhone = pickPrimaryPhoneChannel(phoneChannels);
   const primaryEmail = pickPrimaryEmailChannel(emailChannels);
@@ -3319,18 +4083,55 @@ export async function actionCreateInsurerClient(input: {
   const email = primaryEmail?.valueNormalized ?? normalizeOptional(input.email);
   if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
 
+  const primaryGeneralPhone =
+    normalizedGeneralChannels.find((row) => row.kind !== "EMAIL" && row.isPrimary) ??
+    normalizedGeneralChannels.find((row) => row.kind !== "EMAIL") ??
+    null;
+  const primaryGeneralEmail =
+    normalizedGeneralChannels.find((row) => row.kind === "EMAIL" && row.isPrimary) ??
+    normalizedGeneralChannels.find((row) => row.kind === "EMAIL") ??
+    null;
+  const billingPhone = primaryGeneralPhone ? formatPhoneWithExtension(primaryGeneralPhone.value, primaryGeneralPhone.extension) : phone;
+  const billingEmail = explicitBillingEmail ?? primaryGeneralEmail?.value ?? email;
+
   const defaultStatusId = await resolveDefaultActiveStatusId();
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      if (logoAssetId) {
+        const logoAsset = await tx.fileAsset.findUnique({
+          where: { id: logoAssetId },
+          select: {
+            id: true,
+            mimeType: true,
+            sizeBytes: true,
+            storageKey: true
+          }
+        });
+        if (!logoAsset) throw new Error("Logo inválido.");
+        const logoValidation = validateCompanyLogoAsset({
+          mimeType: logoAsset.mimeType,
+          sizeBytes: logoAsset.sizeBytes,
+          storageKey: logoAsset.storageKey
+        });
+        if (!logoValidation.ok) throw new Error(logoValidation.error);
+      }
+
       const acquisition = await resolveAcquisitionInput(tx, {
         acquisitionSourceId: input.acquisitionSourceId,
         acquisitionDetailOptionId: input.acquisitionDetailOptionId,
         acquisitionOtherNote: input.acquisitionOtherNote
       });
 
+      const reservedClientCode = await reserveNextClientCodeTx(tx, {
+        tenantId,
+        clientType: ClientProfileType.INSURER
+      });
+
       const created = await tx.clientProfile.create({
         data: {
+          tenantId,
+          clientCode: reservedClientCode.code,
           type: ClientProfileType.INSURER,
           companyName,
           tradeName,
@@ -3342,6 +4143,8 @@ export async function actionCreateInsurerClient(input: {
           acquisitionSourceId: acquisition.sourceId,
           acquisitionDetailOptionId: acquisition.detailOptionId,
           acquisitionOtherNote: acquisition.otherNote,
+          photoUrl: logoUrl,
+          photoAssetId: logoAssetId,
           insurerCutoffMode,
           insurerCutoffDay: insurerCutoffMode === InsurerBillingCutoffMode.DAY_OF_MONTH ? insurerCutoffDay : null,
           insurerBillingType,
@@ -3368,6 +4171,86 @@ export async function actionCreateInsurerClient(input: {
         emailChannels,
         fallbackPhone: phone,
         fallbackCountryIso2: input.phoneCountryIso2 ?? geo.countryIso2
+      });
+
+      if (normalizedContactPeopleWithLegacy.length) {
+        for (let index = 0; index < normalizedContactPeopleWithLegacy.length; index += 1) {
+          const person = normalizedContactPeopleWithLegacy[index];
+          const primaryPersonPhone = person.phones.find((row) => row.isPrimary) ?? person.phones[0] ?? null;
+          const primaryPersonEmail = person.emails.find((row) => row.isPrimary) ?? person.emails[0] ?? null;
+          const role = buildLegacyCompanyPersonRole({
+            department: person.department,
+            role: person.role
+          });
+          const name = `${person.firstName} ${person.lastName}`.trim();
+
+          await tx.clientContact.create({
+            data: supportsContactExtendedColumns
+              ? {
+                  clientId: created.id,
+                  name,
+                  relationType: "WORK",
+                  role,
+                  phone: primaryPersonPhone ? formatPhoneWithExtension(primaryPersonPhone.value, primaryPersonPhone.extension) : null,
+                  email: primaryPersonEmail?.value ?? null,
+                  isEmergencyContact: false,
+                  isPrimary: index === 0
+                }
+              : {
+                  clientId: created.id,
+                  name,
+                  role,
+                  phone: primaryPersonPhone ? formatPhoneWithExtension(primaryPersonPhone.value, primaryPersonPhone.extension) : null,
+                  email: primaryPersonEmail?.value ?? null,
+                  isPrimary: index === 0
+                }
+          });
+        }
+      }
+
+      const companyCoreResult = await safeCreateCompanyCoreWithContacts(tx, {
+        tenantId,
+        clientProfileId: created.id,
+        kind: CompanyKind.INSURER,
+        legalName: companyName,
+        tradeName,
+        taxId: nit,
+        website,
+        billingEmail,
+        billingPhone,
+        preferredCurrencyCode,
+        acceptedCurrencyCodes,
+        commercialNote,
+        companySizeRange,
+        legalFormId: legalForm,
+        legalFormOther,
+        activityPrimaryId: null,
+        activitySecondaryIds: [],
+        legacyPbxExtensionNotes,
+        metadataExtra: {
+          insurerTypeId,
+          insurerScope,
+          insurerCode,
+          hasActiveAgreement,
+          agreementStartDate,
+          agreementEndDate,
+          billingMethod,
+          typicalPaymentTermsDays,
+          authorizationPortalUrl,
+          authorizationEmail,
+          claimsEmail,
+          providerSupportPhone,
+          providerSupportWhatsApp,
+          insurerLinePrimaryCode,
+          insurerLineSecondaryCodes,
+          logoUrl,
+          logoAssetId,
+          logoOriginalName,
+          useSameAddressForFiscal: Boolean(input.useSameAddressForFiscal),
+          legacyEconomicActivityId: legacyEconomicActivitySelection
+        },
+        generalChannels: normalizedGeneralChannels,
+        contactPeople: normalizedContactPeopleWithLegacy
       });
 
       const referralResult = await createReferralIfNeeded(tx, {
@@ -3398,6 +4281,35 @@ export async function actionCreateInsurerClient(input: {
         });
       }
 
+      if (resolvedBranchLocations.length) {
+        await tx.clientLocation.createMany({
+          data: resolvedBranchLocations.map((branch) => ({
+            clientId: created.id,
+            type: ClientLocationType.BRANCH,
+            name: branch.name,
+            label: branch.name,
+            code: `SUC_${String(branch.rowNumber).padStart(2, "0")}`,
+            address: branch.address,
+            addressLine1: branch.address,
+            city: branch.city,
+            department: branch.department,
+            country: branch.country,
+            geoCountryId: branch.geoCountryId,
+            geoAdmin1Id: branch.geoAdmin1Id,
+            geoAdmin2Id: branch.geoAdmin2Id,
+            geoAdmin3Id: branch.geoAdmin3Id,
+            freeState: branch.freeState,
+            freeCity: branch.freeCity,
+            postalCode: branch.postalCode,
+            isPrimary: false,
+            metadata: {
+              source: "clients.insurer.new-form.v2",
+              sequence: branch.rowNumber
+            }
+          }))
+        });
+      }
+
       await logClientAuditTx(tx, {
         actorUserId: user.id,
         actorRole: user.roles?.[0] ?? null,
@@ -3405,13 +4317,37 @@ export async function actionCreateInsurerClient(input: {
         action: "CLIENT_CREATED",
         metadata: {
           type: "INSURER",
+          clientCode: reservedClientCode.code,
           acquisitionSourceId: acquisition.sourceId,
           acquisitionSourceCode: acquisition.sourceCode,
           acquisitionDetailOptionId: acquisition.detailOptionId,
           referredByClientId: referralResult.referrerClientId,
           insurerCutoffMode,
           insurerCutoffDay: insurerCutoffMode === InsurerBillingCutoffMode.DAY_OF_MONTH ? insurerCutoffDay : null,
-          insurerBillingType
+          insurerBillingType,
+          insurerTypeId,
+          insurerScope,
+          insurerCode,
+          hasActiveAgreement,
+          agreementStartDate,
+          agreementEndDate,
+          billingMethod,
+          typicalPaymentTermsDays,
+          authorizationPortalUrl,
+          authorizationEmail,
+          claimsEmail,
+          providerSupportPhone,
+          providerSupportWhatsApp,
+          insurerLinePrimaryCode,
+          insurerLineSecondaryCodes,
+          website,
+          logoUrl,
+          logoAssetId,
+          logoOriginalName,
+          companyCoreId: companyCoreResult.companyId,
+          branchCount: resolvedBranchLocations.length,
+          generalChannelsCount: normalizedGeneralChannels.length,
+          contactPeopleCount: normalizedContactPeopleWithLegacy.length
         }
       });
 
@@ -3433,7 +4369,8 @@ export async function actionSearchClientProfiles(input: {
   types: ClientProfileType[];
   limit?: number;
 }) {
-  await requireAdminUser();
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
 
   const q = input.q.trim();
   if (q.length < 2) return { items: [] as Array<{ id: string; type: ClientProfileType; label: string }> };
@@ -3449,9 +4386,11 @@ export async function actionSearchClientProfiles(input: {
 
   const rows = await prisma.clientProfile.findMany({
     where: {
+      tenantId,
       deletedAt: null,
       type: { in: types },
       OR: [
+        { clientCode: { contains: q, mode: insensitiveMode } },
         { companyName: { contains: q, mode: insensitiveMode } },
         { tradeName: { contains: q, mode: insensitiveMode } },
         { nit: { contains: q, mode: insensitiveMode } },
@@ -3472,6 +4411,7 @@ export async function actionSearchClientProfiles(input: {
     take: limit,
     select: {
       id: true,
+      clientCode: true,
       type: true,
       companyName: true,
       tradeName: true,
@@ -6815,6 +7755,259 @@ export async function actionLoadClientPbxCategoryDefaults() {
 
   revalidatePath("/admin/clientes/configuracion");
   revalidatePath("/admin/clientes/empresas/nuevo");
+  return { ok: true, created, reactivated };
+}
+
+export async function actionCreateClientInsurerLine(input: {
+  name: string;
+  code?: string;
+  description?: string;
+  sortOrder?: number;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientInsurerLineDirectoryDelegateOrThrow();
+  const name = normalizeRequired(input.name, "Nombre de ramo requerido.");
+  const codeBase = normalizeContactDirectoryCode({ value: input.code, fallbackName: name });
+  if (!codeBase) throw new Error("Código de ramo inválido.");
+  const existingRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+  const code = resolveUniqueContactDirectoryCode({
+    baseCode: codeBase,
+    existingCodes: existingRows.map((row) => row.code)
+  });
+  if (!code) throw new Error("No se pudo generar un slug único para el ramo.");
+  const description = normalizeOptional(input.description);
+  const sortOrder = normalizeDirectorySortOrder(input.sortOrder);
+
+  try {
+    const created = await delegate.create({
+      data: {
+        tenantId,
+        code,
+        name,
+        description,
+        sortOrder,
+        isActive: true
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_INSURER_LINE_CREATED",
+        entityType: "ClientInsurerLineDirectory",
+        entityId: created.id,
+        metadata: { tenantId, name, code, requestedCode: codeBase, sortOrder }
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    revalidatePath("/admin/clientes/aseguradoras/nuevo");
+    return { id: created.id };
+  } catch (err: any) {
+    if (err?.code === "P2002") throw new Error("Ya existe un ramo con ese nombre o código.");
+    throw err;
+  }
+}
+
+export async function actionUpdateClientInsurerLine(input: {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  sortOrder?: number;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientInsurerLineDirectoryDelegateOrThrow();
+  const id = normalizeRequired(input.id, "Ramo inválido.");
+  const name = normalizeRequired(input.name, "Nombre de ramo requerido.");
+  const codeBase = normalizeContactDirectoryCode({ value: input.code, fallbackName: name });
+  if (!codeBase) throw new Error("Código de ramo inválido.");
+  const description = normalizeOptional(input.description);
+  const sortOrder = normalizeDirectorySortOrder(input.sortOrder);
+
+  const existing = await delegate.findUnique({
+    where: { id },
+    select: { id: true, tenantId: true, name: true, code: true, description: true, sortOrder: true, isActive: true }
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new Error("Ramo no encontrado.");
+
+  const tenantRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+  const code = resolveUniqueContactDirectoryCode({
+    baseCode: codeBase,
+    existingCodes: tenantRows.filter((row) => row.id !== id).map((row) => row.code)
+  });
+  if (!code) throw new Error("No se pudo generar un slug único para el ramo.");
+
+  try {
+    await delegate.update({
+      where: { id },
+      data: {
+        name,
+        code,
+        description,
+        sortOrder
+      },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorRole: user.roles?.[0] ?? null,
+        action: "CLIENT_INSURER_LINE_UPDATED",
+        entityType: "ClientInsurerLineDirectory",
+        entityId: id,
+        before: existing as Prisma.InputJsonValue,
+        after: { name, code, requestedCode: codeBase, description, sortOrder } as Prisma.InputJsonValue
+      }
+    });
+
+    revalidatePath("/admin/clientes/configuracion");
+    revalidatePath("/admin/clientes/aseguradoras/nuevo");
+    return { ok: true };
+  } catch (err: any) {
+    if (err?.code === "P2002") throw new Error("Ya existe un ramo con ese nombre o código.");
+    throw err;
+  }
+}
+
+export async function actionSetClientInsurerLineActive(input: { id: string; isActive: boolean }) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientInsurerLineDirectoryDelegateOrThrow();
+  const id = normalizeRequired(input.id, "Ramo inválido.");
+
+  const existing = await delegate.findUnique({
+    where: { id },
+    select: { id: true, tenantId: true, isActive: true }
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new Error("Ramo no encontrado.");
+
+  await delegate.update({
+    where: { id },
+    data: { isActive: Boolean(input.isActive) },
+    select: { id: true }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_INSURER_LINE_STATUS_CHANGED",
+      entityType: "ClientInsurerLineDirectory",
+      entityId: id,
+      metadata: { before: existing.isActive, after: Boolean(input.isActive) }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/aseguradoras/nuevo");
+  return { ok: true };
+}
+
+export async function actionLoadClientInsurerLineDefaults() {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const delegate = getClientInsurerLineDirectoryDelegateOrThrow();
+
+  const existingRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+
+  const defaultsByCode = new Map(
+    INSURER_LINE_SEED.map((item, index) => [
+      normalizeContactDirectoryCode({ value: item.id }),
+      {
+        ...item,
+        sortOrder: (index + 1) * 10
+      }
+    ] as const)
+  );
+
+  let reactivated = 0;
+  for (const row of existingRows) {
+    const rowCode = normalizeContactDirectoryCode({ value: row.code });
+    if (!defaultsByCode.has(rowCode)) continue;
+    if (row.isActive) continue;
+    await delegate.update({
+      where: { id: row.id },
+      data: { isActive: true },
+      select: { id: true }
+    });
+    reactivated += 1;
+  }
+
+  const refreshedRows = await delegate.findMany({
+    where: { tenantId },
+    select: { id: true, tenantId: true, code: true, name: true, description: true, sortOrder: true, isActive: true }
+  });
+
+  const missingDefaults = resolveMissingInsurerLineDefaults(
+    refreshedRows.map((row) => ({ code: row.code, name: row.name }))
+  );
+
+  let created = 0;
+  for (const defaultRow of missingDefaults) {
+    const codeBase = normalizeContactDirectoryCode({ value: defaultRow.id, fallbackName: defaultRow.label });
+    const code = resolveUniqueContactDirectoryCode({
+      baseCode: codeBase,
+      existingCodes: refreshedRows.map((row) => row.code)
+    });
+    if (!code) continue;
+
+    try {
+      await delegate.create({
+        data: {
+          tenantId,
+          code,
+          name: defaultRow.label,
+          sortOrder: (INSURER_LINE_SEED.findIndex((item) => item.id === defaultRow.id) + 1 || 1) * 10,
+          isSystem: true,
+          isActive: true
+        },
+        select: { id: true }
+      });
+      refreshedRows.push({
+        id: `created_insurer_line_${code}_${created}`,
+        tenantId,
+        code,
+        name: defaultRow.label,
+        description: null,
+        sortOrder: (INSURER_LINE_SEED.findIndex((item) => item.id === defaultRow.id) + 1 || 1) * 10,
+        isActive: true
+      });
+      created += 1;
+    } catch (error: any) {
+      if (error?.code !== "P2002") {
+        throw error;
+      }
+    }
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: user.id,
+      actorRole: user.roles?.[0] ?? null,
+      action: "CLIENT_INSURER_LINE_DEFAULTS_LOADED",
+      entityType: "ClientInsurerLineDirectory",
+      entityId: tenantId,
+      metadata: { tenantId, created, reactivated }
+    }
+  });
+
+  revalidatePath("/admin/clientes/configuracion");
+  revalidatePath("/admin/clientes/aseguradoras/nuevo");
   return { ok: true, created, reactivated };
 }
 

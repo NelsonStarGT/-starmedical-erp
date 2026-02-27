@@ -2,6 +2,7 @@ import AdminShellClient from "./AdminShellClient";
 import { cookies } from "next/headers";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { resolveReceptionRole } from "@/lib/reception/rbac";
+import { canAccessRecepcion } from "@/lib/recepcion/rbac";
 import { canSeePortales } from "@/components/layout/nav";
 import { resolveActiveBranchWithMeta } from "@/lib/branch/activeBranch";
 import { getTenantNavigationPolicy, getTenantThemeConfig } from "@/lib/config-central";
@@ -32,7 +33,7 @@ export default async function AdminShellServer({
 }) {
   const cookieStore = await cookies();
   const user = await getSessionUserFromCookies(cookieStore);
-  const canAccessReception = Boolean(resolveReceptionRole(user?.roles ?? []));
+  const canAccessReception = Boolean(resolveReceptionRole(user?.roles ?? [])) || canAccessRecepcion(user);
   const roles = user?.roles ?? [];
   const permissions = user?.permissions ?? [];
   const canAccessMedicalCommissions = hasAnyRole(roles, ["SUPER_ADMIN", "ADMIN"]);

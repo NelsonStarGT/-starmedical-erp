@@ -178,18 +178,22 @@ export default function LocationPicker({
   disabled,
   errors,
   className,
+  idPrefix,
   title = "Ubicación",
   subtitle,
-  showPostalCode = true
+  showPostalCode = true,
+  onCatalogModeChange
 }: {
   value: LocationPickerValue;
   onChange: (next: LocationPickerValue) => void;
   disabled?: boolean;
   errors?: LocationPickerErrors;
   className?: string;
+  idPrefix?: string;
   title?: string;
   subtitle?: string;
   showPostalCode?: boolean;
+  onCatalogModeChange?: (hasDivisionCatalog: boolean) => void;
 }) {
   const [isLoadingCountries, setIsLoadingCountries] = useState(false);
   const [isLoadingDepartments, setIsLoadingDepartments] = useState(false);
@@ -209,6 +213,39 @@ export default function LocationPicker({
 
   const skipPostalLookupRef = useRef(false);
   const skipReverseLookupRef = useRef(false);
+  const onChangeRef = useRef(onChange);
+  const lastCatalogModeNotifiedRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  const emitChange = useCallback(
+    (next: LocationPickerValue) => {
+      if (
+        value.countryId === next.countryId &&
+        value.departmentId === next.departmentId &&
+        value.municipalityId === next.municipalityId &&
+        value.admin3Id === next.admin3Id &&
+        value.postalCode === next.postalCode &&
+        (value.freeState ?? "") === (next.freeState ?? "") &&
+        (value.freeCity ?? "") === (next.freeCity ?? "")
+      ) {
+        return false;
+      }
+      onChangeRef.current(next);
+      return true;
+    },
+    [
+      value.admin3Id,
+      value.countryId,
+      value.departmentId,
+      value.freeCity,
+      value.freeState,
+      value.municipalityId,
+      value.postalCode
+    ]
+  );
 
   const isDisabled = Boolean(disabled);
 
@@ -252,7 +289,7 @@ export default function LocationPicker({
       const nextMunicipalityId = match.admin2Id ?? match.admin2?.id ?? "";
       const nextAdmin3Id = match.admin3Id ?? match.admin3?.id ?? "";
 
-      onChange({
+      emitChange({
         countryId: nextCountryId,
         departmentId: hasDivisionCatalog ? nextDepartmentId : "",
         municipalityId: hasDivisionCatalog ? nextMunicipalityId : "",
@@ -262,14 +299,15 @@ export default function LocationPicker({
         freeCity: hasDivisionCatalog ? value.freeCity ?? "" : (match.admin2?.name ?? value.freeCity ?? "")
       });
 
-      setPostalMatches([]);
-      setError(null);
+      setPostalMatches((prev) => (prev.length ? [] : prev));
+      setError((prev) => (prev === null ? prev : null));
     },
-    [hasDivisionCatalog, onChange, value.countryId, value.freeCity, value.freeState]
+    [emitChange, hasDivisionCatalog, value.countryId, value.freeCity, value.freeState]
   );
 
   useEffect(() => {
-    setPostalInput(value.postalCode || "");
+    const nextPostal = value.postalCode || "";
+    setPostalInput((prev) => (prev === nextPostal ? prev : nextPostal));
   }, [value.postalCode]);
 
   useEffect(() => {
@@ -309,11 +347,11 @@ export default function LocationPicker({
     let cancelled = false;
 
     if (!value.countryId) {
-      setDepartments([]);
-      setMunicipalities([]);
-      setAdmin3Options([]);
-      setPostalMatches([]);
-      setHasDivisionCatalog(true);
+      setDepartments((prev) => (prev.length ? [] : prev));
+      setMunicipalities((prev) => (prev.length ? [] : prev));
+      setAdmin3Options((prev) => (prev.length ? [] : prev));
+      setPostalMatches((prev) => (prev.length ? [] : prev));
+      setHasDivisionCatalog((prev) => (prev ? prev : true));
       return;
     }
 
@@ -338,13 +376,16 @@ export default function LocationPicker({
         if (cancelled) return;
         const items = ensureDivisions(json.items);
         setDepartments(items);
-        setHasDivisionCatalog(items.length > 0);
-        setError(null);
+        setHasDivisionCatalog((prev) => (prev === (items.length > 0) ? prev : items.length > 0));
+        setError((prev) => (prev === null ? prev : null));
       } catch (err) {
         if (cancelled) return;
         const geoError = err as GeoRequestError;
         setDepartments([]);
-        setHasDivisionCatalog(!geoError.isAuth ? false : true);
+        setHasDivisionCatalog((prev) => {
+          const next = !geoError.isAuth ? false : true;
+          return prev === next ? prev : next;
+        });
         setError(mapGeoLoadErrorMessage(geoError.message, "No se pudieron cargar divisiones de primer nivel."));
       } finally {
         if (!cancelled) setIsLoadingDepartments(false);
@@ -361,8 +402,8 @@ export default function LocationPicker({
     let cancelled = false;
 
     if (!hasDivisionCatalog || !value.departmentId) {
-      setMunicipalities([]);
-      setAdmin3Options([]);
+      setMunicipalities((prev) => (prev.length ? [] : prev));
+      setAdmin3Options((prev) => (prev.length ? [] : prev));
       return;
     }
 
@@ -387,10 +428,10 @@ export default function LocationPicker({
         }
         if (cancelled) return;
         setMunicipalities(ensureDivisions(json.items));
-        setError(null);
+        setError((prev) => (prev === null ? prev : null));
       } catch (err) {
         if (cancelled) return;
-        setMunicipalities([]);
+        setMunicipalities((prev) => (prev.length ? [] : prev));
         setError(mapGeoLoadErrorMessage((err as Error)?.message, "No se pudieron cargar divisiones de segundo nivel."));
       } finally {
         if (!cancelled) setIsLoadingMunicipalities(false);
@@ -407,7 +448,7 @@ export default function LocationPicker({
     let cancelled = false;
 
     if (!hasDivisionCatalog || !value.municipalityId) {
-      setAdmin3Options([]);
+      setAdmin3Options((prev) => (prev.length ? [] : prev));
       return;
     }
 
@@ -432,10 +473,10 @@ export default function LocationPicker({
         }
         if (cancelled) return;
         setAdmin3Options(ensureDivisions(json.items));
-        setError(null);
+        setError((prev) => (prev === null ? prev : null));
       } catch (err) {
         if (cancelled) return;
-        setAdmin3Options([]);
+        setAdmin3Options((prev) => (prev.length ? [] : prev));
         setError(mapGeoLoadErrorMessage((err as Error)?.message, "No se pudieron cargar divisiones de tercer nivel."));
       } finally {
         if (!cancelled) setIsLoadingAdmin3(false);
@@ -459,7 +500,7 @@ export default function LocationPicker({
 
     if (!value.countryId || normalizedPostal.length < 3) {
       if (!normalizedPostal.length) {
-        setPostalMatches([]);
+        setPostalMatches((prev) => (prev.length ? [] : prev));
       }
       return;
     }
@@ -487,15 +528,15 @@ export default function LocationPicker({
         if (items.length === 1) {
           applyPostalMatch(items[0]);
           skipPostalLookupRef.current = true;
-          setPostalInput(items[0].postalCode);
+          setPostalInput((prev) => (prev === items[0].postalCode ? prev : items[0].postalCode));
           return;
         }
 
         setPostalMatches(items);
-        setError(null);
+        setError((prev) => (prev === null ? prev : null));
       } catch (err) {
         if (cancelled) return;
-        setPostalMatches([]);
+        setPostalMatches((prev) => (prev.length ? [] : prev));
         setError(mapGeoLoadErrorMessage((err as Error)?.message, "No se pudo buscar el codigo postal."));
       } finally {
         if (!cancelled) setIsLoadingPostal(false);
@@ -545,8 +586,8 @@ export default function LocationPicker({
         const items = ensurePostalArray(json.items);
         if (items.length === 1) {
           skipPostalLookupRef.current = true;
-          setPostalInput(items[0].postalCode);
-          onChange({
+          setPostalInput((prev) => (prev === items[0].postalCode ? prev : items[0].postalCode));
+          emitChange({
             countryId: value.countryId,
             departmentId: value.departmentId,
             municipalityId: value.municipalityId,
@@ -555,7 +596,7 @@ export default function LocationPicker({
             freeState: value.freeState ?? "",
             freeCity: value.freeCity ?? ""
           });
-          setPostalMatches([]);
+          setPostalMatches((prev) => (prev.length ? [] : prev));
           return;
         }
 
@@ -565,10 +606,10 @@ export default function LocationPicker({
         }
 
         if (!value.admin3Id) {
-          setPostalMatches([]);
+          setPostalMatches((prev) => (prev.length ? [] : prev));
         }
       } catch {
-        if (!cancelled) setPostalMatches([]);
+        if (!cancelled) setPostalMatches((prev) => (prev.length ? [] : prev));
       }
     }, 250);
 
@@ -577,8 +618,8 @@ export default function LocationPicker({
       clearTimeout(timeout);
     };
   }, [
+    emitChange,
     hasDivisionCatalog,
-    onChange,
     value.admin3Id,
     value.countryId,
     value.departmentId,
@@ -605,6 +646,21 @@ export default function LocationPicker({
     [postalMatches]
   );
 
+  useEffect(() => {
+    if (!onCatalogModeChange) return;
+    if (lastCatalogModeNotifiedRef.current === hasDivisionCatalog) return;
+    lastCatalogModeNotifiedRef.current = hasDivisionCatalog;
+    onCatalogModeChange(hasDivisionCatalog);
+  }, [hasDivisionCatalog, onCatalogModeChange]);
+
+  const postalInputId = idPrefix ? `${idPrefix}-postal-code` : undefined;
+  const countryTriggerId = idPrefix ? `${idPrefix}-country` : undefined;
+  const admin1TriggerId = idPrefix ? `${idPrefix}-admin1` : undefined;
+  const admin2TriggerId = idPrefix ? `${idPrefix}-admin2` : undefined;
+  const admin3TriggerId = idPrefix ? `${idPrefix}-admin3` : undefined;
+  const freeStateInputId = idPrefix ? `${idPrefix}-free-state` : undefined;
+  const freeCityInputId = idPrefix ? `${idPrefix}-free-city` : undefined;
+
   return (
     <section className={cn("space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-4", className)}>
       <div>
@@ -617,11 +673,12 @@ export default function LocationPicker({
           <div className="space-y-1">
             <p className="text-xs font-semibold text-slate-500">Código postal (opcional)</p>
             <input
+              id={postalInputId}
               value={postalInput}
               onChange={(event) => {
                 const nextPostal = event.target.value;
-                setPostalInput(nextPostal);
-                onChange({
+                setPostalInput((prev) => (prev === nextPostal ? prev : nextPostal));
+                emitChange({
                   countryId: value.countryId,
                   departmentId: value.departmentId,
                   municipalityId: value.municipalityId,
@@ -658,7 +715,7 @@ export default function LocationPicker({
                   const match = postalMatches.find((item) => item.id === selectedId);
                   if (!match) return;
                   skipPostalLookupRef.current = true;
-                  setPostalInput(match.postalCode);
+                  setPostalInput((prev) => (prev === match.postalCode ? prev : match.postalCode));
                   applyPostalMatch(match);
                 }}
               />
@@ -671,11 +728,12 @@ export default function LocationPicker({
 
       <div className={cn("grid gap-3", hasDivisionCatalog ? (showAdmin3 ? "md:grid-cols-4" : "md:grid-cols-3") : "md:grid-cols-3")}>
         <CountryPicker
+          triggerId={countryTriggerId}
           value={value.countryId}
           options={countryOptions}
           onChange={(countryId) => {
-            setPostalMatches([]);
-            onChange({
+            setPostalMatches((prev) => (prev.length ? [] : prev));
+            emitChange({
               countryId,
               departmentId: "",
               municipalityId: "",
@@ -694,11 +752,12 @@ export default function LocationPicker({
         {hasDivisionCatalog ? (
           <>
             <GeoSearchSelect
+              triggerId={admin1TriggerId}
               label={labels.admin1}
               value={value.departmentId}
               options={departmentOptions}
               onChange={(departmentId) =>
-                onChange({
+                emitChange({
                   countryId: value.countryId,
                   departmentId,
                   municipalityId: "",
@@ -714,11 +773,12 @@ export default function LocationPicker({
             />
 
             <GeoSearchSelect
+              triggerId={admin2TriggerId}
               label={labels.admin2}
               value={value.municipalityId}
               options={municipalityOptions}
               onChange={(municipalityId) =>
-                onChange({
+                emitChange({
                   countryId: value.countryId,
                   departmentId: value.departmentId,
                   municipalityId,
@@ -741,11 +801,12 @@ export default function LocationPicker({
 
             {showAdmin3 ? (
               <GeoSearchSelect
+                triggerId={admin3TriggerId}
                 label={labels.admin3}
                 value={value.admin3Id}
                 options={admin3SearchOptions}
                 onChange={(admin3Id) =>
-                  onChange({
+                  emitChange({
                     countryId: value.countryId,
                     departmentId: value.departmentId,
                     municipalityId: value.municipalityId,
@@ -772,9 +833,10 @@ export default function LocationPicker({
             <div className="space-y-1">
               <p className="text-xs font-semibold text-slate-500">Estado / Provincia (texto)</p>
               <input
+                id={freeStateInputId}
                 value={value.freeState ?? ""}
                 onChange={(event) =>
-                  onChange({
+                  emitChange({
                     countryId: value.countryId,
                     departmentId: "",
                     municipalityId: "",
@@ -798,9 +860,10 @@ export default function LocationPicker({
             <div className="space-y-1">
               <p className="text-xs font-semibold text-slate-500">Ciudad / Municipio (texto)</p>
               <input
+                id={freeCityInputId}
                 value={value.freeCity ?? ""}
                 onChange={(event) =>
-                  onChange({
+                  emitChange({
                     countryId: value.countryId,
                     departmentId: "",
                     municipalityId: "",

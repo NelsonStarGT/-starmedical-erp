@@ -19,6 +19,7 @@ import {
 import { resolveClientIdFromRef } from "@/lib/clients/detailResolver";
 import { getClientDocumentPermissions } from "@/lib/clients/permissions";
 import { buildRequiredDocumentsChecklist, warnDevMissingRequiredDocsDelegate } from "@/lib/clients/requiredDocuments";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 
@@ -156,6 +157,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
     return NextResponse.json({ ok: false, error: "No autorizado." }, { status: 403 });
   }
   const canReturnDocumentList = isAdmin(auth.user) || permissions.canViewDocs;
+  const tenantId = tenantIdFromUser(auth.user);
 
   const routeParams = await context.params;
   const requestedId = routeParams.id?.trim() ?? "";
@@ -168,7 +170,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
 
   let resolvedId = requestedId;
   let client = await prisma.clientProfile.findFirst({
-    where: { id: requestedId, deletedAt: null },
+    where: { id: requestedId, tenantId, deletedAt: null },
     select: clientSelect
   });
 
@@ -177,11 +179,11 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
       console.warn("[DEV][clients.preview] client not found by id", { requestedId });
     }
 
-    const fallbackResolvedId = await resolveClientIdFromRef(requestedId);
+    const fallbackResolvedId = await resolveClientIdFromRef(requestedId, { tenantId });
     if (fallbackResolvedId && fallbackResolvedId !== requestedId) {
       resolvedId = fallbackResolvedId;
       client = await prisma.clientProfile.findFirst({
-        where: { id: fallbackResolvedId, deletedAt: null },
+        where: { id: fallbackResolvedId, tenantId, deletedAt: null },
         select: clientSelect
       });
     }
