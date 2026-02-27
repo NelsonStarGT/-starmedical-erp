@@ -8,6 +8,10 @@ import {
   type OperatingCountryDefaultsSnapshot
 } from "@/lib/clients/operatingCountryDefaults";
 
+type CookieStoreLike = {
+  get(name: string): { value?: string | null } | undefined;
+};
+
 type OperatingCountryRow = {
   tenantId: string;
   isOperatingCountryPinned: boolean;
@@ -27,6 +31,53 @@ type OperatingCountryRow = {
 };
 
 const operatingCountryConfigCache = new Map<string, OperatingCountryDefaultsSnapshot>();
+
+type GeoCountryProjection = {
+  id: string;
+  iso2: string;
+  name: string;
+  callingCode: string | null;
+  admin1Label: string | null;
+  admin2Label: string | null;
+  admin3Label: string | null;
+};
+
+function clean(value: string | null | undefined) {
+  const normalized = String(value || "").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function findActiveCountryProjection(countryIdOrIso2: string | null | undefined): Promise<GeoCountryProjection | null> {
+  const normalized = clean(countryIdOrIso2);
+  if (!normalized) return null;
+  const byId = await prisma.geoCountry.findFirst({
+    where: { id: normalized, isActive: true },
+    select: {
+      id: true,
+      iso2: true,
+      name: true,
+      callingCode: true,
+      admin1Label: true,
+      admin2Label: true,
+      admin3Label: true
+    }
+  });
+  if (byId) return byId;
+
+  const byIso2 = await prisma.geoCountry.findFirst({
+    where: { iso2: normalized.toUpperCase(), isActive: true },
+    select: {
+      id: true,
+      iso2: true,
+      name: true,
+      callingCode: true,
+      admin1Label: true,
+      admin2Label: true,
+      admin3Label: true
+    }
+  });
+  return byIso2 ?? null;
+}
 
 function toSnapshot(
   row: OperatingCountryRow,
@@ -189,4 +240,32 @@ export async function updateOperatingCountryDefaults(input: {
   });
 
   return cacheSnapshot(toSnapshot(row));
+}
+
+export async function getEffectiveOperatingCountryDefaults(
+  tenantIdInput: unknown,
+  options?: {
+    cookieStore?: CookieStoreLike | null;
+    countryIdOrIso2?: string | null;
+  }
+): Promise<OperatingCountryDefaultsSnapshot> {
+  const defaults = await getOperatingCountryDefaults(tenantIdInput);
+  const requestedCountry =
+    clean(options?.countryIdOrIso2)
+    ?? clean(defaults.operatingCountryId)
+    ?? "GT";
+
+  const selectedCountry = await findActiveCountryProjection(requestedCountry);
+  if (!selectedCountry) return defaults;
+
+  return {
+    ...defaults,
+    operatingCountryId: selectedCountry.id,
+    operatingCountryCode: selectedCountry.iso2,
+    operatingCountryName: selectedCountry.name,
+    operatingCountryCallingCode: selectedCountry.callingCode ?? null,
+    admin1Label: selectedCountry.admin1Label ?? null,
+    admin2Label: selectedCountry.admin2Label ?? null,
+    admin3Label: selectedCountry.admin3Label ?? null
+  };
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, Globe, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type CountryPickerOption = {
@@ -11,6 +11,7 @@ export type CountryPickerOption = {
   callingCode?: string | null;
   name: string;
   isActive?: boolean;
+  isAllOption?: boolean;
 };
 
 const PRIORITY_ISO2 = [
@@ -36,8 +37,16 @@ function iso2ToFlag(iso2: string) {
     .join("");
 }
 
+function isAllOption(item: CountryPickerOption) {
+  if (item.isAllOption) return true;
+  const id = item.id.trim().toUpperCase();
+  return id === "ALL";
+}
+
 function sortCountries(options: CountryPickerOption[]) {
-  return [...options].sort((a, b) => {
+  const allOptions = options.filter((item) => isAllOption(item));
+  const regularOptions = options.filter((item) => !isAllOption(item));
+  regularOptions.sort((a, b) => {
     const pa = PRIORITY_ISO2.indexOf(a.code.toUpperCase());
     const pb = PRIORITY_ISO2.indexOf(b.code.toUpperCase());
     const inPriorityA = pa !== -1;
@@ -47,6 +56,7 @@ function sortCountries(options: CountryPickerOption[]) {
     if (inPriorityB) return 1;
     return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
   });
+  return [...allOptions, ...regularOptions];
 }
 
 export default function CountryPicker({
@@ -58,7 +68,9 @@ export default function CountryPicker({
   error,
   placeholder = "Selecciona país",
   className,
-  triggerId
+  triggerId,
+  popover = false,
+  hideLabel = false
 }: {
   label?: string;
   value: string;
@@ -69,6 +81,8 @@ export default function CountryPicker({
   placeholder?: string;
   className?: string;
   triggerId?: string;
+  popover?: boolean;
+  hideLabel?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -104,9 +118,11 @@ export default function CountryPicker({
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [open]);
 
+  const selectedIsAll = selected ? isAllOption(selected) : false;
+
   return (
-    <div className={cn("space-y-1", className)} ref={containerRef}>
-      <p className="text-xs font-semibold text-slate-500">{label}</p>
+    <div className={cn("relative space-y-1", hideLabel && "space-y-0", className)} ref={containerRef}>
+      {hideLabel ? <span className="sr-only">{label}</span> : <p className="text-xs font-semibold text-slate-500">{label}</p>}
       <button
         id={triggerId}
         type="button"
@@ -120,16 +136,20 @@ export default function CountryPicker({
           error && "border-rose-300 focus:border-rose-300 focus:ring-rose-200",
           disabled && "cursor-not-allowed bg-slate-100 text-slate-400"
         )}
-        aria-label="Seleccionar país"
+        aria-label={label || "Seleccionar país"}
       >
         {selected ? (
           <span className="inline-flex min-w-0 items-center gap-2 text-slate-700">
-            <span>{iso2ToFlag(selected.code)}</span>
-            <span className="truncate font-semibold">{selected.name}</span>
-            <span className="text-xs text-slate-500">
-              {selected.code.toUpperCase()}
-              {selected.callingCode ? ` · +${selected.callingCode}` : ""}
+            <span className="inline-flex items-center justify-center">
+              {selectedIsAll ? <Globe size={14} className="text-slate-600" /> : <span>{iso2ToFlag(selected.code)}</span>}
             </span>
+            <span className="truncate font-semibold">{selected.name}</span>
+            {!selectedIsAll ? (
+              <span className="text-xs text-slate-500">
+                {selected.code.toUpperCase()}
+                {selected.callingCode ? ` · +${selected.callingCode}` : ""}
+              </span>
+            ) : null}
           </span>
         ) : (
           <span className="text-slate-400">{placeholder}</span>
@@ -138,7 +158,12 @@ export default function CountryPicker({
       </button>
 
       {open && !disabled ? (
-        <div className="relative z-30 rounded-xl border border-slate-200 bg-white shadow-xl">
+        <div
+          className={cn(
+            "z-30 rounded-xl border border-slate-200 bg-white shadow-xl",
+            popover ? "absolute left-0 right-0 top-full mt-1" : "relative"
+          )}
+        >
           <div className="sticky top-0 border-b border-slate-100 bg-white p-2">
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2 top-2.5 text-slate-400" />
@@ -150,7 +175,7 @@ export default function CountryPicker({
               />
             </div>
           </div>
-          <div className="max-h-72 overflow-auto p-1">
+          <div className="max-h-80 overflow-auto p-1">
             {filtered.map((item) => (
               <button
                 key={item.id}
@@ -166,13 +191,17 @@ export default function CountryPicker({
                 )}
               >
                 <span className="inline-flex min-w-0 items-center gap-2">
-                  <span>{iso2ToFlag(item.code)}</span>
+                  <span className="inline-flex items-center justify-center">
+                    {isAllOption(item) ? <Globe size={14} className="text-slate-600" /> : <span>{iso2ToFlag(item.code)}</span>}
+                  </span>
                   <span className="truncate font-semibold">{item.name}</span>
                 </span>
-                <span className="text-xs text-slate-500">
-                  {item.code.toUpperCase()}
-                  {item.callingCode ? ` · +${item.callingCode}` : ""}
-                </span>
+                {isAllOption(item) ? null : (
+                  <span className="text-xs text-slate-500">
+                    {item.code.toUpperCase()}
+                    {item.callingCode ? ` · +${item.callingCode}` : ""}
+                  </span>
+                )}
               </button>
             ))}
             {!filtered.length ? <p className="px-2 py-3 text-xs text-slate-500">Sin resultados.</p> : null}

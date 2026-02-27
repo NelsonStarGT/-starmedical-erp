@@ -31,7 +31,9 @@ import ClientsConfigChannelsSummary from "@/components/clients/config/ClientsCon
 import ClientsConfigValidationsSummary from "@/components/clients/config/ClientsConfigValidationsSummary";
 import ClientsConfigDiagnosticsPanel from "@/components/clients/config/ClientsConfigDiagnosticsPanel";
 import ClientsConfigTabsNav from "@/components/clients/config/ClientsConfigTabsNav";
+import CbcHeaderBar from "@/components/clients/CbcHeaderBar";
 import ConfigAccessDeniedCard from "@/components/configuracion/ConfigAccessDeniedCard";
+import CollapsibleCard from "@/components/ui/CollapsibleCard";
 import type {
   ClientsConfigManagerPayload,
   ConfigCatalogItem,
@@ -326,13 +328,19 @@ function FallbackBanner({ sources }: { sources: SectionSource[] }) {
   const fallbackSources = sources.filter((item) => isFallbackSource(item.source));
   if (!fallbackSources.length) return null;
   return (
-    <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-      <p className="font-semibold">Modo fallback activo</p>
-      <p className="mt-1 text-xs">
+    <CollapsibleCard
+      title="Modo fallback activo"
+      subtitle={`${fallbackSources.length} origen${fallbackSources.length === 1 ? "" : "es"} en fallback/defaults`}
+      className="border-amber-200 bg-amber-50"
+      summary={<p className="text-xs text-amber-900">Fuentes: {fallbackSources.map((item) => item.label).join(", ")}.</p>}
+    >
+      <p className="text-xs text-amber-900">
         Este tab está usando datos por defecto para: {fallbackSources.map((item) => item.label).join(", ")}.
       </p>
-      <p className="mt-1 text-xs">Recomendación: carga inicial y/o configuración explícita para persistir en DB tenant-scoped.</p>
-    </section>
+      <p className="text-xs text-amber-900">
+        Recomendación: carga inicial y/o configuración explícita para persistir en DB tenant-scoped.
+      </p>
+    </CollapsibleCard>
   );
 }
 
@@ -988,20 +996,17 @@ export default async function ClientesConfiguracionPage({
   }
 
   const fallbackCount = sectionSources.filter((item) => isFallbackSource(item.source)).length;
+  const sectionDescription = buildSectionDescription(section, registryEntries);
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-2xl border border-[#dce7f5] bg-white p-5 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#2e75ba]">Clientes</p>
-        <h1 className="mt-1 text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
-          Clientes · Configuración
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Data Console para gobierno de datos, reglas y validaciones de Clientes. Enfocada en lectura rápida y administración por contexto.
-        </p>
-      </section>
+    <div className="space-y-3">
+      <CbcHeaderBar
+        title="Configuración"
+        subtitle={SECTION_LABELS[section]}
+        helpText={sectionDescription}
+      />
 
-      <section className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
+      <section className="rounded-xl border border-[#dce7f5] bg-white p-3 shadow-sm">
         <ClientsConfigTabsNav
           tabs={visibleTabs.map((tabKey) => ({ key: tabKey, label: SECTION_LABELS[tabKey] }))}
           section={section}
@@ -1009,7 +1014,6 @@ export default async function ClientesConfiguracionPage({
           preferenceScope={preferenceScope}
           fallbackCount={fallbackCount}
         />
-        <p className="mt-2 text-xs text-slate-500">{buildSectionDescription(section, registryEntries)}</p>
         {sectionSources.length ? (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {sectionSources.map((item) => (

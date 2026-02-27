@@ -35,7 +35,6 @@ import {
 } from "@/app/admin/clientes/actions";
 import { ClientProfileLookup, type ClientProfileLookupItem } from "@/components/clients/ClientProfileLookup";
 import GeoCascadeFieldset, { type GeoCascadeErrors, type GeoCascadeValue } from "@/components/clients/GeoCascadeFieldset";
-import { useClientsCountryContext } from "@/components/clients/useClientsCountryContext";
 import CountryPicker, { type CountryPickerOption } from "@/components/clients/CountryPicker";
 import PhoneInput, { type PhoneInputMeta } from "@/components/ui/PhoneInput";
 import {
@@ -383,7 +382,6 @@ export default function PersonCreateForm({
 }) {
   const router = useRouter();
   const clientsDateFormat = useClientsDateFormat(initialDateFormat);
-  const { country: countryContext } = useClientsCountryContext();
   const [isPending, startTransition] = useTransition();
 
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
@@ -805,22 +803,24 @@ export default function PersonCreateForm({
   }, [form.identityCountryId, handleAsyncError]);
 
   useEffect(() => {
-    if (!initialOperatingDefaults?.isOperatingCountryPinned) return;
-    const countryId = initialOperatingDefaults.operatingCountryId;
+    const countryId = initialOperatingDefaults?.operatingCountryId;
     if (!countryId) return;
+    const scopes = initialOperatingDefaults.scopes;
 
     setForm((prev) => {
       const countryDefaults: Partial<FormState> = {
-        identityCountryId: initialOperatingDefaults.scopes.identity ? countryId : undefined,
-        residenceCountryId: initialOperatingDefaults.scopes.residence ? countryId : undefined,
-        geoCountryId: initialOperatingDefaults.scopes.geo ? countryId : undefined
+        identityCountryId: scopes.identity ? countryId : undefined,
+        birthCountryId: scopes.identity ? countryId : undefined,
+        residenceCountryId: scopes.residence ? countryId : undefined,
+        geoCountryId: scopes.geo ? countryId : undefined,
+        workGeoCountryId: scopes.geo ? countryId : undefined
       };
 
       return applyDefaultsToDraft(prev, countryDefaults);
     });
 
     const defaultIso2 = initialOperatingDefaults.operatingCountryCode?.trim().toUpperCase();
-    if (initialOperatingDefaults.scopes.phone && defaultIso2) {
+    if (scopes.phone && defaultIso2) {
       setForm((prev) =>
         applyDefaultsToDraft(prev, {
           phoneCountryIso2: defaultIso2
@@ -840,22 +840,6 @@ export default function PersonCreateForm({
       });
     }
   }, [initialOperatingDefaults]);
-
-  useEffect(() => {
-    if (initialOperatingDefaults?.isOperatingCountryPinned) return;
-    if (!countryContext?.countryId) return;
-    setForm((prev) =>
-      prev.identityCountryId && prev.birthCountryId && prev.residenceCountryId
-        ? prev
-        : {
-            ...prev,
-            identityCountryId: prev.identityCountryId || countryContext.countryId,
-            birthCountryId: prev.birthCountryId || countryContext.countryId,
-            residenceCountryId: prev.residenceCountryId || countryContext.countryId,
-            geoCountryId: prev.geoCountryId || countryContext.countryId
-          }
-    );
-  }, [countryContext?.countryId, initialOperatingDefaults?.isOperatingCountryPinned]);
 
   useEffect(() => {
     if (!form.residenceSameAsIdentity) return;
@@ -1453,7 +1437,7 @@ export default function PersonCreateForm({
   }
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="mx-auto w-full max-w-6xl space-y-4 pb-24">
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
@@ -1534,7 +1518,7 @@ export default function PersonCreateForm({
             <CollapsibleSection
               id="person-section-identity"
               title="Identidad"
-              subtitle="Nombres y documento. País operativo permanece oculto en /nuevo."
+              subtitle="Nombres y documento. Usa el país operativo para prefijos y labels por defecto."
               open={openSections.identity}
               onToggle={() => toggleSection("identity")}
             >

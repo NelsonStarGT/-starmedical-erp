@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ClientProfileType } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
+import { normalizeClientsCountryFilterInput, readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
 import { getClientsReportList, type ClientsReportFilters } from "@/lib/clients/reports.service";
 import { tenantIdFromUser } from "@/lib/tenant";
 
@@ -19,6 +20,8 @@ function buildFilters(req: NextRequest, tenantId: string): ClientsReportFilters 
   const rawType = searchParams.get("type");
   const page = Number(searchParams.get("page") || "1");
   const pageSize = Number(searchParams.get("pageSize") || "25");
+  const queryCountryId = normalizeClientsCountryFilterInput(searchParams.get("countryId"));
+  const cookieCountryId = readClientsCountryFilterCookie(req.cookies);
 
   return {
     tenantId,
@@ -29,7 +32,7 @@ function buildFilters(req: NextRequest, tenantId: string): ClientsReportFilters 
         : "ALL",
     from: parseDate(searchParams.get("from")),
     to: parseDate(searchParams.get("to")),
-    country: searchParams.get("country") || undefined,
+    countryId: queryCountryId ?? cookieCountryId ?? undefined,
     acquisitionSourceId: searchParams.get("sourceId") || undefined,
     acquisitionDetailOptionId: searchParams.get("detailId") || undefined,
     referredOnly: searchParams.get("referred") === "1",

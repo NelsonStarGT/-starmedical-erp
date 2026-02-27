@@ -16,6 +16,7 @@ const schema = z.object({
   status: z.string().default(""),
   alert: alertSchema.default(""),
   includeArchived: z.enum(["0", "1"]).default("0"),
+  archivedOnly: z.enum(["0", "1"]).default("0"),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(10).max(100).default(25),
   error: z.string().default("")
@@ -23,6 +24,7 @@ const schema = z.object({
 
 export type ClientListSearchParams = z.infer<typeof schema> & {
   includeArchivedBool: boolean;
+  archivedOnlyBool: boolean;
   alertFilter: ClientListAlertFilter;
 };
 
@@ -37,6 +39,7 @@ export function parseClientListSearchParams(input?: Record<string, string | stri
     status: firstValue(input?.status),
     alert: firstValue(input?.alert),
     includeArchived: firstValue(input?.includeArchived) || "0",
+    archivedOnly: firstValue(input?.archivedOnly) || "0",
     page: firstValue(input?.page) || 1,
     pageSize: firstValue(input?.pageSize) || 25,
     error: firstValue(input?.error)
@@ -45,6 +48,7 @@ export function parseClientListSearchParams(input?: Record<string, string | stri
   return {
     ...parsed,
     includeArchivedBool: parsed.includeArchived === "1",
+    archivedOnlyBool: parsed.archivedOnly === "1",
     alertFilter: parsed.alert as ClientListAlertFilter
   };
 }
@@ -55,6 +59,7 @@ export function toSearchParamsObject(search: ClientListSearchParams) {
     status: search.status || undefined,
     alert: search.alert || undefined,
     includeArchived: search.includeArchivedBool ? "1" : undefined,
+    archivedOnly: search.archivedOnlyBool ? "1" : undefined,
     page: search.page > 1 ? String(search.page) : undefined,
     pageSize: String(search.pageSize),
     error: search.error || undefined

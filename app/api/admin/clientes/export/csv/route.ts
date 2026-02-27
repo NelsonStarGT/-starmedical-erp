@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ClientProfileType } from "@prisma/client";
+import { ClientNoteType, ClientProfileType } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
-import { isAdmin } from "@/lib/rbac";
+import { buildClientBulkDataRow, type ClientBulkExportProfile } from "@/lib/clients/bulk/clientBulkExport";
+import { canExportClientData } from "@/lib/clients/bulk/permissions";
+import { getClientBulkTemplateHeaders } from "@/lib/clients/bulk/clientBulkSchema";
+import { normalizeClientsCountryFilterInput, readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
+import { prisma } from "@/lib/prisma";
 import { listClients, type ClientListAlertFilter, type ClientListItem } from "@/lib/clients/list.service";
 import { tenantIdFromUser } from "@/lib/tenant";
 
@@ -58,10 +62,12 @@ function parseSelectedIds(qs: URLSearchParams) {
 async function fetchAllItems(params: {
   tenantId: string;
   type: ClientProfileType;
+  countryId: string | null;
   q: string;
   statusId?: string;
   alert?: ClientListAlertFilter;
   includeArchived: boolean;
+  archivedOnly?: boolean;
 }) {
   const items: ClientListItem[] = [];
   const pageSize = 1000;
@@ -71,10 +77,12 @@ async function fetchAllItems(params: {
     const current = await listClients({
       tenantId: params.tenantId,
       type: params.type,
+      countryId: params.countryId,
       q: params.q,
       statusId: params.statusId,
       alert: params.alert,
       includeArchived: params.includeArchived,
+      archivedOnly: params.archivedOnly,
       page,
       pageSize
     });
@@ -86,10 +94,69 @@ async function fetchAllItems(params: {
   return items;
 }
 
+async function fetchProfilesByIds(params: {
+  tenantId: string;
+  type: ClientProfileType;
+  ids: string[];
+}) {
+  if (!params.ids.length) return [];
+
+  const rows = await prisma.clientProfile.findMany({
+    where: {
+      tenantId: params.tenantId,
+      type: params.type,
+      id: { in: params.ids }
+    },
+    include: {
+      status: { select: { name: true } },
+      institutionType: { select: { name: true } },
+      acquisitionSource: { select: { name: true, code: true } },
+      acquisitionDetailOption: { select: { name: true, code: true } },
+      companyRecord: {
+        select: {
+          id: true,
+          kind: true,
+          legalName: true,
+          tradeName: true,
+          taxId: true,
+          billingEmail: true,
+          billingPhone: true,
+          website: true,
+          notes: true,
+          metadata: true
+        }
+      },
+      clientLocations: {
+        where: {
+          isPrimary: true,
+          isActive: true
+        },
+        select: {
+          address: true,
+          addressLine1: true,
+          postalCode: true,
+          city: true,
+          department: true,
+          country: true
+        },
+        take: 1
+      },
+      clientNotes: {
+        where: { noteType: ClientNoteType.ADMIN },
+        select: { body: true, updatedAt: true },
+        orderBy: { updatedAt: "desc" },
+        take: 1
+      }
+    }
+  });
+
+  return rows as ClientBulkExportProfile[];
+}
+
 export async function GET(req: NextRequest) {
   const auth = requireAuth(req);
   if (auth.errorResponse) return auth.errorResponse;
-  if (!auth.user || !isAdmin(auth.user)) {
+  if (!auth.user || !canExportClientData(auth.user)) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
 
@@ -103,18 +170,24 @@ export async function GET(req: NextRequest) {
   const statusId = (qs.get("status") || "").trim() || undefined;
   const alert = sanitizeAlert(qs.get("alert"));
   const includeArchived = qs.get("includeArchived") === "1";
+  const archivedOnly = qs.get("archivedOnly") === "1";
   const selectedIds = parseSelectedIds(qs);
   const tenantId = tenantIdFromUser(auth.user);
+  const queryCountryId = normalizeClientsCountryFilterInput(qs.get("countryId"));
+  const cookieCountryId = readClientsCountryFilterCookie(req.cookies);
+  const countryId = queryCountryId ?? cookieCountryId;
 
   const items = selectedIds.length
     ? (() => {
         return fetchAllItems({
           tenantId,
           type,
+          countryId,
           q,
           statusId,
           alert,
-          includeArchived: true
+          includeArchived: true,
+          archivedOnly
         }).then((rows) => {
           const byId = new Map(rows.map((row) => [row.id, row]));
           return selectedIds.map((id) => byId.get(id)).filter((item): item is ClientListItem => Boolean(item));
@@ -123,53 +196,27 @@ export async function GET(req: NextRequest) {
     : fetchAllItems({
         tenantId,
         type,
+        countryId,
         q,
         statusId,
         alert,
-        includeArchived
+        includeArchived,
+        archivedOnly
       });
   const resolvedItems = await items;
 
-  const header = [
-    "ID",
-    "Correlativo",
-    "Tipo",
-    "Nombre",
-    "Identificador",
-    "Telefono",
-    "Email",
-    "Estado",
-    "HealthScore",
-    "Incompleto",
-    "DocsVencidos",
-    "DocsPorVencer",
-    "ReqPendientes",
-    "ReqRechazados",
-    "ReqVencidos",
-    "Archivado",
-    "Creado"
-  ];
+  const profiles = await fetchProfilesByIds({
+    tenantId,
+    type,
+    ids: resolvedItems.map((item) => item.id)
+  });
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const orderedProfiles = resolvedItems
+    .map((item) => profileById.get(item.id))
+    .filter((profile): profile is ClientBulkExportProfile => Boolean(profile));
 
-  const rows = resolvedItems.map((item) => [
-    item.id,
-    item.clientCode,
-    item.type,
-    item.displayName,
-    item.identifier,
-    item.phone,
-    item.email,
-    item.statusLabel,
-    item.healthScore,
-    item.isIncomplete,
-    item.hasExpiredDocs,
-    item.hasExpiringDocs,
-    item.requiredPendingCount,
-    item.requiredRejectedCount,
-    item.requiredExpiredCount,
-    item.isArchived,
-    item.createdAt.toISOString()
-  ]);
-
+  const header = getClientBulkTemplateHeaders(type);
+  const rows = orderedProfiles.map((profile) => buildClientBulkDataRow(type, profile));
   const csvRows = [header, ...rows].map((row) => row.map((value) => csvEscape(value)).join(";")).join("\n");
   const csv = `sep=;\n${csvRows}`;
 

@@ -5,6 +5,7 @@ import { ClientProfileType } from "@prisma/client";
 import { Download, FilterX } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
+import { readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
 import {
   formatDateForClients,
   getClientsDatePlaceholder,
@@ -13,6 +14,7 @@ import {
   type ClientsDateFormat
 } from "@/lib/clients/dateFormat";
 import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
+import { CLIENTS_COUNTRY_FILTER_ALL } from "@/lib/clients/operatingCountryContext";
 import { getClientsReportList, getClientsReportSummary, type ClientsReportFilters } from "@/lib/clients/reports.service";
 import { tenantIdFromUser } from "@/lib/tenant";
 
@@ -22,6 +24,7 @@ type SearchParams = {
   from?: string | string[];
   to?: string | string[];
   country?: string | string[];
+  countryId?: string | string[];
   sourceId?: string | string[];
   detailId?: string | string[];
   referred?: string | string[];
@@ -49,12 +52,23 @@ function parseDate(value: string | null | undefined, dateFormat: ClientsDateForm
   return parseIsoDateString(value);
 }
 
-function buildFilters(searchParams: SearchParams | undefined, dateFormat: ClientsDateFormat, tenantId: string): ClientsReportFilters {
+function buildFilters(
+  searchParams: SearchParams | undefined,
+  dateFormat: ClientsDateFormat,
+  tenantId: string,
+  defaultCountryId?: string | null
+) {
   const page = Number(firstValue(searchParams?.page) || "1");
   const pageSize = Number(firstValue(searchParams?.pageSize) || "25");
   const rawType = firstValue(searchParams?.type);
+  const rawCountryId = firstValue(searchParams?.countryId) ?? firstValue(searchParams?.country);
+  const hasCountryParam = typeof rawCountryId === "string";
+  const requestedCountryId = String(rawCountryId || "").trim();
+  const countryFilterParam = hasCountryParam
+    ? requestedCountryId || CLIENTS_COUNTRY_FILTER_ALL
+    : defaultCountryId || CLIENTS_COUNTRY_FILTER_ALL;
 
-  return {
+  const filters: ClientsReportFilters = {
     tenantId,
     q: firstValue(searchParams?.q)?.trim() || undefined,
     type:
@@ -63,13 +77,15 @@ function buildFilters(searchParams: SearchParams | undefined, dateFormat: Client
         : "ALL",
     from: parseDate(firstValue(searchParams?.from) || null, dateFormat),
     to: parseDate(firstValue(searchParams?.to) || null, dateFormat),
-    country: firstValue(searchParams?.country) || undefined,
+    countryId: countryFilterParam === CLIENTS_COUNTRY_FILTER_ALL ? undefined : countryFilterParam,
     acquisitionSourceId: firstValue(searchParams?.sourceId) || undefined,
     acquisitionDetailOptionId: firstValue(searchParams?.detailId) || undefined,
     referredOnly: firstValue(searchParams?.referred) === "1",
     page: Number.isFinite(page) ? page : 1,
     pageSize: Number.isFinite(pageSize) ? pageSize : 25
   };
+
+  return { filters, countryFilterParam };
 }
 
 function buildQuery(next: Record<string, string | undefined>) {
@@ -87,11 +103,18 @@ export default async function ClientesReportesPage({
   searchParams?: Promise<SearchParams | undefined> | SearchParams;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const currentUser = await getSessionUserFromCookies(cookies());
+  const cookieStore = await cookies();
+  const currentUser = await getSessionUserFromCookies(cookieStore);
   if (!currentUser) redirect("/login");
   const tenantId = tenantIdFromUser(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
-  const filters = buildFilters(resolvedSearchParams, dateFormat, tenantId);
+  const defaultCountryId = readClientsCountryFilterCookie(cookieStore);
+  const { filters, countryFilterParam } = buildFilters(
+    resolvedSearchParams,
+    dateFormat,
+    tenantId,
+    defaultCountryId
+  );
 
   const [summary, list, sources, sourceDetails, countries] = await Promise.all([
     getClientsReportSummary(filters),
@@ -109,7 +132,7 @@ export default async function ClientesReportesPage({
     prisma.geoCountry.findMany({
       where: { isActive: true },
       orderBy: { name: "asc" },
-      select: { name: true }
+      select: { id: true, name: true }
     })
   ]);
 
@@ -118,7 +141,7 @@ export default async function ClientesReportesPage({
     type: filters.type && filters.type !== "ALL" ? filters.type : "ALL",
     from: filters.from ? formatDateForClients(filters.from, dateFormat) : "",
     to: filters.to ? formatDateForClients(filters.to, dateFormat) : "",
-    country: filters.country || "",
+    countryId: countryFilterParam,
     sourceId: filters.acquisitionSourceId || "",
     detailId: filters.acquisitionDetailOptionId || "",
     referred: filters.referredOnly ? "1" : "",
@@ -128,7 +151,10 @@ export default async function ClientesReportesPage({
   const chips: Array<{ key: string; label: string }> = [];
   if (queryParams.q) chips.push({ key: "q", label: `Buscar: ${queryParams.q}` });
   if (queryParams.type && queryParams.type !== "ALL") chips.push({ key: "type", label: `Tipo: ${queryParams.type}` });
-  if (queryParams.country) chips.push({ key: "country", label: `País: ${queryParams.country}` });
+  if (queryParams.countryId && queryParams.countryId !== CLIENTS_COUNTRY_FILTER_ALL) {
+    const countryLabel = countries.find((country) => country.id === queryParams.countryId)?.name ?? "País";
+    chips.push({ key: "countryId", label: `País: ${countryLabel}` });
+  }
   if (queryParams.sourceId) {
     const sourceLabel = sources.find((source) => source.id === queryParams.sourceId)?.name || "Canal";
     chips.push({ key: "sourceId", label: `Canal: ${sourceLabel}` });
@@ -146,7 +172,7 @@ export default async function ClientesReportesPage({
     type: queryParams.type !== "ALL" ? queryParams.type : undefined,
     from: queryParams.from || undefined,
     to: queryParams.to || undefined,
-    country: queryParams.country || undefined,
+    countryId: queryParams.countryId || undefined,
     sourceId: queryParams.sourceId || undefined,
     detailId: queryParams.detailId || undefined,
     referred: queryParams.referred || undefined
@@ -195,13 +221,13 @@ export default async function ClientesReportesPage({
           </select>
 
           <select
-            name="country"
-            defaultValue={queryParams.country}
+            name="countryId"
+            defaultValue={queryParams.countryId}
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
           >
-            <option value="">País (todos)</option>
+            <option value={CLIENTS_COUNTRY_FILTER_ALL}>País (todos)</option>
             {countries.map((country) => (
-              <option key={country.name} value={country.name}>
+              <option key={country.id} value={country.id}>
                 {country.name}
               </option>
             ))}
@@ -345,20 +371,20 @@ export default async function ClientesReportesPage({
           emptyLabel="Sin datos geográficos por país"
         />
         <SimpleTable
-          title="Geo por admin1"
+          title="Geo por departamento"
           rows={summary.byGeo.admin1.map((row) => ({
             label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
             value: row.total
           }))}
-          emptyLabel="Sin datos geográficos por admin1"
+          emptyLabel="Sin datos geográficos por departamento"
         />
         <SimpleTable
-          title="Geo por admin2"
+          title="Geo por municipio/ciudad"
           rows={summary.byGeo.admin2.map((row) => ({
             label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
             value: row.total
           }))}
-          emptyLabel="Sin datos geográficos por admin2"
+          emptyLabel="Sin datos geográficos por municipio/ciudad"
         />
       </section>
 

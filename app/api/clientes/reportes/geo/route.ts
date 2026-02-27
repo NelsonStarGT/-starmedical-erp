@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ClientProfileType } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
+import { normalizeClientsCountryFilterInput, readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
 import { isAdmin } from "@/lib/rbac";
 import {
   getClientCountsByGeo,
@@ -21,6 +22,8 @@ function parseDate(value: string | null) {
 function buildFilters(req: NextRequest, tenantId: string): ClientsReportFilters {
   const { searchParams } = new URL(req.url);
   const rawType = searchParams.get("type");
+  const queryCountryId = normalizeClientsCountryFilterInput(searchParams.get("countryId"));
+  const cookieCountryId = readClientsCountryFilterCookie(req.cookies);
 
   return {
     tenantId,
@@ -31,7 +34,7 @@ function buildFilters(req: NextRequest, tenantId: string): ClientsReportFilters 
         : "ALL",
     from: parseDate(searchParams.get("from")),
     to: parseDate(searchParams.get("to")),
-    country: searchParams.get("country") || undefined,
+    countryId: queryCountryId ?? cookieCountryId ?? undefined,
     acquisitionSourceId: searchParams.get("sourceId") || undefined,
     acquisitionDetailOptionId: searchParams.get("detailId") || undefined,
     referredOnly: searchParams.get("referred") === "1",

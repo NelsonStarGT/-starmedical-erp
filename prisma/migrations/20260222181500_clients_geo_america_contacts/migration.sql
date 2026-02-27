@@ -52,8 +52,19 @@ EXCEPTION
 END
 $$;
 
-ALTER TABLE "ClientPhone"
-  ADD COLUMN IF NOT EXISTS "category" "ClientPhoneCategory" NOT NULL DEFAULT 'PRIMARY';
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'ClientPhone'
+  ) THEN
+    ALTER TABLE "ClientPhone"
+      ADD COLUMN IF NOT EXISTS "category" "ClientPhoneCategory" NOT NULL DEFAULT 'PRIMARY';
+  END IF;
+END
+$$;
 
 -- Email channels for categorized multi-email support
 DO $$
@@ -116,9 +127,20 @@ END
 $$;
 
 -- Enforce one active primary phone/email per client with partial unique indexes.
-CREATE UNIQUE INDEX IF NOT EXISTS "ClientPhone_one_primary_active_per_client"
-  ON "ClientPhone"("clientId")
-  WHERE "isPrimary" = true AND "isActive" = true;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'ClientPhone'
+  ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS "ClientPhone_one_primary_active_per_client"
+      ON "ClientPhone"("clientId")
+      WHERE "isPrimary" = true AND "isActive" = true;
+  END IF;
+END
+$$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "ClientEmail_one_primary_active_per_client"
   ON "ClientEmail"("clientId")

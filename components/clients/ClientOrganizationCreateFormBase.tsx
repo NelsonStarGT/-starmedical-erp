@@ -23,7 +23,6 @@ import { ClientProfileLookup, type ClientProfileLookupItem } from "@/components/
 import GeoCascadeFieldset, { type GeoCascadeErrors, type GeoCascadeValue } from "@/components/clients/GeoCascadeFieldset";
 import SearchableMultiSelect from "@/components/ui/SearchableMultiSelect";
 import SearchableSelect from "@/components/ui/SearchableSelect";
-import { useClientsCountryContext } from "@/components/clients/useClientsCountryContext";
 import {
   buildFallbackClientContactDirectories,
   type ClientContactDirectoriesSnapshot
@@ -608,7 +607,6 @@ export default function ClientOrganizationCreateFormBase({
   const isInstitutionMode = mode === "institution";
   const isInsurerMode = mode === "insurer";
   const organizationLabel = isInstitutionMode ? "institución" : isInsurerMode ? "aseguradora" : "empresa";
-  const { country: countryContext } = useClientsCountryContext();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [geoErrors, setGeoErrors] = useState<GeoCascadeErrors>({});
@@ -838,17 +836,11 @@ export default function ClientOrganizationCreateFormBase({
   }, [mode]);
 
   useEffect(() => {
-    if (initialOperatingDefaults?.isOperatingCountryPinned) return;
-    if (!countryContext?.countryId) return;
-    setForm((prev) => (prev.geoCountryId ? prev : { ...prev, geoCountryId: countryContext.countryId }));
-  }, [countryContext?.countryId, initialOperatingDefaults?.isOperatingCountryPinned]);
-
-  useEffect(() => {
-    if (!initialOperatingDefaults?.isOperatingCountryPinned) return;
-    const countryId = initialOperatingDefaults.operatingCountryId;
+    const countryId = initialOperatingDefaults?.operatingCountryId;
     if (!countryId) return;
+    const scopes = initialOperatingDefaults.scopes;
 
-    if (initialOperatingDefaults.scopes.geo) {
+    if (scopes.geo) {
       setForm((prev) =>
         applyDefaultsToDraft(prev, {
           geoCountryId: countryId
@@ -857,7 +849,7 @@ export default function ClientOrganizationCreateFormBase({
     }
 
     const defaultIso2 = initialOperatingDefaults.operatingCountryCode?.trim().toUpperCase();
-    if (initialOperatingDefaults.scopes.phone && defaultIso2) {
+    if (scopes.phone && defaultIso2) {
       setContacts((prev) => ({
         ...prev,
         generalChannels: prev.generalChannels.map((row) => {
@@ -3036,7 +3028,7 @@ export default function ClientOrganizationCreateFormBase({
             jobTitleIdsByDepartment={jobTitleIdsByDepartment}
             pbxCategoryOptions={pbxCategoryOptions}
             pbxCategoriesSource={contactDirectories.pbxCategoriesSource}
-            preferredGeoCountryId={form.geoCountryId || countryContext?.countryId || null}
+            preferredGeoCountryId={form.geoCountryId || initialOperatingDefaults?.operatingCountryId || null}
             disabled={isPending}
           />
           {generalChannelsDraftValidationError ? <p className="text-xs text-rose-700">{generalChannelsDraftValidationError}</p> : null}

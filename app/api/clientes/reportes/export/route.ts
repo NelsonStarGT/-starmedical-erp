@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ClientProfileType } from "@prisma/client";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { requireAuth } from "@/lib/auth";
+import { normalizeClientsCountryFilterInput, readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
 import { isAdmin } from "@/lib/rbac";
 import { parseClientsDateInput, parseIsoDateString, type ClientsDateFormat } from "@/lib/clients/dateFormat";
 import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
@@ -22,6 +23,8 @@ function parseDate(value: string | null, dateFormat: ClientsDateFormat) {
 function buildFilters(req: NextRequest, dateFormat: ClientsDateFormat, tenantId: string): ClientsReportFilters {
   const { searchParams } = new URL(req.url);
   const rawType = searchParams.get("type");
+  const queryCountryId = normalizeClientsCountryFilterInput(searchParams.get("countryId"));
+  const cookieCountryId = readClientsCountryFilterCookie(req.cookies);
 
   return {
     tenantId,
@@ -32,7 +35,7 @@ function buildFilters(req: NextRequest, dateFormat: ClientsDateFormat, tenantId:
         : "ALL",
     from: parseDate(searchParams.get("from"), dateFormat),
     to: parseDate(searchParams.get("to"), dateFormat),
-    country: searchParams.get("country") || undefined,
+    countryId: queryCountryId ?? cookieCountryId ?? undefined,
     acquisitionSourceId: searchParams.get("sourceId") || undefined,
     acquisitionDetailOptionId: searchParams.get("detailId") || undefined,
     referredOnly: searchParams.get("referred") === "1",

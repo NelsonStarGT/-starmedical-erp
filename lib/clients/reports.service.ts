@@ -1,5 +1,6 @@
 import { ClientProfileType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { buildClientCountryFilterWhere } from "@/lib/clients/countryFilter.server";
 import { isPrismaMissingTableError } from "@/lib/prisma/errors.server";
 import { INSURER_LINE_FALLBACK } from "@/lib/catalogs/insurerLines";
 import {
@@ -15,7 +16,7 @@ export type ClientsReportFilters = {
   type?: ClientProfileType | "ALL";
   from?: Date | null;
   to?: Date | null;
-  country?: string;
+  countryId?: string;
   acquisitionSourceId?: string;
   acquisitionDetailOptionId?: string;
   referredOnly?: boolean;
@@ -92,16 +93,7 @@ function buildWhere(filters: ClientsReportFilters): Prisma.ClientProfileWhereInp
     deletedAt: null,
     createdAt: { gte: from, lte: to },
     ...(type ? { type } : {}),
-    ...(filters.country
-      ? {
-          clientLocations: {
-            some: {
-              isActive: true,
-              country: { equals: filters.country, mode: "insensitive" }
-            }
-          }
-        }
-      : {}),
+    ...buildClientCountryFilterWhere(filters.countryId ?? null),
     ...(filters.acquisitionSourceId ? { acquisitionSourceId: filters.acquisitionSourceId } : {}),
     ...(filters.acquisitionDetailOptionId ? { acquisitionDetailOptionId: filters.acquisitionDetailOptionId } : {})
   };
@@ -156,6 +148,19 @@ function buildSqlWhereClauses(filters: ClientsReportFilters) {
 
   if (filters.acquisitionDetailOptionId) {
     clauses.push(Prisma.sql`cp."acquisitionDetailOptionId" = ${filters.acquisitionDetailOptionId}`);
+  }
+
+  if (filters.countryId) {
+    clauses.push(Prisma.sql`
+      EXISTS (
+        SELECT 1
+        FROM "ClientLocation" AS clf
+        WHERE clf."clientId" = cp."id"
+          AND clf."isActive" = TRUE
+          AND clf."isPrimary" = TRUE
+          AND clf."geoCountryId" = ${filters.countryId}
+      )
+    `);
   }
 
   const q = filters.q?.trim();
@@ -388,10 +393,6 @@ async function queryGeoBuckets(
 ): Promise<GeoBucketRow[]> {
   const clauses = buildSqlWhereClauses(filters);
   const whereSql = Prisma.sql`${Prisma.join(clauses, " AND ")}`;
-  const countryFilter = filters.country?.trim();
-  const countryFilterSql = countryFilter
-    ? Prisma.sql`AND LOWER(COALESCE(NULLIF(TRIM(gco."name"), ''), NULLIF(TRIM(loc."country"), ''), '')) = LOWER(${countryFilter})`
-    : Prisma.empty;
 
   const labelSql =
     level === "country"
@@ -434,7 +435,6 @@ async function queryGeoBuckets(
     LEFT JOIN "GeoAdmin1" AS ga1 ON ga1."id" = loc."geoAdmin1Id"
     LEFT JOIN "GeoAdmin2" AS ga2 ON ga2."id" = loc."geoAdmin2Id"
     WHERE ${whereSql}
-    ${countryFilterSql}
     GROUP BY "label", "source"
     ORDER BY "total" DESC, "label" ASC
     LIMIT 30

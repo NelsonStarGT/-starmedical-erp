@@ -3,9 +3,10 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ClientCatalogType, ClientProfileType } from "@prisma/client";
-import { Download, Eye, Mail, MessageCircle, Phone, Plus } from "lucide-react";
+import { Eye, Mail, MessageCircle, Phone, Plus } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
+import { canExportClientData, canExportClientTemplate } from "@/lib/clients/bulk/permissions";
 import { tenantIdFromUser } from "@/lib/tenant";
 import { formatDateForClients } from "@/lib/clients/dateFormat";
 import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
@@ -14,6 +15,7 @@ import { buildClientListHref, mergeHrefQuery, type HrefQuery } from "@/lib/clien
 import { DataTable } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterBar } from "@/components/ui/FilterBar";
+import ClientBulkExportMenu from "@/components/clients/ClientBulkExportMenu";
 import DebouncedSearchInput from "@/components/clients/DebouncedSearchInput";
 import { cn } from "@/lib/utils";
 
@@ -101,6 +103,8 @@ export default async function ClientesListaPage({
   const currentUser = await getSessionUserFromCookies(cookies());
   if (!currentUser) redirect("/login");
   const tenantId = tenantIdFromUser(currentUser);
+  const canExportTemplate = canExportClientTemplate(currentUser);
+  const canExportData = canExportClientData(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
 
   const q = firstValue(resolved?.q).trim();
@@ -150,6 +154,12 @@ export default async function ClientesListaPage({
           includeArchived: includeArchived ? "1" : undefined
         })
       : null;
+  const templateCsvHref = type
+    ? buildClientListHref("/api/admin/clientes/import/template", { type, format: "csv" })
+    : null;
+  const templateXlsxHref = type
+    ? buildClientListHref("/api/admin/clientes/import/template", { type, format: "xlsx" })
+    : null;
 
   const columns = [
     {
@@ -243,19 +253,13 @@ export default async function ClientesListaPage({
               <Plus size={16} />
               Crear cliente
             </Link>
-            {exportHref ? (
-              <Link
-                href={exportHref}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-              >
-                <Download size={16} />
-                Exportar CSV
-              </Link>
-            ) : (
-              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-500">
-                Exportar CSV (selecciona un tipo)
-              </span>
-            )}
+            <ClientBulkExportMenu
+              templateCsvHref={templateCsvHref ?? "#"}
+              templateXlsxHref={templateXlsxHref ?? "#"}
+              dataCsvHref={exportHref ?? "#"}
+              canExportTemplate={canExportTemplate && Boolean(templateCsvHref && templateXlsxHref)}
+              canExportData={canExportData && Boolean(exportHref)}
+            />
           </>
         }
       >

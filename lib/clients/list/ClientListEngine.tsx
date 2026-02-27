@@ -4,6 +4,13 @@ import { cookies } from "next/headers";
 import { ClientCatalogType, ClientProfileType } from "@prisma/client";
 import { Download, Plus } from "lucide-react";
 import { actionApplyBulkClientMutation } from "@/app/admin/clientes/actions";
+import {
+  canAnalyzeClientImport,
+  canExportClientData,
+  canExportClientTemplate,
+  canProcessClientImport
+} from "@/lib/clients/bulk/permissions";
+import { readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
@@ -13,6 +20,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
 import AlertBadges from "@/components/clients/AlertBadges";
+import ClientBulkExportMenu from "@/components/clients/ClientBulkExportMenu";
 import ClientCsvImportButton from "@/components/clients/ClientCsvImportButton";
 import ClientListKpiStrip from "@/components/clients/ClientListKpiStrip";
 import DebouncedSearchInput from "@/components/clients/DebouncedSearchInput";
@@ -57,7 +65,10 @@ export type ClientListConfig<Row> = {
     pageSizeOptions?: number[];
   };
   columns: ColumnDef<Row>[];
-  fetcher: (params: ClientListSearchParams, context?: { tenantId?: string }) => Promise<ClientListFetchResult<Row>>;
+  fetcher: (
+    params: ClientListSearchParams,
+    context?: { tenantId?: string; countryId?: string | null }
+  ) => Promise<ClientListFetchResult<Row>>;
 };
 
 function kindToProfileType(kind: ClientListKind) {
@@ -207,7 +218,7 @@ function buildSelectionColumn(): ColumnDef<ClientListItem> {
 async function defaultFetcher(
   type: ClientProfileType,
   params: ClientListSearchParams,
-  context?: { tenantId?: string }
+  context?: { tenantId?: string; countryId?: string | null }
 ): Promise<ClientListFetchResult<ClientListItem>> {
   const result = await listClients({
     tenantId: context?.tenantId,
@@ -295,8 +306,10 @@ export async function ClientListEngine({
 }) {
   const parsed = parseClientListSearchParams(searchParams);
   const pageSizeOptions = config.filters?.pageSizeOptions ?? [10, 25, 50];
-  const currentUser = await getSessionUserFromCookies(cookies());
+  const cookieStore = await cookies();
+  const currentUser = await getSessionUserFromCookies(cookieStore);
   const tenantId = tenantIdFromUser(currentUser);
+  const countryId = readClientsCountryFilterCookie(cookieStore);
 
   const queryObject = toSearchParamsObject(parsed);
   const queryForTabs: HrefQuery = {
@@ -313,9 +326,13 @@ export async function ClientListEngine({
       orderBy: { name: "asc" },
       select: { id: true, name: true }
     }),
-    config.fetcher(parsed, { tenantId })
+    config.fetcher(parsed, { tenantId, countryId })
   ]);
   const canBulkMutate = Boolean(currentUser && isAdmin(currentUser));
+  const canExportTemplate = canExportClientTemplate(currentUser);
+  const canExportData = canExportClientData(currentUser);
+  const canImportAnalyze = canAnalyzeClientImport(currentUser);
+  const canImportProcess = canProcessClientImport(currentUser);
   const docPermissions = getClientDocumentPermissions(currentUser);
   const columns = [
     ...(canBulkMutate ? [buildSelectionColumn()] : []),
@@ -334,7 +351,16 @@ export async function ClientListEngine({
 
   const exportHref = buildClientListHref("/api/admin/clientes/export/csv", {
     ...queryForTabs,
-    type: config.profileType
+    type: config.profileType,
+    countryId: countryId ?? undefined
+  });
+  const templateCsvHref = buildClientListHref("/api/admin/clientes/import/template", {
+    type: config.profileType,
+    format: "csv"
+  });
+  const templateXlsxHref = buildClientListHref("/api/admin/clientes/import/template", {
+    type: config.profileType,
+    format: "xlsx"
   });
 
   return (
@@ -366,14 +392,19 @@ export async function ClientListEngine({
               <Plus size={16} />
               {config.createLabel}
             </Link>
-            <Link
-              href={exportHref}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-            >
-              <Download size={16} />
-              Exportar CSV
-            </Link>
-            <ClientCsvImportButton type={config.profileType} />
+            <ClientBulkExportMenu
+              templateCsvHref={templateCsvHref}
+              templateXlsxHref={templateXlsxHref}
+              dataCsvHref={exportHref}
+              canExportTemplate={canExportTemplate}
+              canExportData={canExportData}
+            />
+            <ClientCsvImportButton
+              type={config.profileType}
+              canExportTemplate={canExportTemplate}
+              canAnalyze={canImportAnalyze}
+              canProcess={canImportProcess}
+            />
           </>
         }
       >

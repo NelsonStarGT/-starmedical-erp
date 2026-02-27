@@ -10,6 +10,7 @@ import {
 } from "@/app/admin/clientes/actions";
 import ClientsConfigManagerDrawer from "@/components/clients/config/ClientsConfigManagerDrawer";
 import ClientsConfigManagerRenderer, { type ClientsConfigManagerPayload } from "@/components/clients/config/ClientsConfigManagerRenderer";
+import ResponsiveInfoCard from "@/components/ui/ResponsiveInfoCard";
 import type { ClientsConfigScope, ClientsConfigSourceState } from "@/lib/clients/clientsConfigRegistry";
 import { cn } from "@/lib/utils";
 
@@ -87,55 +88,70 @@ export default function ClientsConfigDirectoriesSummary({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-xl border border-[#dce7f5] bg-white p-4 shadow-sm">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2e75ba]">Autoguía</p>
-        <p className="mt-1 text-sm text-slate-600">
-          Inicia por Áreas y Cargos, luego define categorías PBX y ramos de seguro, y termina con la correlación Área↔Cargo.
-        </p>
-      </section>
-
       {!entries.length ? (
         <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
           No hay directorios visibles. Revisa si fueron marcados como deprecados en Resumen.
         </section>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {entries.map((entry) => {
             const isEmpty = entry.activeItems + entry.inactiveItems === 0;
             const canLoadDefaults = Boolean(resolveLoadDefaultsAction(entry.managerComponentId));
 
             return (
-              <section key={entry.key} className="space-y-3 rounded-xl border border-[#dce7f5] bg-white p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-900">{entry.label}</p>
+              <ResponsiveInfoCard
+                key={entry.key}
+                title={entry.label}
+                subtitle={`${entry.activeItems} activos · ${entry.inactiveItems} inactivos`}
+                badges={
                   <div className="flex items-center gap-1.5">
-                    <span className="rounded-full border border-[#4aadf5]/30 bg-[#4aadf5]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
+                    <span className="rounded-full border border-[#4aadf5]/30 bg-[#4aadf5]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba] sm:text-[11px]">
                       {SCOPE_LABELS[entry.scope]}
                     </span>
                     <span
                       className={cn(
-                        "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                        "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] sm:text-[11px]",
                         SOURCE_BADGE_STYLES[entry.source]
                       )}
                     >
                       {entry.source}
                     </span>
                   </div>
-                </div>
-                <p className="truncate text-xs text-slate-600" title={entry.summary || undefined}>
+                }
+                actions={
+                  <button
+                    type="button"
+                    onClick={() => setOpenKey(entry.key)}
+                    className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba] sm:h-10 sm:text-sm"
+                  >
+                    Administrar
+                  </button>
+                }
+                summary={
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {isEmpty ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 sm:text-xs">
+                        Directorio vacío
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-slate-200 bg-[#f8fafc] px-2 py-0.5 text-[11px] font-semibold text-slate-700 sm:text-xs">
+                        Items: {entry.activeItems + entry.inactiveItems}
+                      </span>
+                    )}
+                  </div>
+                }
+              >
+                <p className="break-words text-xs text-slate-600 sm:text-sm" title={entry.summary || undefined}>
                   <span className="font-semibold text-slate-700">Qué es:</span>{" "}
                   {entry.summary || "Directorio operativo para normalizar datos de contacto de empresas."}
                 </p>
-                <p className="truncate text-xs text-slate-500" title={entry.usedBy.join(" · ") || undefined}>
+                <p className="break-words text-xs text-slate-500 sm:text-sm" title={entry.usedBy.join(" · ") || undefined}>
                   <span className="font-semibold text-slate-700">Se usa en:</span>{" "}
                   {entry.usedBy.length ? entry.usedBy.join(" · ") : "Sin uso registrado"}
                 </p>
-                <p className="text-xs text-slate-500">
-                  Items: <span className="font-semibold text-slate-700">{entry.activeItems}</span> activos ·{" "}
-                  <span className="font-semibold text-slate-700">{entry.inactiveItems}</span> inactivos
+                <p className="break-words text-xs text-slate-500 sm:text-sm">
+                  <span className="font-semibold text-slate-700">Dependencias:</span> {entry.dependsOn.length ? entry.dependsOn.join(" · ") : "—"}
                 </p>
-                <p className="text-xs text-slate-500">Dependencias: {entry.dependsOn.length ? entry.dependsOn.join(" · ") : "—"}</p>
-
                 {isEmpty ? (
                   <DirectoryEmptyState
                     canLoadDefaults={canLoadDefaults}
@@ -144,15 +160,7 @@ export default function ClientsConfigDirectoriesSummary({
                     feedback={feedbackByKey[entry.key] ?? null}
                   />
                 ) : null}
-
-                <button
-                  type="button"
-                  onClick={() => setOpenKey(entry.key)}
-                  className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-                >
-                  Administrar
-                </button>
-              </section>
+              </ResponsiveInfoCard>
             );
           })}
         </div>

@@ -1,0 +1,3 @@
+﻿sep=;
+NombreLegal*;NombrePublico;TipoInstitucion*;RegimenInstitucional;SectorInstitucional;EsPublica;NIT;SitioWeb;DireccionPrincipal*;Pais*;Departamento*;Ciudad*;CodigoPostal;TelefonoPrincipal;EmailPrincipal;EmailFacturacion;MonedaPreferida;MonedasAceptadas;CanalAdquisicion;DetalleAdquisicion;NotaComercial
+Hospital Central Nacional;Hospital Central;Hospital;publico;publico;true;1234567-9;https://institucion.demo;Zona 1;Guatemala;Guatemala;Guatemala;01001;+50255550002;info@institucion.demo;facturacion@institucion.demo;GTQ;"GTQ, USD";Referido;Contacto institucional;Institucion pagadora con convenio activo.

@@ -1,5 +1,6 @@
 import { ClientPhoneCategory, ClientProfileType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { buildClientCountryFilterWhere } from "@/lib/clients/countryFilter.server";
 import { normalizeTenantId } from "@/lib/tenant";
 
 export type ClientCommercialSort = "createdAt_desc" | "name_asc";
@@ -8,6 +9,7 @@ export type ClientCommercialListQuery = {
   tenantId: unknown;
   q?: string;
   type?: ClientProfileType | "";
+  countryId?: string | null;
   statusId?: string;
   includeArchived?: boolean;
   page?: number;
@@ -207,6 +209,7 @@ export async function listClientsCommercial(query: ClientCommercialListQuery): P
     tenantId,
     ...(includeArchived ? {} : { deletedAt: null }),
     ...(query.type ? { type: query.type } : {}),
+    ...buildClientCountryFilterWhere(query.countryId ?? null),
     ...(query.statusId ? { statusId: query.statusId } : {}),
     ...(andFilters.length ? { AND: andFilters } : {})
   };

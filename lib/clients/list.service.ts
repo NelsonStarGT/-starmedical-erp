@@ -1,5 +1,6 @@
 import { ClientDocumentApprovalStatus, ClientProfileType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { buildClientCountryFilterWhere } from "@/lib/clients/countryFilter.server";
 import { isPrismaMissingTableError, resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 import { safeGetClientRulesConfig } from "@/lib/clients/rulesConfig";
 import {
@@ -34,9 +35,11 @@ export type ClientListQuery = {
   tenantId?: string;
   type: ClientProfileType;
   q?: string;
+  countryId?: string | null;
   statusId?: string;
   alert?: ClientListAlertFilter;
   includeArchived?: boolean;
+  archivedOnly?: boolean;
   page?: number;
   pageSize?: number;
 };
@@ -360,11 +363,14 @@ export async function listClients(query: ClientListQuery): Promise<ClientListRes
   const requiredDocTypeIds = requiredRules.map((rule) => rule.documentTypeId);
   const profileWeight = rulesConfig.healthProfileWeight;
   const documentsWeight = rulesConfig.healthDocsWeight;
+  const archivedScopeWhere: Prisma.ClientProfileWhereInput =
+    query.archivedOnly ? { deletedAt: { not: null } } : query.includeArchived ? {} : { deletedAt: null };
 
   const baseWhere: Prisma.ClientProfileWhereInput = {
     ...buildSearchWhere(query.type, q),
     ...(query.tenantId ? { tenantId: query.tenantId } : {}),
-    ...(query.includeArchived ? {} : { deletedAt: null }),
+    ...buildClientCountryFilterWhere(query.countryId ?? null),
+    ...archivedScopeWhere,
     ...(query.statusId ? { statusId: query.statusId } : {})
   };
 

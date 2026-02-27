@@ -1,0 +1,3 @@
+﻿sep=;
+RazonSocial*;NombreComercial*;NIT*;FormaJuridica;FormaJuridicaOtro;TamanoEmpresa;ActividadEconomicaPrincipal;ActividadesEconomicasSecundarias;SitioWeb;DireccionPrincipal*;Pais*;Departamento*;Ciudad*;CodigoPostal;TelefonoPrincipal;EmailPrincipal;EmailFacturacion;MonedaPreferida;MonedasAceptadas;CanalAdquisicion;DetalleAdquisicion;NotaComercial
+"Empresa Demo, S.A.";Empresa Demo;1234567-8;sociedad_anonima;;51_200;servicios_medicos;"laboratorio, imagenes";https://empresa.demo;"Zona 4, Ciudad de Guatemala";Guatemala;Guatemala;Guatemala;01004;+50255550001;contacto@empresa.demo;facturacion@empresa.demo;GTQ;"GTQ, USD";Web;Landing corporativa;Cliente corporativo de alto volumen.
