@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import CountryPicker from "@/components/clients/CountryPicker";
-import { useClientsCountryContext } from "@/components/clients/useClientsCountryContext";
+import { shouldShowClientsOperatingCountrySelector } from "@/lib/clients/operatingCountryContext";
 
 type CountryApiItem = {
   id: string;
@@ -15,28 +15,42 @@ type CountryApiItem = {
 
 type ApiResponse<T> = {
   ok?: boolean;
+  data?: T;
   items?: T[];
   error?: string;
 };
 
-export default function ClientsCountryContextBar() {
+function parseErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback;
+  const message = (payload as { error?: unknown }).error;
+  if (typeof message === "string" && message.trim().length > 0) return message.trim();
+  return fallback;
+}
+
+export default function ClientsCountryContextBar({
+  initialCountryId,
+  tenantId
+}: {
+  initialCountryId: string | null;
+  tenantId?: string | null;
+}) {
+  const router = useRouter();
   const pathname = usePathname();
-  const normalizedPath = pathname ?? "";
-  const detailSegment = normalizedPath.split("/").filter(Boolean)[2] ?? "";
-  const isClientDetailRoute =
-    normalizedPath.startsWith("/admin/clientes/") &&
-    !["dashboard", "lista", "personas", "empresas", "instituciones", "aseguradoras", "configuracion", "reportes", "buscar"].includes(detailSegment) &&
-    !normalizedPath.endsWith("/nuevo");
-  const hideForCreate = Boolean(normalizedPath.includes("/personas/nuevo") || normalizedPath.endsWith("/nuevo"));
-  const hideBar = hideForCreate || isClientDetailRoute;
+  const showBar = shouldShowClientsOperatingCountrySelector(pathname);
+  const tenantIdStable = tenantId ?? "";
   const [countries, setCountries] = useState<CountryApiItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { country, setCountry } = useClientsCountryContext();
+  const [countryId, setCountryId] = useState(initialCountryId ?? "");
+
+  useEffect(() => {
+    setCountryId(initialCountryId ?? "");
+  }, [initialCountryId]);
 
   useEffect(() => {
     let cancelled = false;
-    if (hideBar) return () => undefined;
+    if (!showBar) return () => undefined;
 
     async function loadCountries() {
       setLoading(true);
@@ -50,12 +64,15 @@ export default function ClientsCountryContextBar() {
         if (cancelled) return;
         const items = Array.isArray(json.items) ? json.items : [];
         setCountries(items);
-
-        if (!country?.countryId && items.length) {
-          const preferred = items.find((item) => item.code.toUpperCase() === "GT") ?? items[0];
-          setCountry({ countryId: preferred.id, code: preferred.code, name: preferred.name });
+        if (items.length) {
+          setCountryId((previous) => {
+            if (previous) return previous;
+            const preferred = items.find((item) => item.id === initialCountryId)
+              ?? items.find((item) => item.code.toUpperCase() === "GT")
+              ?? items[0];
+            return preferred?.id ?? previous;
+          });
         }
-
         setError(null);
       } catch (err) {
         if (cancelled) return;
@@ -70,31 +87,52 @@ export default function ClientsCountryContextBar() {
     return () => {
       cancelled = true;
     };
-  }, [country?.countryId, hideBar, setCountry]);
+  }, [showBar, initialCountryId, tenantIdStable]);
 
-  const currentCountryId = country?.countryId || "";
   const helper = useMemo(() => {
     if (error) return error;
+    if (isSaving) return "Aplicando país operativo...";
     if (loading) return "Cargando países...";
     if (!countries.length) return "No hay países disponibles.";
     return "País operativo del módulo Clientes (afecta prefijo y labels de ubicación por defecto).";
-  }, [countries.length, error, loading]);
+  }, [countries.length, error, isSaving, loading]);
 
-  // En formularios de alta (".../nuevo") el contexto visual duplica país de identidad/residencia.
-  if (hideBar) return null;
+  async function persistOperatingCountry(nextCountryId: string) {
+    setIsSaving(true);
+    try {
+      const response = await fetch("/api/admin/clientes/operating-country", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ countryId: nextCountryId })
+      });
+      const payload = (await response.json().catch(() => ({}))) as ApiResponse<CountryApiItem>;
+      if (!response.ok || payload.ok === false) {
+        throw new Error(parseErrorMessage(payload, "No se pudo actualizar el país operativo."));
+      }
+      setCountryId(nextCountryId);
+      setError(null);
+      router.refresh();
+    } catch (err) {
+      setError((err as Error)?.message || "No se pudo actualizar el país operativo.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  if (!showBar) return null;
 
   return (
     <section className="rounded-2xl border border-[#dce7f5] bg-white px-4 py-3 shadow-sm">
       <div className="grid gap-3 md:grid-cols-[minmax(240px,320px)_1fr] md:items-end">
         <CountryPicker
           label="País operativo"
-          value={currentCountryId}
+          value={countryId}
           options={countries}
-          disabled={loading || !countries.length}
+          disabled={loading || isSaving || !countries.length}
           onChange={(countryId) => {
             const selected = countries.find((item) => item.id === countryId);
             if (!selected) return;
-            setCountry({ countryId: selected.id, code: selected.code, name: selected.name });
+            void persistOperatingCountry(selected.id);
           }}
         />
         <p className="text-xs text-slate-500">{helper}</p>
