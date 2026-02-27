@@ -1,36 +1,14 @@
-import { ClientProfileType, Prisma } from "@prisma/client";
+import { ClientPhoneCategory, ClientProfileType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getClientCompletenessScore, type ClientCompletenessSnapshot } from "@/lib/clients/completeness";
-import { INSURER_LINE_FALLBACK } from "@/lib/catalogs/insurerLines";
 import { normalizeTenantId } from "@/lib/tenant";
 
-export type ClientsListViewMode = "operativa" | "comercial";
-
-export type ClientCommercialScoreFilter = "" | "LOW" | "MEDIUM" | "HIGH";
-
-export type ClientCommercialSort =
-  | "createdAt_desc"
-  | "createdAt_asc"
-  | "code_asc"
-  | "code_desc"
-  | "name_asc"
-  | "name_desc"
-  | "score_desc"
-  | "score_asc"
-  | "lastActivity_desc"
-  | "lastActivity_asc";
+export type ClientCommercialSort = "createdAt_desc" | "name_asc";
 
 export type ClientCommercialListQuery = {
   tenantId: unknown;
   q?: string;
   type?: ClientProfileType | "";
   statusId?: string;
-  acquisitionSourceId?: string;
-  activityOrLine?: string;
-  location?: string;
-  score?: ClientCommercialScoreFilter;
-  dateFrom?: string;
-  dateTo?: string;
   includeArchived?: boolean;
   page?: number;
   pageSize?: number;
@@ -42,15 +20,13 @@ export type ClientCommercialListItem = {
   clientCode: string | null;
   displayName: string;
   type: ClientProfileType;
-  typeLabel: string;
   identifier: string | null;
-  acquisitionChannel: string | null;
-  activityOrLine: string | null;
-  locationLabel: string | null;
-  primaryContact: string | null;
+  primaryPhone: string | null;
+  primaryPhoneHref: string | null;
+  primaryEmail: string | null;
+  primaryEmailHref: string | null;
+  whatsappHref: string | null;
   statusLabel: string | null;
-  healthScore: number;
-  lastActivityAt: Date;
   createdAt: Date;
   isArchived: boolean;
 };
@@ -62,20 +38,8 @@ export type ClientCommercialListResult = {
   pageSize: number;
 };
 
-const INSURER_LINE_LABEL_BY_ID = new Map<string, string>(INSURER_LINE_FALLBACK.map((item) => [item.id, item.label]));
-
 function normalizeSearch(value?: string | null) {
   return (value ?? "").trim();
-}
-
-function parseDateBoundary(value?: string, endOfDay = false) {
-  const token = normalizeSearch(value);
-  if (!token) return null;
-  const parsed = new Date(token);
-  if (Number.isNaN(parsed.getTime())) return null;
-  if (endOfDay) parsed.setHours(23, 59, 59, 999);
-  else parsed.setHours(0, 0, 0, 0);
-  return parsed;
 }
 
 function displayName(row: {
@@ -93,103 +57,105 @@ function displayName(row: {
   return row.companyName || row.tradeName || "Cliente";
 }
 
-function typeLabel(type: ClientProfileType) {
-  if (type === ClientProfileType.PERSON) return "Persona";
-  if (type === ClientProfileType.COMPANY) return "Empresa";
-  if (type === ClientProfileType.INSTITUTION) return "Institución";
-  return "Aseguradora";
+function stripToDigits(value: string) {
+  return value.replace(/\D+/g, "");
 }
 
-function buildLocationLabel(input: {
-  country: string | null;
-  department: string | null;
-  city: string | null;
-  clientLocations: Array<{ country: string | null; department: string | null; city: string | null; isPrimary: boolean }>;
-}) {
-  const primaryLocation = input.clientLocations.find((item) => item.isPrimary) ?? input.clientLocations[0] ?? null;
-  const country = primaryLocation?.country ?? input.country;
-  const department = primaryLocation?.department ?? input.department;
-  const city = primaryLocation?.city ?? input.city;
-  const parts = [city, department, country].filter((value): value is string => Boolean(value && value.trim()));
-  return parts.length ? parts.join(", ") : null;
-}
-
-function buildPrimaryContact(input: {
-  clientContacts: Array<{ name: string; role: string | null; phone: string | null; email: string | null; isPrimary: boolean }>;
-  phone: string | null;
-  email: string | null;
-  clientPhones: Array<{ number: string; e164: string | null; isPrimary: boolean }>;
+function selectPrimaryEmail(input: {
   clientEmails: Array<{ valueRaw: string; valueNormalized: string; isPrimary: boolean }>;
+  email: string | null;
+  clientContacts: Array<{ email: string | null; isPrimary: boolean }>;
 }) {
-  const primaryContact = input.clientContacts.find((item) => item.isPrimary) ?? input.clientContacts[0] ?? null;
-  if (primaryContact) {
-    const phone = primaryContact.phone?.trim() || null;
-    const email = primaryContact.email?.trim() || null;
-    const contactToken = phone || email || "Sin canal";
-    return `${primaryContact.name} · ${contactToken}`;
-  }
-
-  const primaryPhone = input.clientPhones.find((item) => item.isPrimary) ?? input.clientPhones[0] ?? null;
   const primaryEmail = input.clientEmails.find((item) => item.isPrimary) ?? input.clientEmails[0] ?? null;
-  const phone = primaryPhone?.e164 || primaryPhone?.number || input.phone;
-  const email = primaryEmail?.valueNormalized || primaryEmail?.valueRaw || input.email;
-  return phone || email || null;
+  const primaryContact = input.clientContacts.find((item) => item.isPrimary) ?? input.clientContacts[0] ?? null;
+  const value =
+    primaryEmail?.valueNormalized?.trim() ||
+    primaryEmail?.valueRaw?.trim() ||
+    input.email?.trim() ||
+    primaryContact?.email?.trim() ||
+    null;
+
+  if (!value) {
+    return { value: null, href: null };
+  }
+
+  const normalized = value.toLowerCase();
+  return {
+    value,
+    href: normalized.includes("@") ? `mailto:${normalized}` : null
+  };
 }
 
-function readInsurerLineLabel(metadata: Prisma.JsonValue | null | undefined) {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
-  const lineCode = (metadata as Record<string, unknown>).insurerLinePrimaryCode;
-  if (typeof lineCode !== "string") return null;
-  const normalized = lineCode.trim().toLowerCase();
-  if (!normalized) return null;
-  return INSURER_LINE_LABEL_BY_ID.get(normalized) ?? normalized;
+function buildTelHref(value: string | null) {
+  if (!value) return null;
+  const compact = value.replace(/\s+/g, "").trim();
+  return compact ? `tel:${compact}` : null;
 }
 
-function buildActivityOrLine(row: {
-  type: ClientProfileType;
-  sector: { name: string } | null;
-  institutionCategory: { name: string } | null;
-  institutionType: { name: string } | null;
-  companyRecord: { metadata: Prisma.JsonValue | null } | null;
+function toWhatsAppDigits(phone: { e164: string | null; countryCode: string; number: string }) {
+  const e164Digits = stripToDigits(phone.e164 || "");
+  if (e164Digits) return e164Digits;
+
+  const countryCodeDigits = stripToDigits(phone.countryCode);
+  const numberDigits = stripToDigits(phone.number);
+  if (!numberDigits) return null;
+
+  if (countryCodeDigits && !numberDigits.startsWith(countryCodeDigits)) {
+    return `${countryCodeDigits}${numberDigits}`;
+  }
+
+  return numberDigits;
+}
+
+function selectPrimaryPhone(input: {
+  clientPhones: Array<{
+    number: string;
+    e164: string | null;
+    countryCode: string;
+    category: ClientPhoneCategory;
+    canWhatsapp: boolean;
+    isPrimary: boolean;
+  }>;
+  phone: string | null;
+  clientContacts: Array<{ phone: string | null; phoneE164: string | null; isPrimary: boolean }>;
 }) {
-  if (row.type === ClientProfileType.INSURER) {
-    const insurerLine = readInsurerLineLabel(row.companyRecord?.metadata);
-    return insurerLine ?? "—";
+  const primaryPhone = input.clientPhones.find((item) => item.isPrimary) ?? input.clientPhones[0] ?? null;
+  const whatsappPhone =
+    input.clientPhones.find(
+      (item) =>
+        item.category === ClientPhoneCategory.WHATSAPP || item.category === ClientPhoneCategory.MOBILE || item.canWhatsapp
+    ) ?? null;
+
+  if (primaryPhone) {
+    const value = primaryPhone.e164?.trim() || primaryPhone.number?.trim() || null;
+    const whatsappDigits = whatsappPhone ? toWhatsAppDigits(whatsappPhone) : null;
+
+    return {
+      value,
+      href: buildTelHref(value),
+      whatsappHref: whatsappDigits ? `https://wa.me/${whatsappDigits}` : null
+    };
   }
-  if (row.type === ClientProfileType.COMPANY) {
-    return row.sector?.name ?? "—";
-  }
-  if (row.type === ClientProfileType.INSTITUTION) {
-    return row.institutionCategory?.name ?? row.institutionType?.name ?? "—";
-  }
-  return "—";
+
+  const primaryContact = input.clientContacts.find((item) => item.isPrimary) ?? input.clientContacts[0] ?? null;
+  const fallback = input.phone?.trim() || primaryContact?.phoneE164?.trim() || primaryContact?.phone?.trim() || null;
+
+  return {
+    value: fallback,
+    href: buildTelHref(fallback),
+    whatsappHref: null
+  };
 }
 
-function buildScoreBand(score: number): ClientCommercialScoreFilter {
-  if (score < 50) return "LOW";
-  if (score < 80) return "MEDIUM";
-  return "HIGH";
-}
-
-function compareNullableString(a: string | null, b: string | null) {
-  const left = a ?? "";
-  const right = b ?? "";
+function compareNames(left: string, right: string) {
   return left.localeCompare(right, "es", { sensitivity: "base" });
 }
 
 function applySort(items: ClientCommercialListItem[], sort: ClientCommercialSort) {
   const rows = [...items];
   rows.sort((left, right) => {
-    if (sort === "createdAt_asc") return left.createdAt.getTime() - right.createdAt.getTime();
-    if (sort === "createdAt_desc") return right.createdAt.getTime() - left.createdAt.getTime();
-    if (sort === "code_asc") return compareNullableString(left.clientCode, right.clientCode);
-    if (sort === "code_desc") return compareNullableString(right.clientCode, left.clientCode);
-    if (sort === "name_asc") return left.displayName.localeCompare(right.displayName, "es", { sensitivity: "base" });
-    if (sort === "name_desc") return right.displayName.localeCompare(left.displayName, "es", { sensitivity: "base" });
-    if (sort === "score_asc") return left.healthScore - right.healthScore;
-    if (sort === "score_desc") return right.healthScore - left.healthScore;
-    if (sort === "lastActivity_asc") return left.lastActivityAt.getTime() - right.lastActivityAt.getTime();
-    return right.lastActivityAt.getTime() - left.lastActivityAt.getTime();
+    if (sort === "name_asc") return compareNames(left.displayName, right.displayName);
+    return right.createdAt.getTime() - left.createdAt.getTime();
   });
   return rows;
 }
@@ -197,11 +163,7 @@ function applySort(items: ClientCommercialListItem[], sort: ClientCommercialSort
 export async function listClientsCommercial(query: ClientCommercialListQuery): Promise<ClientCommercialListResult> {
   const tenantId = normalizeTenantId(query.tenantId);
   const q = normalizeSearch(query.q);
-  const locationNeedle = normalizeSearch(query.location).toLowerCase();
-  const activityNeedle = normalizeSearch(query.activityOrLine).toLowerCase();
-  const dateFrom = parseDateBoundary(query.dateFrom);
-  const dateTo = parseDateBoundary(query.dateTo, true);
-  const pageSize = Math.min(Math.max(query.pageSize ?? 25, 10), 200);
+  const pageSize = Math.min(Math.max(query.pageSize ?? 10, 10), 200);
   const page = Math.max(query.page ?? 1, 1);
   const offset = (page - 1) * pageSize;
   const includeArchived = Boolean(query.includeArchived);
@@ -221,28 +183,19 @@ export async function listClientsCommercial(query: ClientCommercialListQuery): P
         { dpi: { contains: q, mode: "insensitive" } },
         { phone: { contains: q, mode: "insensitive" } },
         { email: { contains: q, mode: "insensitive" } },
-        { clientPhones: { some: { isActive: true, OR: [{ number: { contains: q, mode: "insensitive" } }, { e164: { contains: q, mode: "insensitive" } }] } } },
-        { clientEmails: { some: { isActive: true, OR: [{ valueRaw: { contains: q, mode: "insensitive" } }, { valueNormalized: { contains: q.toLowerCase() } }] } } }
-      ]
-    });
-  }
-
-  if (locationNeedle) {
-    andFilters.push({
-      OR: [
-        { country: { contains: locationNeedle, mode: "insensitive" } },
-        { department: { contains: locationNeedle, mode: "insensitive" } },
-        { city: { contains: locationNeedle, mode: "insensitive" } },
         {
-          clientLocations: {
+          clientPhones: {
             some: {
               isActive: true,
-              OR: [
-                { country: { contains: locationNeedle, mode: "insensitive" } },
-                { department: { contains: locationNeedle, mode: "insensitive" } },
-                { city: { contains: locationNeedle, mode: "insensitive" } },
-                { addressLine1: { contains: locationNeedle, mode: "insensitive" } }
-              ]
+              OR: [{ number: { contains: q, mode: "insensitive" } }, { e164: { contains: q, mode: "insensitive" } }]
+            }
+          }
+        },
+        {
+          clientEmails: {
+            some: {
+              isActive: true,
+              OR: [{ valueRaw: { contains: q, mode: "insensitive" } }, { valueNormalized: { contains: q.toLowerCase() } }]
             }
           }
         }
@@ -255,15 +208,6 @@ export async function listClientsCommercial(query: ClientCommercialListQuery): P
     ...(includeArchived ? {} : { deletedAt: null }),
     ...(query.type ? { type: query.type } : {}),
     ...(query.statusId ? { statusId: query.statusId } : {}),
-    ...(query.acquisitionSourceId ? { acquisitionSourceId: query.acquisitionSourceId } : {}),
-    ...(dateFrom || dateTo
-      ? {
-          createdAt: {
-            ...(dateFrom ? { gte: dateFrom } : {}),
-            ...(dateTo ? { lte: dateTo } : {})
-          }
-        }
-      : {}),
     ...(andFilters.length ? { AND: andFilters } : {})
   };
 
@@ -283,19 +227,9 @@ export async function listClientsCommercial(query: ClientCommercialListQuery): P
       dpi: true,
       phone: true,
       email: true,
-      country: true,
-      department: true,
-      city: true,
-      address: true,
       createdAt: true,
-      updatedAt: true,
       deletedAt: true,
       status: { select: { name: true } },
-      acquisitionSource: { select: { name: true } },
-      sector: { select: { name: true } },
-      institutionCategory: { select: { name: true } },
-      institutionType: { select: { name: true } },
-      companyRecord: { select: { metadata: true } },
       clientPhones: {
         where: { isActive: true },
         orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
@@ -303,6 +237,9 @@ export async function listClientsCommercial(query: ClientCommercialListQuery): P
         select: {
           number: true,
           e164: true,
+          countryCode: true,
+          category: true,
+          canWhatsapp: true,
           isPrimary: true
         }
       },
@@ -316,106 +253,49 @@ export async function listClientsCommercial(query: ClientCommercialListQuery): P
           isPrimary: true
         }
       },
-      clientLocations: {
-        where: { isActive: true },
-        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-        take: 5,
-        select: {
-          country: true,
-          department: true,
-          city: true,
-          addressLine1: true,
-          isPrimary: true
-        }
-      },
       clientContacts: {
         orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         take: 5,
         select: {
-          name: true,
-          role: true,
           phone: true,
+          phoneE164: true,
           email: true,
           isPrimary: true
         }
-      },
-      auditEvents: {
-        orderBy: { timestamp: "desc" },
-        take: 1,
-        select: { timestamp: true }
       }
     }
   });
 
   const mapped = rows.map((row): ClientCommercialListItem => {
-    const locationLabel = buildLocationLabel({
-      country: row.country,
-      department: row.department,
-      city: row.city,
-      clientLocations: row.clientLocations
-    });
-    const activityOrLine = buildActivityOrLine({
-      type: row.type,
-      sector: row.sector,
-      institutionCategory: row.institutionCategory,
-      institutionType: row.institutionType,
-      companyRecord: row.companyRecord
-    });
-    const primaryContact = buildPrimaryContact({
-      clientContacts: row.clientContacts,
-      phone: row.phone,
-      email: row.email,
+    const primaryPhone = selectPrimaryPhone({
       clientPhones: row.clientPhones,
-      clientEmails: row.clientEmails
+      phone: row.phone,
+      clientContacts: row.clientContacts
     });
-
-    const snapshot: ClientCompletenessSnapshot = {
-      type: row.type,
-      firstName: row.firstName,
-      middleName: row.middleName,
-      lastName: row.lastName,
-      secondLastName: row.secondLastName,
-      dpi: row.dpi,
-      phone: row.phone ?? row.clientPhones[0]?.number ?? null,
-      companyName: row.companyName,
-      tradeName: row.tradeName,
-      nit: row.nit,
-      address: row.address ?? row.clientLocations[0]?.addressLine1 ?? null,
-      city: row.city ?? row.clientLocations[0]?.city ?? null,
-      department: row.department ?? row.clientLocations[0]?.department ?? null,
-      institutionTypeId: row.institutionType ? "set" : null
-    };
-
-    const healthScore = getClientCompletenessScore(snapshot);
+    const primaryEmail = selectPrimaryEmail({
+      clientEmails: row.clientEmails,
+      email: row.email,
+      clientContacts: row.clientContacts
+    });
 
     return {
       id: row.id,
       clientCode: row.clientCode,
       displayName: displayName(row),
       type: row.type,
-      typeLabel: typeLabel(row.type),
       identifier: row.type === ClientProfileType.PERSON ? row.dpi : row.nit,
-      acquisitionChannel: row.acquisitionSource?.name ?? null,
-      activityOrLine,
-      locationLabel,
-      primaryContact,
+      primaryPhone: primaryPhone.value,
+      primaryPhoneHref: primaryPhone.href,
+      primaryEmail: primaryEmail.value,
+      primaryEmailHref: primaryEmail.href,
+      whatsappHref: primaryPhone.whatsappHref,
       statusLabel: row.status?.name ?? null,
-      healthScore,
-      lastActivityAt: row.auditEvents[0]?.timestamp ?? row.updatedAt,
       createdAt: row.createdAt,
       isArchived: Boolean(row.deletedAt)
     };
   });
 
-  const filteredByActivity = activityNeedle
-    ? mapped.filter((row) => (row.activityOrLine || "").toLowerCase().includes(activityNeedle))
-    : mapped;
-
-  const filteredByScore = query.score
-    ? filteredByActivity.filter((row) => buildScoreBand(row.healthScore) === query.score)
-    : filteredByActivity;
-
-  const sorted = applySort(filteredByScore, query.sort ?? "createdAt_desc");
+  const sorted = applySort(mapped, query.sort ?? "createdAt_desc");
   const total = sorted.length;
   const items = sorted.slice(offset, offset + pageSize);
 

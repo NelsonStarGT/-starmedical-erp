@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
 import { companyDetailQuerySchema, companyIdParamSchema } from "@/lib/companies/schema/company.zod";
 import { getCompanyDetail } from "@/lib/companies/services/company.service";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest, context: Context) {
   }
 
   const queryParsed = companyDetailQuerySchema.safeParse({
-    tenantId: req.nextUrl.searchParams.get("tenantId") ?? undefined,
+    tenantId: tenantIdFromUser(auth.user),
     includeArchived: req.nextUrl.searchParams.get("includeArchived") ?? undefined
   });
 

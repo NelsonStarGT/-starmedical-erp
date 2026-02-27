@@ -1,5 +1,8 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { getSessionUserFromCookies } from "@/lib/auth";
+import { resolveTenantContextForUser } from "@/lib/security/tenantContext.server";
 
 export const runtime = "nodejs";
 
@@ -14,6 +17,10 @@ export default async function ClientesBuscarPage({
 }: {
   searchParams?: Promise<SearchParams | undefined> | SearchParams;
 }) {
+  const cookieStore = await cookies();
+  const currentUser = await getSessionUserFromCookies(cookieStore);
+  if (!currentUser) redirect("/login");
+  const tenantContext = await resolveTenantContextForUser(currentUser, { cookieStore });
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const dpi = resolvedSearchParams?.dpi?.trim();
   const nit = resolvedSearchParams?.nit?.trim();
@@ -27,12 +34,28 @@ export default async function ClientesBuscarPage({
 
   const client =
     (dpi
-      ? await prisma.clientProfile.findFirst({ where: { dpi, deletedAt: null }, select: { id: true } })
+      ? await prisma.clientProfile.findFirst({
+          where: { dpi, tenantId: tenantContext.tenantId, deletedAt: null },
+          select: { id: true }
+        })
       : nit
-        ? await prisma.clientProfile.findFirst({ where: { nit, deletedAt: null }, select: { id: true } })
+        ? await prisma.clientProfile.findFirst({
+            where: { nit, tenantId: tenantContext.tenantId, deletedAt: null },
+            select: { id: true }
+          })
         : null) ??
-    (q ? await prisma.clientProfile.findFirst({ where: { dpi: q, deletedAt: null }, select: { id: true } }) : null) ??
-    (q ? await prisma.clientProfile.findFirst({ where: { nit: q, deletedAt: null }, select: { id: true } }) : null);
+    (q
+      ? await prisma.clientProfile.findFirst({
+          where: { dpi: q, tenantId: tenantContext.tenantId, deletedAt: null },
+          select: { id: true }
+        })
+      : null) ??
+    (q
+      ? await prisma.clientProfile.findFirst({
+          where: { nit: q, tenantId: tenantContext.tenantId, deletedAt: null },
+          select: { id: true }
+        })
+      : null);
 
   if (!client) {
     const term = dpi || nit || q || "";

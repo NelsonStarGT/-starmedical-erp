@@ -101,8 +101,11 @@ export async function listCompaniesRepo(input: CompanyListQuery) {
 }
 
 export async function getCompanyDetailRepo(input: CompanyDetailInput) {
-  const row = await prisma.company.findUnique({
-    where: { id: input.companyId },
+  const row = await prisma.company.findFirst({
+    where: {
+      id: input.companyId,
+      tenantId: input.tenantId
+    },
     select: {
       id: true,
       tenantId: true,
@@ -258,7 +261,6 @@ export async function getCompanyDetailRepo(input: CompanyDetailInput) {
   });
 
   if (!row) return null;
-  if (row.tenantId !== input.tenantId) return null;
   if (!input.includeArchived && row.deletedAt) return null;
 
   return row;

@@ -1,19 +1,15 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { ClientCatalogType, ClientProfileType } from "@prisma/client";
-import { Download, Plus } from "lucide-react";
+import { Download, Eye, Mail, MessageCircle, Phone, Plus } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { tenantIdFromUser } from "@/lib/tenant";
 import { formatDateForClients } from "@/lib/clients/dateFormat";
 import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
-import {
-  listClientsCommercial,
-  type ClientCommercialListItem,
-  type ClientCommercialScoreFilter,
-  type ClientCommercialSort,
-  type ClientsListViewMode
-} from "@/lib/clients/commercialList.service";
+import { listClientsCommercial, type ClientCommercialListItem, type ClientCommercialSort } from "@/lib/clients/commercialList.service";
 import { buildClientListHref, mergeHrefQuery, type HrefQuery } from "@/lib/clients/list/href";
 import { DataTable } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -28,10 +24,6 @@ function firstValue(value: string | string[] | undefined) {
   return value ?? "";
 }
 
-function parseView(value: string): ClientsListViewMode {
-  return value === "comercial" ? "comercial" : "operativa";
-}
-
 function parseType(value: string): ClientProfileType | "" {
   if (value === ClientProfileType.PERSON) return ClientProfileType.PERSON;
   if (value === ClientProfileType.COMPANY) return ClientProfileType.COMPANY;
@@ -40,30 +32,9 @@ function parseType(value: string): ClientProfileType | "" {
   return "";
 }
 
-function parseScore(value: string): ClientCommercialScoreFilter {
-  if (value === "LOW") return "LOW";
-  if (value === "MEDIUM") return "MEDIUM";
-  if (value === "HIGH") return "HIGH";
-  return "";
-}
-
-function parseSort(value: string, view: ClientsListViewMode): ClientCommercialSort {
-  const allowed: ClientCommercialSort[] = [
-    "createdAt_desc",
-    "createdAt_asc",
-    "code_asc",
-    "code_desc",
-    "name_asc",
-    "name_desc",
-    "score_desc",
-    "score_asc",
-    "lastActivity_desc",
-    "lastActivity_asc"
-  ];
-  if (allowed.includes(value as ClientCommercialSort)) {
-    return value as ClientCommercialSort;
-  }
-  return view === "comercial" ? "lastActivity_desc" : "createdAt_desc";
+function parseSort(value: string): ClientCommercialSort {
+  if (value === "name_asc") return "name_asc";
+  return "createdAt_desc";
 }
 
 function parsePositiveInt(value: string, fallback: number, min: number, max: number) {
@@ -84,10 +55,41 @@ function statusTone(isArchived: boolean) {
   return "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
-function scoreTone(score: number) {
-  if (score < 50) return "text-rose-700";
-  if (score < 80) return "text-amber-700";
-  return "text-emerald-700";
+function CompactAction({
+  href,
+  label,
+  icon,
+  external = false
+}: {
+  href?: string | null;
+  label: string;
+  icon: ReactNode;
+  external?: boolean;
+}) {
+  if (!href) {
+    return (
+      <span
+        title="No disponible"
+        aria-label={`${label} no disponible`}
+        className="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-slate-400"
+      >
+        {icon}
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={href}
+      title={label}
+      aria-label={label}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noreferrer" : undefined}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+    >
+      {icon}
+    </a>
+  );
 }
 
 export default async function ClientesListaPage({
@@ -97,33 +99,22 @@ export default async function ClientesListaPage({
 }) {
   const resolved = searchParams ? await searchParams : undefined;
   const currentUser = await getSessionUserFromCookies(cookies());
+  if (!currentUser) redirect("/login");
   const tenantId = tenantIdFromUser(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
 
-  const view = parseView(firstValue(resolved?.view));
   const q = firstValue(resolved?.q).trim();
   const type = parseType(firstValue(resolved?.type));
   const statusId = firstValue(resolved?.status).trim();
-  const acquisitionSourceId = firstValue(resolved?.source).trim();
-  const activityOrLine = firstValue(resolved?.activity).trim();
-  const location = firstValue(resolved?.location).trim();
-  const score = parseScore(firstValue(resolved?.score));
-  const dateFrom = firstValue(resolved?.dateFrom).trim();
-  const dateTo = firstValue(resolved?.dateTo).trim();
   const includeArchived = firstValue(resolved?.includeArchived) === "1";
-  const pageSize = parsePositiveInt(firstValue(resolved?.pageSize), 25, 10, 100);
+  const pageSize = parsePositiveInt(firstValue(resolved?.pageSize), 10, 10, 10);
   const page = parsePositiveInt(firstValue(resolved?.page), 1, 1, 5000);
-  const sort = parseSort(firstValue(resolved?.sort), view);
+  const sort = parseSort(firstValue(resolved?.sort));
 
-  const [statusOptions, sourceOptions, result] = await Promise.all([
+  const [statusOptions, result] = await Promise.all([
     prisma.clientCatalogItem.findMany({
       where: { type: ClientCatalogType.CLIENT_STATUS, isActive: true },
       orderBy: { name: "asc" },
-      select: { id: true, name: true }
-    }),
-    prisma.clientAcquisitionSource.findMany({
-      where: { isActive: true },
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
       select: { id: true, name: true }
     }),
     listClientsCommercial({
@@ -131,12 +122,6 @@ export default async function ClientesListaPage({
       q,
       type,
       statusId,
-      acquisitionSourceId,
-      activityOrLine,
-      location,
-      score,
-      dateFrom,
-      dateTo,
       includeArchived,
       page,
       pageSize,
@@ -145,16 +130,9 @@ export default async function ClientesListaPage({
   ]);
 
   const queryObject: HrefQuery = {
-    view,
     q: q || undefined,
     type: type || undefined,
     status: statusId || undefined,
-    source: acquisitionSourceId || undefined,
-    activity: activityOrLine || undefined,
-    location: location || undefined,
-    score: score || undefined,
-    dateFrom: dateFrom || undefined,
-    dateTo: dateTo || undefined,
     includeArchived: includeArchived ? "1" : undefined,
     sort: sort || undefined,
     pageSize: String(pageSize)
@@ -173,7 +151,7 @@ export default async function ClientesListaPage({
         })
       : null;
 
-  const commonColumns = [
+  const columns = [
     {
       header: "Correlativo",
       width: "w-[120px]",
@@ -181,29 +159,30 @@ export default async function ClientesListaPage({
     },
     {
       header: "Cliente",
-      width: "w-[260px]",
+      width: "w-[280px]",
       render: (row: ClientCommercialListItem) => (
         <div className="space-y-1">
           <Link href={`/admin/clientes/${row.id}`} className="font-semibold text-slate-900 hover:text-[#2e75ba]">
             {row.displayName}
           </Link>
-          <p className="text-xs text-slate-500">{row.identifier ?? "Sin documento"}</p>
+          {row.identifier ? <p className="text-xs text-slate-500">{row.identifier}</p> : null}
         </div>
       )
     },
     {
       header: "Tipo",
-      width: "w-[130px]",
+      width: "w-[140px]",
       render: (row: ClientCommercialListItem) => <span className="text-slate-700">{typeLabel(row.type)}</span>
-    }
-  ];
-
-  const operationalColumns = [
-    ...commonColumns,
+    },
     {
-      header: "Contacto",
+      header: "Contacto principal",
       width: "w-[220px]",
-      render: (row: ClientCommercialListItem) => <span className="text-slate-700">{row.primaryContact ?? "—"}</span>
+      render: (row: ClientCommercialListItem) => (
+        <div className="space-y-0.5 text-sm text-slate-700">
+          <p>{row.primaryPhone ?? "—"}</p>
+          <p className="text-xs text-slate-500">{row.primaryEmail ?? "—"}</p>
+        </div>
+      )
     },
     {
       header: "Estado",
@@ -213,63 +192,32 @@ export default async function ClientesListaPage({
           {row.statusLabel ?? (row.isArchived ? "Archivado" : "Activo")}
         </span>
       )
-    },
-    {
-      header: "Score",
-      width: "w-[90px]",
-      render: (row: ClientCommercialListItem) => <span className={cn("font-semibold", scoreTone(row.healthScore))}>{row.healthScore}%</span>
     },
     {
       header: "Creado",
       width: "w-[140px]",
       render: (row: ClientCommercialListItem) => <span className="text-slate-600">{formatDateForClients(row.createdAt, dateFormat)}</span>
-    }
-  ];
-
-  const commercialColumns = [
-    ...commonColumns,
-    {
-      header: "NIT",
-      width: "w-[150px]",
-      render: (row: ClientCommercialListItem) => <span className="text-slate-700">{row.identifier ?? "—"}</span>
     },
     {
-      header: "Canal",
-      width: "w-[160px]",
-      render: (row: ClientCommercialListItem) => <span className="text-slate-700">{row.acquisitionChannel ?? "—"}</span>
-    },
-    {
-      header: "Actividad / ramo",
-      width: "w-[220px]",
-      render: (row: ClientCommercialListItem) => <span className="text-slate-700">{row.activityOrLine ?? "—"}</span>
-    },
-    {
-      header: "Ubicación",
-      width: "w-[220px]",
-      render: (row: ClientCommercialListItem) => <span className="text-slate-700">{row.locationLabel ?? "—"}</span>
-    },
-    {
-      header: "Contacto principal",
-      width: "w-[220px]",
-      render: (row: ClientCommercialListItem) => <span className="text-slate-700">{row.primaryContact ?? "—"}</span>
-    },
-    {
-      header: "Estado",
-      width: "w-[130px]",
+      header: "Acciones",
+      width: "w-[210px]",
       render: (row: ClientCommercialListItem) => (
-        <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold", statusTone(row.isArchived))}>
-          {row.statusLabel ?? (row.isArchived ? "Archivado" : "Activo")}
-        </span>
+        <div className="flex flex-wrap items-center gap-1">
+          <Link
+            href={`/admin/clientes/${row.id}`}
+            title="Ver perfil"
+            aria-label="Ver perfil"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+          >
+            <Eye size={14} />
+          </Link>
+          <CompactAction href={row.primaryPhoneHref} label="Llamar" icon={<Phone size={14} />} />
+          <CompactAction href={row.whatsappHref} label="WhatsApp" icon={<MessageCircle size={14} />} external />
+          <CompactAction href={row.primaryEmailHref} label="Email" icon={<Mail size={14} />} />
+        </div>
       )
-    },
-    {
-      header: "Última actividad",
-      width: "w-[150px]",
-      render: (row: ClientCommercialListItem) => <span className="text-slate-600">{formatDateForClients(row.lastActivityAt, dateFormat)}</span>
     }
   ];
-
-  const columns = view === "comercial" ? commercialColumns : operationalColumns;
 
   return (
     <div className="space-y-4">
@@ -280,31 +228,7 @@ export default async function ClientesListaPage({
             <h1 className="mt-1 text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
               Lista de Clientes
             </h1>
-            <p className="text-sm text-slate-600">Vista operativa y comercial unificada, con búsqueda por correlativo y filtros de negocio.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={buildClientListHref("/admin/clientes/lista", { ...queryObject, view: "operativa", page: undefined })}
-              className={cn(
-                "rounded-full border px-4 py-2 text-sm font-semibold",
-                view === "operativa"
-                  ? "border-[#4aa59c] bg-[#4aa59c]/12 text-[#2e75ba]"
-                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-              )}
-            >
-              Operativa
-            </Link>
-            <Link
-              href={buildClientListHref("/admin/clientes/lista", { ...queryObject, view: "comercial", page: undefined })}
-              className={cn(
-                "rounded-full border px-4 py-2 text-sm font-semibold",
-                view === "comercial"
-                  ? "border-[#4aa59c] bg-[#4aa59c]/12 text-[#2e75ba]"
-                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-              )}
-            >
-              Comercial
-            </Link>
+            <p className="text-sm text-slate-600">Catálogo maestro para consultar y gestionar la base de clientes del ERP.</p>
           </div>
         </div>
       </section>
@@ -336,7 +260,6 @@ export default async function ClientesListaPage({
         }
       >
         <form action="/admin/clientes/lista" method="GET" className="flex flex-wrap items-center gap-2">
-          <input type="hidden" name="view" value={view} />
           <DebouncedSearchInput
             basePath="/admin/clientes/lista"
             initialValue={q}
@@ -361,65 +284,13 @@ export default async function ClientesListaPage({
             ))}
           </select>
 
-          <select name="source" defaultValue={acquisitionSourceId} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-            <option value="">Canal (todos)</option>
-            {sourceOptions.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-
-          <input
-            name="activity"
-            defaultValue={activityOrLine}
-            placeholder="Actividad / ramo"
-            className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-          />
-
-          <input
-            name="location"
-            defaultValue={location}
-            placeholder="Ubicación"
-            className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-          />
-
-          <select name="score" defaultValue={score} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-            <option value="">Score (todos)</option>
-            <option value="LOW">Bajo (&lt;50)</option>
-            <option value="MEDIUM">Medio (50-79)</option>
-            <option value="HIGH">Alto (80+)</option>
-          </select>
-
-          <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-            Desde
-            <input type="date" name="dateFrom" defaultValue={dateFrom} className="bg-transparent text-sm outline-none" />
-          </label>
-
-          <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-            Hasta
-            <input type="date" name="dateTo" defaultValue={dateTo} className="bg-transparent text-sm outline-none" />
-          </label>
-
           <select name="sort" defaultValue={sort} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
             <option value="createdAt_desc">Orden: creados reciente</option>
-            <option value="createdAt_asc">Orden: creados antiguo</option>
-            <option value="code_asc">Orden: código asc</option>
-            <option value="code_desc">Orden: código desc</option>
-            <option value="name_asc">Orden: nombre asc</option>
-            <option value="name_desc">Orden: nombre desc</option>
-            <option value="score_desc">Orden: score alto</option>
-            <option value="score_asc">Orden: score bajo</option>
-            <option value="lastActivity_desc">Orden: última actividad reciente</option>
-            <option value="lastActivity_asc">Orden: última actividad antigua</option>
+            <option value="name_asc">Orden: A-Z</option>
           </select>
 
           <select name="pageSize" defaultValue={String(pageSize)} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-            {[10, 25, 50, 100].map((size) => (
-              <option key={size} value={size}>
-                {size} por página
-              </option>
-            ))}
+            <option value="10">10 por página</option>
           </select>
 
           <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">

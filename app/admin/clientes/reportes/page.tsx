@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { ClientProfileType } from "@prisma/client";
 import { Download, FilterX } from "lucide-react";
 import { prisma } from "@/lib/prisma";
@@ -87,6 +88,7 @@ export default async function ClientesReportesPage({
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const currentUser = await getSessionUserFromCookies(cookies());
+  if (!currentUser) redirect("/login");
   const tenantId = tenantIdFromUser(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
   const filters = buildFilters(resolvedSearchParams, dateFormat, tenantId);

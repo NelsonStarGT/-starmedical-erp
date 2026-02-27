@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { OperationalArea, VisitPriority } from "@prisma/client";
-import { requireAuth } from "@/lib/auth";
 import { withApiErrorHandling, safeJson } from "@/lib/api/http";
 import {
   createServiceRequest,
   listOpenServiceRequestsByArea,
   listServiceRequestsForVisit
 } from "@/lib/reception/service-requests.service";
+import { prisma } from "@/lib/prisma";
+import {
+  assertBranchAccess,
+  recordTenantIsolationBlocked,
+  requireTenantContextFromRequest
+} from "@/lib/security/tenantContext.server";
 
 function parseArea(value: unknown): OperationalArea {
   if (typeof value !== "string") throw { status: 400, body: { error: "area inválida" } };
@@ -28,8 +33,9 @@ function parsePriority(value: unknown): VisitPriority | null {
 }
 
 export const GET = withApiErrorHandling(async (req: NextRequest) => {
-  const auth = requireAuth(req);
-  if (auth.errorResponse) return auth.errorResponse;
+  const scoped = await requireTenantContextFromRequest(req);
+  if (scoped.errorResponse || !scoped.context) return scoped.errorResponse!;
+  const { context } = scoped;
 
   const visitId = req.nextUrl.searchParams.get("visitId");
   const siteId = req.nextUrl.searchParams.get("siteId");
@@ -37,12 +43,44 @@ export const GET = withApiErrorHandling(async (req: NextRequest) => {
   const status = req.nextUrl.searchParams.get("status");
 
   if (visitId) {
+    const visit = await prisma.visit.findFirst({
+      where: { id: visitId, patient: { tenantId: context.tenantId } },
+      select: { id: true, siteId: true }
+    });
+    if (!visit) {
+      const crossTenantVisit = await prisma.visit.findFirst({
+        where: { id: visitId, patient: { tenantId: { not: context.tenantId } } },
+        select: { id: true }
+      });
+      if (crossTenantVisit) {
+        await recordTenantIsolationBlocked({
+          tenantId: context.tenantId,
+          userId: context.user.id,
+          route: "/api/reception/service-requests",
+          resourceType: "Visit",
+          resourceId: visitId,
+          reason: "visit_not_in_tenant"
+        });
+      }
+      return NextResponse.json({ error: "ServiceRequest no encontrado" }, { status: 404 });
+    }
+    if (!assertBranchAccess(context, visit.siteId)) {
+      return NextResponse.json({ error: "ServiceRequest no encontrado" }, { status: 404 });
+    }
     const data = await listServiceRequestsForVisit({ visitId });
     return NextResponse.json({ ok: true, data });
   }
 
   if (siteId && areaRaw && status === "open") {
-    if (auth.user?.branchId && auth.user.branchId !== siteId) {
+    if (!assertBranchAccess(context, siteId)) {
+      await recordTenantIsolationBlocked({
+        tenantId: context.tenantId,
+        userId: context.user.id,
+        route: "/api/reception/service-requests",
+        resourceType: "Branch",
+        resourceId: siteId,
+        reason: "branch_not_allowed"
+      });
       return NextResponse.json({ error: "No autorizado para esta sede" }, { status: 403 });
     }
     const area = parseArea(areaRaw);
@@ -57,8 +95,9 @@ export const GET = withApiErrorHandling(async (req: NextRequest) => {
 });
 
 export const POST = withApiErrorHandling(async (req: NextRequest) => {
-  const auth = requireAuth(req);
-  if (auth.errorResponse) return auth.errorResponse;
+  const scoped = await requireTenantContextFromRequest(req);
+  if (scoped.errorResponse || !scoped.context) return scoped.errorResponse!;
+  const { context } = scoped;
 
   const body = await safeJson(req);
   const visitId = body.visitId as string | undefined;
@@ -68,8 +107,38 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
     return NextResponse.json({ error: "visitId y siteId son requeridos" }, { status: 400 });
   }
 
-  if (auth.user?.branchId && auth.user.branchId !== siteId) {
+  if (!assertBranchAccess(context, siteId)) {
+    await recordTenantIsolationBlocked({
+      tenantId: context.tenantId,
+      userId: context.user.id,
+      route: "/api/reception/service-requests",
+      resourceType: "Branch",
+      resourceId: siteId,
+      reason: "branch_not_allowed"
+    });
     return NextResponse.json({ error: "No autorizado para esta sede" }, { status: 403 });
+  }
+
+  const visit = await prisma.visit.findFirst({
+    where: { id: visitId, patient: { tenantId: context.tenantId }, siteId },
+    select: { id: true }
+  });
+  if (!visit) {
+    const crossTenantVisit = await prisma.visit.findFirst({
+      where: { id: visitId, patient: { tenantId: { not: context.tenantId } } },
+      select: { id: true }
+    });
+    if (crossTenantVisit) {
+      await recordTenantIsolationBlocked({
+        tenantId: context.tenantId,
+        userId: context.user.id,
+        route: "/api/reception/service-requests",
+        resourceType: "Visit",
+        resourceId: visitId,
+        reason: "visit_not_in_tenant"
+      });
+    }
+    return NextResponse.json({ error: "Visita no encontrada" }, { status: 404 });
   }
 
   const area = parseArea(body.area);
@@ -80,8 +149,8 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
     visitId,
     siteId,
     area,
-    actorUserId: auth.user!.id,
-    actorUser: auth.user,
+    actorUserId: context.user.id,
+    actorUser: context.user,
     priorityOverride: priority,
     notes: typeof body.notes === "string" ? body.notes : undefined,
     enqueue

@@ -2,20 +2,27 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
-import { isAdmin } from "@/lib/rbac";
 import { ACTIVE_QUEUE_ITEM_STATUSES } from "@/lib/reception/queue-guards";
 import { RECEPTION_AREA_LABELS, VISIT_STATUS_LABELS } from "@/lib/reception/constants";
 import VisitActions from "../VisitActions";
 import { VisitTimeline } from "@/components/reception/VisitTimeline";
 import { buildReceptionContext } from "@/lib/reception/rbac";
+import { recordTenantIsolationBlocked, resolveTenantContextForUser } from "@/lib/security/tenantContext.server";
 
 export default async function ReceptionVisitDetailPage({ params }: { params: { visitId: string } }) {
-  const user = await getSessionUserFromCookies(cookies());
+  const cookieStore = await cookies();
+  const user = await getSessionUserFromCookies(cookieStore);
   if (!user) redirect("/login");
+  const tenantContext = await resolveTenantContextForUser(user, { cookieStore });
   const context = buildReceptionContext(user);
+  const allowedBranchIds = tenantContext.allowedBranchIds;
 
-  const visit = await prisma.visit.findUnique({
-    where: { id: params.visitId },
+  const visit = await prisma.visit.findFirst({
+    where: {
+      id: params.visitId,
+      patient: { tenantId: tenantContext.tenantId },
+      ...(allowedBranchIds.length ? { siteId: { in: allowedBranchIds } } : { siteId: "__no_branch_access__" })
+    },
     include: {
       patient: { select: { firstName: true, lastName: true, phone: true } },
       queueItems: {
@@ -51,14 +58,27 @@ export default async function ReceptionVisitDetailPage({ params }: { params: { v
     }
   });
 
-  if (!visit) notFound();
+  if (!visit) {
+    const crossTenantVisit = await prisma.visit.findFirst({
+      where: {
+        id: params.visitId,
+        patient: { tenantId: { not: tenantContext.tenantId } }
+      },
+      select: { id: true }
+    });
 
-  if (!isAdmin(user) && user.branchId && visit.siteId && visit.siteId !== user.branchId) {
-    return (
-      <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">
-        No autorizado para esta visita.
-      </div>
-    );
+    if (crossTenantVisit) {
+      await recordTenantIsolationBlocked({
+        tenantId: tenantContext.tenantId,
+        userId: tenantContext.user.id,
+        route: "/admin/reception/visit/[visitId]",
+        resourceType: "Visit",
+        resourceId: params.visitId,
+        reason: "visit_not_in_tenant"
+      });
+    }
+
+    notFound();
   }
 
   const patientName = [visit.patient?.firstName, visit.patient?.lastName].filter(Boolean).join(" ") || "Paciente";

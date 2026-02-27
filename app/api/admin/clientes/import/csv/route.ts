@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { isValidEmail } from "@/lib/utils";
 import { dpiSchema } from "@/lib/validation/identity";
 import { importExcelViaProcessingService } from "@/lib/processing-service/excel";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 
@@ -310,11 +311,12 @@ function buildErrorCsv(rows: Array<{ row: number; message: string }>) {
 }
 
 async function processRows(params: {
+  tenantId: string;
   type: ClientProfileType;
   rows: ParsedRow[];
   mapping: Record<string, string>;
 }): Promise<ProcessResult> {
-  const { type, rows, mapping } = params;
+  const { tenantId, type, rows, mapping } = params;
   const defaultStatusId = await getDefaultStatusId();
 
   let processedRows = 0;
@@ -345,7 +347,7 @@ async function processRows(params: {
         if (email && !isValidEmail(email)) throw new Error("Email inválido.");
 
         const existing = await prisma.clientProfile.findFirst({
-          where: { type: ClientProfileType.PERSON, dpi },
+          where: { type: ClientProfileType.PERSON, tenantId, dpi },
           select: { id: true, type: true }
         });
 
@@ -371,6 +373,7 @@ async function processRows(params: {
         } else {
           await prisma.clientProfile.create({
             data: {
+              tenantId,
               type: ClientProfileType.PERSON,
               firstName,
               middleName,
@@ -403,7 +406,10 @@ async function processRows(params: {
         }
         if (email && !isValidEmail(email)) throw new Error("Email inválido.");
 
-        const existing = await prisma.clientProfile.findFirst({ where: { nit }, select: { id: true, type: true } });
+        const existing = await prisma.clientProfile.findFirst({
+          where: { tenantId, nit },
+          select: { id: true, type: true }
+        });
 
         if (existing) {
           if (existing.type !== ClientProfileType.COMPANY) {
@@ -429,6 +435,7 @@ async function processRows(params: {
         } else {
           await prisma.clientProfile.create({
             data: {
+              tenantId,
               type: ClientProfileType.COMPANY,
               companyName,
               tradeName,
@@ -465,7 +472,9 @@ async function processRows(params: {
         const institutionTypeId = await getOrCreateInstitutionTypeId(institutionType);
         if (!institutionTypeId) throw new Error("Tipo de institución inválido.");
 
-        const existing = nit ? await prisma.clientProfile.findFirst({ where: { nit }, select: { id: true, type: true } }) : null;
+        const existing = nit
+          ? await prisma.clientProfile.findFirst({ where: { tenantId, nit }, select: { id: true, type: true } })
+          : null;
 
         if (existing) {
           if (existing.type !== ClientProfileType.INSTITUTION) {
@@ -491,6 +500,7 @@ async function processRows(params: {
         } else {
           await prisma.clientProfile.create({
             data: {
+              tenantId,
               type: ClientProfileType.INSTITUTION,
               companyName,
               nit,
@@ -524,7 +534,9 @@ async function processRows(params: {
         }
         if (email && !isValidEmail(email)) throw new Error("Email inválido.");
 
-        const existing = nit ? await prisma.clientProfile.findFirst({ where: { nit }, select: { id: true, type: true } }) : null;
+        const existing = nit
+          ? await prisma.clientProfile.findFirst({ where: { tenantId, nit }, select: { id: true, type: true } })
+          : null;
 
         if (existing) {
           if (existing.type !== ClientProfileType.INSURER) {
@@ -550,6 +562,7 @@ async function processRows(params: {
         } else {
           await prisma.clientProfile.create({
             data: {
+              tenantId,
               type: ClientProfileType.INSURER,
               companyName,
               tradeName,
@@ -591,6 +604,7 @@ export async function POST(req: NextRequest) {
   if (!auth.user || !isAdmin(auth.user)) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
+  const tenantId = tenantIdFromUser(auth.user);
 
   const formData = await req.formData();
   const file = formData.get("file");
@@ -654,7 +668,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await processRows({ type, rows: parsed.rows, mapping });
+    const result = await processRows({ tenantId, type, rows: parsed.rows, mapping });
     return NextResponse.json({ ok: true, summary: {
       totalRows: result.totalRows,
       processedRows: result.processedRows,

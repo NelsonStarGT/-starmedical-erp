@@ -20,7 +20,6 @@ import {
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies, type SessionUser } from "@/lib/auth";
 import { auditLog } from "@/lib/audit";
-import { isAdmin } from "@/lib/rbac";
 import {
   actionCreateCompanyClient,
   actionCreateInstitutionClient,
@@ -63,7 +62,7 @@ import {
   saveReceptionSlaAdvancedConfig,
   saveReceptionSlaSimpleConfig
 } from "@/lib/reception/sla-settings.service";
-import { RECEPTION_ACTIVE_BRANCH_COOKIE_NAME, resolveReceptionBranchId } from "@/lib/reception/active-branch";
+import { RECEPTION_ACTIVE_BRANCH_COOKIE_NAME } from "@/lib/reception/active-branch";
 import { assertReceptionBranchSelectable, listReceptionBranchOptions } from "@/lib/reception/branches.service";
 import {
   createClientRegistrationInviteToken,
@@ -91,6 +90,11 @@ import {
   assertVisitTransitionPermission,
   buildReceptionContext
 } from "@/lib/reception/rbac";
+import {
+  assertBranchAccess,
+  recordTenantIsolationBlocked,
+  resolveTenantContextForUser
+} from "@/lib/security/tenantContext.server";
 
 type WalkInInput = {
   patientId: string;
@@ -382,12 +386,15 @@ async function requireUser(): Promise<SessionUser> {
 
 async function resolveSiteId(user: SessionUser, siteId?: string) {
   const cookieStore = await cookies();
-  const cookieBranchId = cookieStore.get(RECEPTION_ACTIVE_BRANCH_COOKIE_NAME)?.value ?? null;
-  const effective = resolveReceptionBranchId(user, {
-    requestedBranchId: siteId,
-    cookieBranchId
+  const tenantContext = await resolveTenantContextForUser(user, {
+    cookieStore,
+    requestedBranchId: siteId ?? null
   });
+  const effective = siteId?.trim() || tenantContext.activeBranchId;
   if (!effective) throw new Error("Sede requerida.");
+  if (!assertBranchAccess(tenantContext, effective)) {
+    throw new Error("Sucursal no autorizada.");
+  }
   return effective;
 }
 
@@ -449,9 +456,13 @@ function revalidateReception(paths?: string[]) {
   targets.forEach((path) => revalidatePath(path));
 }
 
-async function requireQueueItemInActiveSite(input: { queueItemId: string; siteId: string }) {
-  const item = await prisma.queueItem.findUnique({
-    where: { id: input.queueItemId },
+async function requireQueueItemInActiveSite(input: { queueItemId: string; siteId: string; tenantId: string; userId: string }) {
+  const item = await prisma.queueItem.findFirst({
+    where: {
+      id: input.queueItemId,
+      queue: { siteId: input.siteId },
+      visit: { patient: { tenantId: input.tenantId } }
+    },
     select: {
       id: true,
       status: true,
@@ -459,10 +470,24 @@ async function requireQueueItemInActiveSite(input: { queueItemId: string; siteId
     }
   });
   if (!item) {
+    const crossTenantItem = await prisma.queueItem.findFirst({
+      where: {
+        id: input.queueItemId,
+        visit: { patient: { tenantId: { not: input.tenantId } } }
+      },
+      select: { id: true }
+    });
+    if (crossTenantItem) {
+      await recordTenantIsolationBlocked({
+        tenantId: input.tenantId,
+        userId: input.userId,
+        route: "actionQueueItemMutation",
+        resourceType: "QueueItem",
+        resourceId: input.queueItemId,
+        reason: "queue_item_not_in_tenant"
+      });
+    }
     throw new Error("Turno no encontrado.");
-  }
-  if (item.queue.siteId !== input.siteId) {
-    throw new Error("El turno no pertenece a la sede activa.");
   }
   return item;
 }
@@ -621,15 +646,10 @@ export async function actionCreateAdmission(input: AdmissionInput) {
       tx
     );
 
-    const updated = await tx.visit.findUnique({
-      where: { id: visit.id },
-      select: { ticketCode: true }
-    });
-
     return {
       visitId: visit.id,
       queueItemId: queueItem.id,
-      ticketCode: updated?.ticketCode ?? visit.ticketCode
+      ticketCode: visit.ticketCode
     };
   });
 
@@ -688,7 +708,12 @@ export async function actionStartServiceFromQueue(input: QueueItemActionInput) {
   const user = await requireUser();
   assertCapability(user, "QUEUE_START");
   const siteId = await resolveSiteId(user, input.siteId);
-  await requireQueueItemInActiveSite({ queueItemId: input.queueItemId, siteId });
+  await requireQueueItemInActiveSite({
+    queueItemId: input.queueItemId,
+    siteId,
+    tenantId: tenantIdFromUser(user),
+    userId: user.id
+  });
   const result = await startServiceFromQueue({ queueItemId: input.queueItemId, actorUserId: user.id });
   revalidateReception();
   return result;
@@ -698,7 +723,12 @@ export async function actionCompleteQueueItem(input: QueueItemActionInput) {
   const user = await requireUser();
   assertCapability(user, "QUEUE_COMPLETE");
   const siteId = await resolveSiteId(user, input.siteId);
-  await requireQueueItemInActiveSite({ queueItemId: input.queueItemId, siteId });
+  await requireQueueItemInActiveSite({
+    queueItemId: input.queueItemId,
+    siteId,
+    tenantId: tenantIdFromUser(user),
+    userId: user.id
+  });
   const reason = input.reason?.trim() || null;
   const result = await completeQueueItem({ queueItemId: input.queueItemId, actorUserId: user.id, reason });
   revalidateReception();
@@ -709,7 +739,12 @@ export async function actionPauseQueueItem(input: QueueItemActionInput) {
   const user = await requireUser();
   assertCapability(user, "QUEUE_PAUSE_RESUME");
   const siteId = await resolveSiteId(user, input.siteId);
-  await requireQueueItemInActiveSite({ queueItemId: input.queueItemId, siteId });
+  await requireQueueItemInActiveSite({
+    queueItemId: input.queueItemId,
+    siteId,
+    tenantId: tenantIdFromUser(user),
+    userId: user.id
+  });
   const reason = input.reason?.trim();
   if (!reason) {
     throw new Error("Motivo requerido para pausar un turno.");
@@ -723,7 +758,12 @@ export async function actionResumeQueueItem(input: QueueItemActionInput) {
   const user = await requireUser();
   assertCapability(user, "QUEUE_PAUSE_RESUME");
   const siteId = await resolveSiteId(user, input.siteId);
-  await requireQueueItemInActiveSite({ queueItemId: input.queueItemId, siteId });
+  await requireQueueItemInActiveSite({
+    queueItemId: input.queueItemId,
+    siteId,
+    tenantId: tenantIdFromUser(user),
+    userId: user.id
+  });
   const reason = input.reason?.trim() || null;
   const result = await resumeQueueItem({ queueItemId: input.queueItemId, actorUserId: user.id, reason });
   revalidateReception();
@@ -734,7 +774,12 @@ export async function actionSkipQueueItem(input: QueueItemActionInput) {
   const user = await requireUser();
   assertCapability(user, "QUEUE_SKIP");
   const siteId = await resolveSiteId(user, input.siteId);
-  await requireQueueItemInActiveSite({ queueItemId: input.queueItemId, siteId });
+  await requireQueueItemInActiveSite({
+    queueItemId: input.queueItemId,
+    siteId,
+    tenantId: tenantIdFromUser(user),
+    userId: user.id
+  });
   const reason = input.reason?.trim();
   if (!reason) {
     throw new Error("Motivo requerido para saltar un turno.");
@@ -748,7 +793,12 @@ export async function actionTransferQueueItem(input: TransferQueueItemInput) {
   const user = await requireUser();
   assertCapability(user, "QUEUE_TRANSFER");
   const siteId = await resolveSiteId(user, input.siteId);
-  await requireQueueItemInActiveSite({ queueItemId: input.queueItemId, siteId });
+  await requireQueueItemInActiveSite({
+    queueItemId: input.queueItemId,
+    siteId,
+    tenantId: tenantIdFromUser(user),
+    userId: user.id
+  });
   assertArea(input.toArea);
   const reason = input.reason?.trim();
   if (!reason) {
@@ -768,16 +818,37 @@ export async function actionTransferQueueItem(input: TransferQueueItemInput) {
 
 export async function actionTransitionVisitStatus(input: TransitionInput) {
   const user = await requireUser();
+  const tenantId = tenantIdFromUser(user);
   assertStatus(input.toStatus);
   const reason = input.reason?.trim() || null;
-  const visit = await prisma.visit.findUnique({
-    where: { id: input.visitId },
+  const visit = await prisma.visit.findFirst({
+    where: {
+      id: input.visitId,
+      patient: { tenantId }
+    },
     select: { id: true, status: true, siteId: true }
   });
-  if (!visit) throw new Error("Visita no encontrada.");
-  if (user.branchId && visit.siteId && user.branchId !== visit.siteId && !isAdmin(user)) {
-    throw new Error("Sucursal no autorizada.");
+  if (!visit) {
+    const crossTenantVisit = await prisma.visit.findFirst({
+      where: {
+        id: input.visitId,
+        patient: { tenantId: { not: tenantId } }
+      },
+      select: { id: true }
+    });
+    if (crossTenantVisit) {
+      await recordTenantIsolationBlocked({
+        tenantId,
+        userId: user.id,
+        route: "actionTransitionVisitStatus",
+        resourceType: "Visit",
+        resourceId: input.visitId,
+        reason: "visit_not_in_tenant"
+      });
+    }
+    throw new Error("Visita no encontrada.");
   }
+  await resolveSiteId(user, visit.siteId);
 
   const [openRequests, activeQueueItems] = await prisma.$transaction([
     prisma.serviceRequest.count({
@@ -857,6 +928,7 @@ export async function actionGetReceptionDashboardSnapshot(siteId?: string) {
 export async function actionGetReceptionDashboardLite(siteId?: string) {
   const user = await requireUser();
   assertReceptionAccess(user);
+  const tenantId = tenantIdFromUser(user);
   const effectiveSiteId = await resolveSiteId(user, siteId);
   const now = new Date();
   const todayStart = startOfTodayLocal(now);
@@ -906,7 +978,7 @@ export async function actionGetReceptionDashboardLite(siteId?: string) {
   const [patients, branches] = await Promise.all([
     patientIds.length
       ? prisma.clientProfile.findMany({
-          where: { id: { in: patientIds } },
+          where: { id: { in: patientIds }, tenantId },
           select: {
             id: true,
             type: true,
@@ -922,7 +994,7 @@ export async function actionGetReceptionDashboardLite(siteId?: string) {
       : Promise.resolve([]),
     branchIds.length
       ? prisma.branch.findMany({
-          where: { id: { in: branchIds } },
+          where: { id: { in: branchIds }, OR: [{ tenantId }, { tenantId: null }] },
           select: { id: true, name: true }
         })
       : Promise.resolve([])
@@ -1114,20 +1186,18 @@ export async function actionGetAvailabilitySnapshot(siteId?: string) {
 export async function actionMarkAppointmentArrival(input: MarkAppointmentArrivalInput) {
   const user = await requireUser();
   assertCapabilities(user, ["VISIT_CREATE", "VISIT_CHECKIN", "QUEUE_ENQUEUE"]);
+  const tenantId = tenantIdFromUser(user);
   const siteId = await resolveSiteId(user, input.siteId);
 
   const appointmentId = input.appointmentId?.trim();
   if (!appointmentId) throw new Error("Cita requerida.");
 
   const result = await prisma.$transaction(async (tx) => {
-    const appointment = await tx.appointment.findUnique({
-      where: { id: appointmentId },
+    const appointment = await tx.appointment.findFirst({
+      where: { id: appointmentId, branchId: siteId },
       select: { id: true, branchId: true, status: true }
     });
     if (!appointment) throw new Error("Cita no encontrada.");
-    if (appointment.branchId !== siteId) {
-      throw new Error("La cita no pertenece a la sede activa.");
-    }
 
     if (appointment.status === AppointmentStatus.CANCELADA) {
       throw new Error("No se puede marcar llegada: la cita está cancelada.");
@@ -1140,7 +1210,7 @@ export async function actionMarkAppointmentArrival(input: MarkAppointmentArrival
     }
 
     const existing = await tx.visit.findFirst({
-      where: { appointmentId },
+      where: { appointmentId, patient: { tenantId } },
       select: { id: true, ticketCode: true }
     });
 
@@ -1197,14 +1267,9 @@ export async function actionMarkAppointmentArrival(input: MarkAppointmentArrival
       data: { status: AppointmentStatus.EN_SALA, updatedById: user.id }
     });
 
-    const refreshed = await tx.visit.findUnique({
-      where: { id: visit.id },
-      select: { ticketCode: true }
-    });
-
     return {
       visitId: visit.id,
-      ticketCode: refreshed?.ticketCode ?? visit.ticketCode ?? null,
+      ticketCode: visit.ticketCode ?? null,
       created: true
     };
   });
@@ -1640,6 +1705,7 @@ export async function actionListReceptionDoctors(siteId?: string): Promise<Recep
 export async function actionCreateReceptionAppointment(input: CreateReceptionAppointmentInput) {
   const user = await requireUser();
   assertCapability(user, "VISIT_CREATE");
+  const tenantId = tenantIdFromUser(user);
   const siteId = await resolveSiteId(user, input.siteId);
 
   // TODO(reception-appointments): considerar delegar creación/traslapes al scheduler canónico (POST /api/agenda)
@@ -1647,7 +1713,10 @@ export async function actionCreateReceptionAppointment(input: CreateReceptionApp
 
   const patientId = input.patientId?.trim();
   if (!patientId) throw new Error("Paciente requerido.");
-  const patientExists = await prisma.clientProfile.findUnique({ where: { id: patientId }, select: { id: true } });
+  const patientExists = await prisma.clientProfile.findFirst({
+    where: { id: patientId, tenantId, deletedAt: null },
+    select: { id: true }
+  });
   if (!patientExists) throw new Error("Paciente no encontrado.");
 
   const date = input.date?.trim();
@@ -1734,22 +1803,26 @@ export async function actionListPortalAppointmentRequests(input?: {
 }): Promise<PortalAppointmentRequestRow[]> {
   const user = await requireUser();
   assertCapability(user, "VISIT_CREATE");
+  const tenantContext = await resolveTenantContextForUser(user, { requestedBranchId: input?.siteId ?? null });
+  const tenantId = tenantContext.tenantId;
 
   const scope = resolvePortalRequestScope(input?.scope);
-  let branchFilterId: string | null = null;
+  let branchFilterIds: string[] = [];
 
   if (scope === "active") {
-    branchFilterId = await resolveSiteId(user, input?.siteId);
-  } else if (!isAdmin(user)) {
-    branchFilterId = user.branchId ?? null;
-    if (!branchFilterId) {
-      throw new Error("Sede requerida.");
-    }
+    const activeBranchId = await resolveSiteId(user, input?.siteId);
+    branchFilterIds = [activeBranchId];
+  } else {
+    branchFilterIds = tenantContext.allowedBranchIds;
+  }
+
+  if (!branchFilterIds.length) {
+    throw new Error("Sede requerida.");
   }
 
   const requestedRows = await prisma.appointment.findMany({
     where: {
-      branchId: branchFilterId ?? undefined,
+      branchId: { in: branchFilterIds },
       status: AppointmentStatus.REQUESTED
     },
     orderBy: [{ date: "asc" }, { createdAt: "asc" }],
@@ -1776,7 +1849,7 @@ export async function actionListPortalAppointmentRequests(input?: {
 
   const [patients, branches] = await Promise.all([
     prisma.clientProfile.findMany({
-      where: { id: { in: patientIds } },
+      where: { id: { in: patientIds }, tenantId },
       select: {
         id: true,
         firstName: true,
@@ -1788,7 +1861,7 @@ export async function actionListPortalAppointmentRequests(input?: {
       }
     }),
     prisma.branch.findMany({
-      where: { id: { in: branchIds } },
+      where: { id: { in: branchIds }, OR: [{ tenantId }, { tenantId: null }] },
       select: { id: true, name: true }
     })
   ]);
@@ -1848,8 +1921,8 @@ export async function actionConfirmPortalAppointmentRequest(input: ConfirmPortal
   }
 
   const result = await prisma.$transaction(async (tx) => {
-    const appointment = await tx.appointment.findUnique({
-      where: { id: appointmentId },
+    const appointment = await tx.appointment.findFirst({
+      where: { id: appointmentId, branchId: siteId },
       select: {
         id: true,
         branchId: true,
@@ -1861,7 +1934,6 @@ export async function actionConfirmPortalAppointmentRequest(input: ConfirmPortal
     });
 
     if (!appointment) throw new Error("Solicitud no encontrada.");
-    if (appointment.branchId !== siteId) throw new Error("La solicitud no pertenece a la sede activa.");
     if (appointment.status !== AppointmentStatus.REQUESTED) {
       throw new Error("La solicitud ya fue procesada.");
     }
@@ -1946,8 +2018,8 @@ export async function actionRejectPortalAppointmentRequest(input: RejectPortalAp
   }
 
   const result = await prisma.$transaction(async (tx) => {
-    const appointment = await tx.appointment.findUnique({
-      where: { id: appointmentId },
+    const appointment = await tx.appointment.findFirst({
+      where: { id: appointmentId, branchId: siteId },
       select: {
         id: true,
         branchId: true,
@@ -1957,7 +2029,6 @@ export async function actionRejectPortalAppointmentRequest(input: RejectPortalAp
     });
 
     if (!appointment) throw new Error("Solicitud no encontrada.");
-    if (appointment.branchId !== siteId) throw new Error("La solicitud no pertenece a la sede activa.");
     if (appointment.status !== AppointmentStatus.REQUESTED) {
       throw new Error("La solicitud ya fue procesada.");
     }
@@ -2078,12 +2149,14 @@ export async function actionSaveReceptionAppointmentVitals(input: SaveReceptionA
   const appointmentId = input.appointmentId?.trim();
   if (!appointmentId) throw new Error("Cita requerida.");
 
-  const appointment = await prisma.appointment.findUnique({
-    where: { id: appointmentId },
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      branchId: siteId
+    },
     select: { id: true, branchId: true }
   });
   if (!appointment) throw new Error("Cita no encontrada.");
-  if (appointment.branchId !== siteId) throw new Error("La cita no pertenece a la sede activa.");
 
   const { systolicBp, diastolicBp, heartRate, temperatureC, weightKg, heightCm, observations } = normalizeVitalsInput(input);
 
@@ -2142,17 +2215,21 @@ export async function actionSaveReceptionAppointmentVitals(input: SaveReceptionA
 export async function actionSaveReceptionVisitVitals(input: SaveReceptionVisitVitalsInput) {
   const user = await requireUser();
   assertCapability(user, "VISIT_CHECKIN");
+  const tenantId = tenantIdFromUser(user);
   const siteId = await resolveSiteId(user, input.siteId);
 
   const visitId = input.visitId?.trim();
   if (!visitId) throw new Error("Visita requerida.");
 
-  const visit = await prisma.visit.findUnique({
-    where: { id: visitId },
+  const visit = await prisma.visit.findFirst({
+    where: {
+      id: visitId,
+      siteId,
+      patient: { tenantId }
+    },
     select: { id: true, siteId: true }
   });
   if (!visit) throw new Error("Visita no encontrada.");
-  if (visit.siteId !== siteId) throw new Error("La visita no pertenece a la sede activa.");
 
   const { systolicBp, diastolicBp, heartRate, temperatureC, weightKg, heightCm, observations } = normalizeVitalsInput(input);
 

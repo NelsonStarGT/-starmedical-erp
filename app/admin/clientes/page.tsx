@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { ClientProfileType } from "@prisma/client";
 import { ArrowRight, Building2, ClipboardCheck, FileBarChart2, ListChecks, UserPlus, UserRoundCheck } from "lucide-react";
 import { prisma } from "@/lib/prisma";
@@ -43,6 +44,7 @@ function displayName(row: {
 
 export default async function ClientesDashboardPage() {
   const currentUser = await getSessionUserFromCookies(cookies());
+  if (!currentUser) redirect("/login");
   const tenantId = tenantIdFromUser(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
   const now = new Date();

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import {
   canViewClientsConfigDiagnostics,
-  canViewGlobalClientsConfigDiagnostics,
   filterDiagnosticsEvents,
   getRecommendedAction,
   normalizeDiagnosticsDomain,
@@ -81,8 +80,7 @@ export async function GET(req: NextRequest) {
   const code = rawCode.toLowerCase() === "all" ? "all" : rawCode.toUpperCase();
   const search = (qs.get("search") || "").trim();
 
-  const canViewGlobal = canViewGlobalClientsConfigDiagnostics(auth.user);
-  const tenantId = canViewGlobal ? undefined : tenantIdFromUser(auth.user);
+  const tenantId = tenantIdFromUser(auth.user);
   const dbDomains = resolveDbDomainFilter(effectiveDomain);
   const logs = await listSystemEventLogs({
     tenantId,

@@ -62,7 +62,8 @@
     "bootstrap:superadmin": "tsx scripts/bootstrap-super-admin.ts",
     "backfill:user-job-roles": "ts-node scripts/backfill-user-job-roles.ts",
     "backfill:client-codes": "tsx scripts/ops/backfill-client-codes.ts",
-    "backfill:client-codes:dry-run": "tsx scripts/ops/backfill-client-codes.ts --dry-run"
+    "backfill:client-codes:dry-run": "tsx scripts/ops/backfill-client-codes.ts --dry-run",
+    "check:tenant:isolation": "bash scripts/check-tenant-scope.sh"
   },
   "dependencies": {
     "@heroicons/react": "^2.1.5",

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { notFound, redirect } from "next/navigation";
 import Image from "next/image";
 import { ClientCatalogType, ClientProfileType, Prisma } from "@prisma/client";
 import { Building2, CalendarClock, Landmark, MapPin, Shield, ShieldCheck, UserRound } from "lucide-react";
@@ -37,6 +38,7 @@ import ClientIdentityCard from "@/components/clients/ClientIdentityCard";
 import { tenantIdFromUser } from "@/lib/tenant";
 import { isCompanySsoDocumentType, mapCompanyDocumentTypeLabel } from "@/lib/clients/companyDocumentTypes";
 import { normalizeAffiliationVerifyMonths, resolveAffiliationEffectiveStatus } from "@/lib/clients/affiliations";
+import { recordTenantIsolationBlocked } from "@/lib/security/tenantContext.server";
 
 type SearchParams = { tab?: string | string[] };
 
@@ -269,48 +271,6 @@ function translateTimelineAction(action: string) {
   return map[action] ?? action;
 }
 
-function MissingClientState({ clientRef }: { clientRef?: string }) {
-  const normalized = clientRef?.trim() || "";
-  const encoded = normalized ? encodeURIComponent(normalized) : "";
-  const personasHref = normalized ? `/admin/clientes/personas?error=not_found&q=${encoded}` : "/admin/clientes/personas";
-  const empresasHref = normalized ? `/admin/clientes/empresas?error=not_found&q=${encoded}` : "/admin/clientes/empresas";
-  const buscarHref = normalized ? `/admin/clientes/buscar?q=${encoded}` : "/admin/clientes/buscar";
-
-  return (
-    <section className="rounded-2xl border border-[#dce7f5] bg-white p-6 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#2e75ba]">Clientes</p>
-      <h1 className="mt-2 text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
-        Cliente no encontrado
-      </h1>
-      <p className="mt-2 text-sm text-slate-600">
-        {normalized
-          ? `No encontramos un perfil para “${normalized}”. Verifica el identificador o usa la búsqueda del módulo.`
-          : "No se pudo resolver el identificador del cliente."}
-      </p>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Link
-          href={buscarHref}
-          className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-        >
-          Buscar cliente
-        </Link>
-        <Link
-          href={personasHref}
-          className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-        >
-          Ver personas
-        </Link>
-        <Link
-          href={empresasHref}
-          className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-        >
-          Ver empresas
-        </Link>
-      </div>
-    </section>
-  );
-}
-
 export default async function ClientePortalPage({
   params,
   searchParams
@@ -323,6 +283,7 @@ export default async function ClientePortalPage({
   const resolvedParams = await params;
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const currentUser = await getSessionUserFromCookies(cookies());
+  if (!currentUser) redirect("/login");
   const tenantId = tenantIdFromUser(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
   const docPermissions = getClientDocumentPermissions(currentUser);
@@ -330,12 +291,30 @@ export default async function ClientePortalPage({
   const tab = firstValue(resolvedSearchParams?.tab) ?? "resumen";
 
   if (!clientRef) {
-    return <MissingClientState />;
+    notFound();
   }
 
   const resolvedClientId = await resolveClientIdFromRef(clientRef, { tenantId });
   if (!resolvedClientId) {
-    return <MissingClientState clientRef={clientRef} />;
+    const existsInAnotherTenant = await prisma.clientProfile.findFirst({
+      where: {
+        id: clientRef,
+        tenantId: { not: tenantId },
+        deletedAt: null
+      },
+      select: { id: true }
+    });
+    if (existsInAnotherTenant) {
+      await recordTenantIsolationBlocked({
+        tenantId,
+        userId: currentUser?.id ?? null,
+        route: "/admin/clientes/[id]",
+        resourceType: "ClientProfile",
+        resourceId: clientRef,
+        reason: "client_ref_not_in_tenant"
+      });
+    }
+    notFound();
   }
 
   const supportsPhotoColumns = await safeSupportsClientProfilePhotoColumns("clients.detail");
@@ -345,7 +324,25 @@ export default async function ClientePortalPage({
     select: clientSelect
   });
   if (!client) {
-    return <MissingClientState clientRef={clientRef} />;
+    const existsInAnotherTenant = await prisma.clientProfile.findFirst({
+      where: {
+        id: resolvedClientId,
+        tenantId: { not: tenantId },
+        deletedAt: null
+      },
+      select: { id: true }
+    });
+    if (existsInAnotherTenant) {
+      await recordTenantIsolationBlocked({
+        tenantId,
+        userId: currentUser?.id ?? null,
+        route: "/admin/clientes/[id]",
+        resourceType: "ClientProfile",
+        resourceId: resolvedClientId,
+        reason: "client_id_not_in_tenant"
+      });
+    }
+    notFound();
   }
   const { photoUrl, photoAssetId } = readClientProfilePhotoFields(client);
   const clientId = client.id;

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import {
   canViewClientsConfigDiagnostics,
-  canViewGlobalClientsConfigDiagnostics,
   normalizeDiagnosticsDomain
 } from "@/lib/clients/configDiagnostics";
 import { resolveSystemEventDigest } from "@/lib/ops/eventLog.server";
@@ -35,7 +34,6 @@ export async function POST(req: NextRequest) {
     resolved?: unknown;
     resolutionNote?: unknown;
     domain?: unknown;
-    tenantId?: unknown;
   } | null;
   const digest = sanitizeDigest(body?.digest);
   if (!digest) {
@@ -52,12 +50,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Dominio inválido." }, { status: 400 });
   }
 
-  const canViewGlobal = canViewGlobalClientsConfigDiagnostics(auth.user);
-  const tenantId = canViewGlobal
-    ? typeof body?.tenantId === "string" && body.tenantId.trim()
-      ? body.tenantId.trim()
-      : undefined
-    : tenantIdFromUser(auth.user);
+  const tenantId = tenantIdFromUser(auth.user);
 
   const result = await resolveSystemEventDigest({
     digest,

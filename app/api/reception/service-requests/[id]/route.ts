@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { withApiErrorHandling, safeJson } from "@/lib/api/http";
 import {
@@ -8,46 +7,93 @@ import {
   completeServiceRequest,
   startServiceRequest
 } from "@/lib/reception/service-requests.service";
+import {
+  assertBranchAccess,
+  recordTenantIsolationBlocked,
+  requireTenantContextFromRequest
+} from "@/lib/security/tenantContext.server";
 
 export const GET = withApiErrorHandling(async (req: NextRequest, ctx: { params: { id: string } }) => {
-  const auth = requireAuth(req);
-  if (auth.errorResponse) return auth.errorResponse;
+  const scoped = await requireTenantContextFromRequest(req);
+  if (scoped.errorResponse || !scoped.context) return scoped.errorResponse!;
+  const { context } = scoped;
 
   const id = ctx.params.id;
-  const request = await prisma.serviceRequest.findUnique({
-    where: { id },
+  const request = await prisma.serviceRequest.findFirst({
+    where: {
+      id,
+      visit: { patient: { tenantId: context.tenantId } }
+    },
     include: {
       visit: { select: { siteId: true } }
     }
   });
 
   if (!request) {
+    const crossTenantRequest = await prisma.serviceRequest.findFirst({
+      where: {
+        id,
+        visit: { patient: { tenantId: { not: context.tenantId } } }
+      },
+      select: { id: true }
+    });
+    if (crossTenantRequest) {
+      await recordTenantIsolationBlocked({
+        tenantId: context.tenantId,
+        userId: context.user.id,
+        route: "/api/reception/service-requests/[id]",
+        resourceType: "ServiceRequest",
+        resourceId: id,
+        reason: "service_request_not_in_tenant"
+      });
+    }
     return NextResponse.json({ error: "ServiceRequest no encontrado" }, { status: 404 });
   }
 
-  if (auth.user?.branchId && request.visit.siteId !== auth.user.branchId) {
-    return NextResponse.json({ error: "No autorizado para esta sede" }, { status: 403 });
+  if (!assertBranchAccess(context, request.visit.siteId)) {
+    return NextResponse.json({ error: "ServiceRequest no encontrado" }, { status: 404 });
   }
 
   return NextResponse.json({ ok: true, data: request });
 });
 
 export const PATCH = withApiErrorHandling(async (req: NextRequest, ctx: { params: { id: string } }) => {
-  const auth = requireAuth(req);
-  if (auth.errorResponse) return auth.errorResponse;
+  const scoped = await requireTenantContextFromRequest(req);
+  if (scoped.errorResponse || !scoped.context) return scoped.errorResponse!;
+  const { context } = scoped;
 
   const id = ctx.params.id;
-  const existing = await prisma.serviceRequest.findUnique({
-    where: { id },
+  const existing = await prisma.serviceRequest.findFirst({
+    where: {
+      id,
+      visit: { patient: { tenantId: context.tenantId } }
+    },
     include: { visit: { select: { siteId: true } } }
   });
 
   if (!existing) {
+    const crossTenantRequest = await prisma.serviceRequest.findFirst({
+      where: {
+        id,
+        visit: { patient: { tenantId: { not: context.tenantId } } }
+      },
+      select: { id: true }
+    });
+    if (crossTenantRequest) {
+      await recordTenantIsolationBlocked({
+        tenantId: context.tenantId,
+        userId: context.user.id,
+        route: "/api/reception/service-requests/[id]",
+        resourceType: "ServiceRequest",
+        resourceId: id,
+        reason: "service_request_not_in_tenant"
+      });
+    }
     return NextResponse.json({ error: "ServiceRequest no encontrado" }, { status: 404 });
   }
 
-  if (auth.user?.branchId && existing.visit.siteId !== auth.user.branchId) {
-    return NextResponse.json({ error: "No autorizado para esta sede" }, { status: 403 });
+  if (!assertBranchAccess(context, existing.visit.siteId)) {
+    return NextResponse.json({ error: "ServiceRequest no encontrado" }, { status: 404 });
   }
 
   const body = await safeJson(req);
@@ -65,8 +111,8 @@ export const PATCH = withApiErrorHandling(async (req: NextRequest, ctx: { params
     const updated = await assignServiceRequest({
       serviceRequestId: id,
       assignedToUserId: body.assignedToUserId,
-      actorUserId: auth.user!.id,
-      actorUser: auth.user
+      actorUserId: context.user.id,
+      actorUser: context.user
     });
 
     return NextResponse.json({ ok: true, data: updated });
@@ -75,8 +121,8 @@ export const PATCH = withApiErrorHandling(async (req: NextRequest, ctx: { params
   if (action === "start") {
     const updated = await startServiceRequest({
       serviceRequestId: id,
-      actorUserId: auth.user!.id,
-      actorUser: auth.user,
+      actorUserId: context.user.id,
+      actorUser: context.user,
       queueItemId: typeof body.queueItemId === "string" ? body.queueItemId : undefined,
       roomId: typeof body.roomId === "string" ? body.roomId : undefined
     });
@@ -87,8 +133,8 @@ export const PATCH = withApiErrorHandling(async (req: NextRequest, ctx: { params
   if (action === "complete") {
     const updated = await completeServiceRequest({
       serviceRequestId: id,
-      actorUserId: auth.user!.id,
-      actorUser: auth.user,
+      actorUserId: context.user.id,
+      actorUser: context.user,
       queueItemId: typeof body.queueItemId === "string" ? body.queueItemId : undefined,
       notes: typeof body.notes === "string" ? body.notes : undefined
     });
@@ -99,8 +145,8 @@ export const PATCH = withApiErrorHandling(async (req: NextRequest, ctx: { params
   if (action === "cancel") {
     const updated = await cancelServiceRequest({
       serviceRequestId: id,
-      actorUserId: auth.user!.id,
-      actorUser: auth.user,
+      actorUserId: context.user.id,
+      actorUser: context.user,
       reason: typeof body.reason === "string" ? body.reason : undefined
     });
 
