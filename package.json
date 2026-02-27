@@ -13,6 +13,7 @@
     "postinstall": "prisma generate",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
+    "check:legacy:recepcion": "bash scripts/check-no-legacy-recepcion.sh",
     "typecheck:clients": "tsc --noEmit -p tsconfig.clients.json",
     "test": "tsx --tsconfig tsconfig.test.json --test \"tests/**/*.test.ts\" \"src/tests/**/*.test.ts\"",
     "test:baseline": "tsx --tsconfig tsconfig.test.json --test \"tests/**/*.test.ts\" \"src/tests/**/*.test.ts\" --test-reporter=spec --test-concurrency=1",
@@ -33,6 +34,7 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:migrate:status": "prisma migrate status",
+    "db:drift:check": "bash scripts/check-migration-drift.sh",
     "db:migrate:diff": "sh -c 'test -n \"$SHADOW_DATABASE_URL\" || (echo \"SHADOW_DATABASE_URL is required\" && exit 1); prisma migrate diff --exit-code --from-schema-datasource prisma/schema.prisma --to-migrations prisma/migrations --shadow-database-url \"$SHADOW_DATABASE_URL\"'",
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed",
@@ -45,6 +47,7 @@
     "db:seed:central-config": "tsx prisma/seed.central-config.ts",
     "qa:config-central": "bash scripts/qa/config-central.sh",
     "qa:config-central:readiness": "tsx scripts/qa/config-central-readiness.ts",
+    "ops:events:purge": "tsx scripts/ops/purge-system-event-log.ts",
     "medical:cie10:import": "tsx scripts/medical/import-cie10.ts",
     "portal:link-party": "tsx scripts/portal/link-client-party.ts",
     "db:validate": "prisma validate",
@@ -58,7 +61,8 @@
     "inventory:reset": "sh -c 'if [ \"$NODE_ENV\" = \"production\" ]; then echo \"inventory:reset bloqueado en production\" && exit 1; else curl -X POST -H \"x-reset-confirm: YES\" -H \"Content-Type: application/json\" -d \"{\\\"mode\\\":\\\"wipe_movements\\\"}\" http://localhost:3000/api/inventario/reset; fi'",
     "bootstrap:superadmin": "tsx scripts/bootstrap-super-admin.ts",
     "backfill:user-job-roles": "ts-node scripts/backfill-user-job-roles.ts",
-    "backfill:client-codes": "tsx scripts/backfill-client-codes.ts"
+    "backfill:client-codes": "tsx scripts/ops/backfill-client-codes.ts",
+    "backfill:client-codes:dry-run": "tsx scripts/ops/backfill-client-codes.ts --dry-run"
   },
   "dependencies": {
     "@heroicons/react": "^2.1.5",
