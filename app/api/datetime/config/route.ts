@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { normalizeTenantId } from "@/lib/tenant";
-import { buildTenantDateTimeConfigDefaults, getTenantDateTimeConfig } from "@/lib/datetime/config";
+import { buildTenantDateTimeConfigDefaults } from "@/lib/datetime/config";
+import { getTenantDateTimeConfig } from "@/lib/datetime/config.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

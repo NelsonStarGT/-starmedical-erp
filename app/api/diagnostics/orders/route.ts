@@ -6,7 +6,7 @@ import { auditLog } from "@/lib/audit";
 import { createDiagnosticOrderSchema } from "@/lib/diagnostics/schemas";
 import { serializeDiagnosticOrder } from "@/lib/diagnostics/service";
 import { attachClinicalSummary } from "@/lib/server/diagnosticsClinical.service";
-import { getTenantDateTimeConfig } from "@/lib/datetime/config";
+import { getTenantDateTimeConfig } from "@/lib/datetime/config.server";
 import { parseDate, parseIsoDateString } from "@/lib/datetime/parse";
 import { buildRange } from "@/lib/datetime/range";
 

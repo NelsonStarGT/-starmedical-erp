@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { listWorklistOrders } from "@/lib/medical/encounterRealStore";
 import { canAccessWorklistByModality, type WorklistModality } from "@/lib/medical/worklistAccess";
-import { getTenantDateTimeConfig } from "@/lib/datetime/config";
+import { getTenantDateTimeConfig } from "@/lib/datetime/config.server";
 import { parseDate, parseIsoDateString } from "@/lib/datetime/parse";
 import { buildRange } from "@/lib/datetime/range";
 

@@ -7,7 +7,7 @@ import {
 import {
   getTenantDateTimeConfig,
   updateTenantDateTimeConfig
-} from "@/lib/datetime/config";
+} from "@/lib/datetime/config.server";
 
 export type TenantClientsDateFormatSnapshot = {
   tenantId: string;

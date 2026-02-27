@@ -12,16 +12,18 @@ import {
 import { normalizeTenantId } from "@/lib/tenant";
 import { enforceRateLimit } from "@/lib/api/rateLimit";
 import {
-  getTenantDateTimeConfig,
   parseTenantDateTimeConfigPatch,
-  updateTenantDateTimeConfig
 } from "@/lib/datetime/config";
+import {
+  getTenantDateTimeConfig,
+  updateTenantDateTimeConfig
+} from "@/lib/datetime/config.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BRANCH_READ");
   if (auth.response) return auth.response;
 
   try {
@@ -39,7 +41,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
   if (auth.response) return auth.response;
 
   try {
