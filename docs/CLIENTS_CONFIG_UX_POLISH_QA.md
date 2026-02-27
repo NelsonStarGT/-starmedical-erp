@@ -3,6 +3,8 @@
 ## Scope
 Ruta: `/admin/clientes/configuracion`
 
+Deep link ERROR SYSTEMS: `/admin/clientes/configuracion?section=diagnostico`
+
 ## Pre-check técnico
 1. `npm run typecheck:clients`
 2. `npx eslint app/admin/clientes/configuracion/page.tsx components/clients/config/ClientsConfigTabsNav.tsx components/clients/config/ClientsConfigOverview.tsx components/clients/config/ClientsConfigCatalogFocus.tsx components/clients/config/ClientsConfigDirectoriesSummary.tsx components/clients/config/ClientsConfigChannelsSummary.tsx app/admin/clientes/actions.ts`
@@ -117,3 +119,4 @@ PASS si:
 - Captura Command Palette (`Cmd/Ctrl+K`) abierta.
 - Captura Catálogos/Directorios/Canales con empty state + CTA.
 - Captura de restauración de tab/filtros después de recarga.
+- Captura de `ERROR SYSTEMS` abierto con `?section=diagnostico`.

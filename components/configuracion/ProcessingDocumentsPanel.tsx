@@ -1,5 +1,6 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -7,7 +8,7 @@ import { DataTable } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 import { cn } from "@/lib/utils";
 
 type TabId =
@@ -126,6 +127,8 @@ type PaginatedApiData<T> = {
   jobs?: T[];
   artifacts?: T[];
 };
+
+type JobsQueryState = "idle" | "loading" | "success_empty" | "success_with_data" | "error_fetch";
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "actividad", label: "Actividad (Jobs)" },
@@ -275,7 +278,7 @@ function QueryStateCard({
 }
 
 export default function ProcessingDocumentsPanel() {
-  const { toasts, dismiss, showToast } = useToast();
+  const { toasts, dismiss, showToast } = useConfigToast();
 
   const [activeTab, setActiveTab] = useState<TabId>("actividad");
   const [filters, setFilters] = useState(() => {
@@ -295,6 +298,8 @@ export default function ProcessingDocumentsPanel() {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsError, setJobsError] = useState<string | null>(null);
+  const [jobsQueryState, setJobsQueryState] = useState<JobsQueryState>("idle");
+  const [jobsLastUpdatedAt, setJobsLastUpdatedAt] = useState<string | null>(null);
   const [jobsPagination, setJobsPagination] = useState<Pagination>(EMPTY_PAGINATION);
 
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
@@ -326,6 +331,7 @@ export default function ProcessingDocumentsPanel() {
     async (page = 1) => {
       setJobsLoading(true);
       setJobsError(null);
+      setJobsQueryState("loading");
       try {
         const search = new URLSearchParams();
         search.set("page", String(page));
@@ -337,7 +343,7 @@ export default function ProcessingDocumentsPanel() {
         if (filters.createdBy) search.set("createdBy", filters.createdBy);
         if (filters.q) search.set("q", filters.q);
 
-        const response = await fetch(`/api/admin/processing/jobs?${search.toString()}`, {
+        const response = await configApiFetch(`/api/admin/processing/jobs?${search.toString()}`, {
           cache: "no-store"
         });
         const payload = await parseEnvelope<PaginatedApiData<JobRecord>>(response);
@@ -349,9 +355,12 @@ export default function ProcessingDocumentsPanel() {
         const normalized = normalizePaginatedData(payload.data, jobsPagination.pageSize || 25);
         setJobs(normalized.items);
         setJobsPagination(normalized.pagination);
+        setJobsLastUpdatedAt(new Date().toISOString());
+        setJobsQueryState(normalized.items.length > 0 ? "success_with_data" : "success_empty");
       } catch (error) {
         const message = error instanceof Error ? error.message : "No se pudieron cargar jobs.";
         setJobsError(message);
+        setJobsQueryState("error_fetch");
         showToast({
           tone: "error",
           title: "Error cargando actividad",
@@ -378,7 +387,7 @@ export default function ProcessingDocumentsPanel() {
         if (filters.status) search.set("status", filters.status);
         if (filters.q) search.set("q", filters.q);
 
-        const response = await fetch(`/api/admin/processing/artifacts?${search.toString()}`, {
+        const response = await configApiFetch(`/api/admin/processing/artifacts?${search.toString()}`, {
           cache: "no-store"
         });
         const payload = await parseEnvelope<PaginatedApiData<ArtifactRecord>>(response);
@@ -409,7 +418,7 @@ export default function ProcessingDocumentsPanel() {
     setHealthLoading(true);
     setHealthError(null);
     try {
-      const response = await fetch("/api/admin/processing/health", { cache: "no-store" });
+      const response = await configApiFetch("/api/admin/processing/health", { cache: "no-store" });
       const payload = await parseEnvelope<HealthResponse>(response);
 
       if (!response.ok || payload.ok === false || !payload.data) {
@@ -430,7 +439,7 @@ export default function ProcessingDocumentsPanel() {
     setConfigLoading(true);
     setConfigError(null);
     try {
-      const response = await fetch("/api/admin/processing/config", { cache: "no-store" });
+      const response = await configApiFetch("/api/admin/processing/config", { cache: "no-store" });
       const payload = await parseEnvelope<TenantProcessingConfig>(response);
       if (!response.ok || payload.ok === false || !payload.data) {
         throw new Error(payload.error || "No se pudo cargar configuración de procesamiento.");
@@ -454,7 +463,7 @@ export default function ProcessingDocumentsPanel() {
     async (jobId: string) => {
       setJobDetailLoading(true);
       try {
-        const response = await fetch(`/api/admin/processing/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+        const response = await configApiFetch(`/api/admin/processing/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
         const payload = await parseEnvelope<JobRecord>(response);
         if (!response.ok || payload.ok === false || !payload.data) {
           throw new Error(payload.error || "No se pudo cargar el detalle del job.");
@@ -485,7 +494,7 @@ export default function ProcessingDocumentsPanel() {
     async (jobId: string) => {
       setJobActionLoading(true);
       try {
-        const response = await fetch(`/api/admin/processing/jobs/${encodeURIComponent(jobId)}/retry`, {
+        const response = await configApiFetch(`/api/admin/processing/jobs/${encodeURIComponent(jobId)}/retry`, {
           method: "POST"
         });
         const payload = await parseEnvelope<Record<string, unknown>>(response);
@@ -512,7 +521,7 @@ export default function ProcessingDocumentsPanel() {
     async (jobId: string) => {
       setJobActionLoading(true);
       try {
-        const response = await fetch(`/api/admin/processing/jobs/${encodeURIComponent(jobId)}/cancel`, {
+        const response = await configApiFetch(`/api/admin/processing/jobs/${encodeURIComponent(jobId)}/cancel`, {
           method: "POST"
         });
         const payload = await parseEnvelope<Record<string, unknown>>(response);
@@ -547,7 +556,7 @@ export default function ProcessingDocumentsPanel() {
         retention = parsed && typeof parsed === "object" ? parsed : {};
       }
 
-      const response = await fetch("/api/admin/processing/config", {
+      const response = await configApiFetch("/api/admin/processing/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -814,23 +823,33 @@ export default function ProcessingDocumentsPanel() {
             </div>
 
             {jobsLoading ? <p className="text-xs text-slate-500">Cargando jobs...</p> : null}
-            {jobsError ? (
+            {jobsQueryState === "error_fetch" ? (
               <QueryStateCard
-                title="No se pudo cargar la actividad"
-                message="La consulta de jobs falló para el tenant actual."
+                title="No se pudo conectar al processing-service"
+                message="Verifica la conectividad o estado del servicio e intenta nuevamente."
                 detail={jobsError}
                 onRetry={() => void loadJobs(1)}
               />
             ) : null}
 
-            {jobs.length === 0 && !jobsLoading && !jobsError ? (
-              <EmptyState
-                title="Sin jobs para este filtro"
-                description="Ajusta rango, estado o tipo para consultar actividad del tenant actual."
-              />
+            {jobsQueryState === "success_empty" ? (
+              <div className="rounded-lg border border-[#4aa59c]/40 bg-[#4aa59c]/10 p-3">
+                <p className="text-sm font-semibold text-[#2e75ba]">Todo bien. No hay jobs en cola para el tenant actual.</p>
+                <p className="mt-1 text-xs text-slate-700">
+                  Sin cola pendiente, todo al día{jobsLastUpdatedAt ? ` · Última actualización: ${formatDateTime(jobsLastUpdatedAt)}` : ""}.
+                </p>
+              </div>
             ) : null}
 
-            {jobs.length > 0 && !jobsError ? <DataTable columns={activityColumns} data={jobs} /> : null}
+            {jobsQueryState === "success_with_data" ? (
+              <div className="space-y-2">
+                <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2 text-xs text-slate-700">
+                  Total jobs: <span className="font-semibold">{jobsPagination.total}</span> · Fallidos en página:{" "}
+                  <span className="font-semibold">{jobs.filter((job) => job.status === "failed").length}</span>
+                </div>
+                <DataTable columns={activityColumns} data={jobs} />
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

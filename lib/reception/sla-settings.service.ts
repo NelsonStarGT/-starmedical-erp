@@ -2,7 +2,7 @@ import "server-only";
 
 import type { OperationalArea, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 import {
   RECEPTION_SLA_RECOMMENDED,
   buildAreaThresholdMap,
@@ -81,9 +81,15 @@ export async function getReceptionSlaPolicy(branchId: string): Promise<Reception
     });
     return toPolicy(branchId, config);
   } catch (error) {
-    if (process.env.NODE_ENV !== "production" && isPrismaMissingTableError(error)) {
-      warnDevMissingTable("Reception.getReceptionSlaPolicy", error);
-      return defaultPolicy(branchId);
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "reception",
+      context: "Reception.getReceptionSlaPolicy",
+      requirement: "OPTIONAL",
+      error,
+      fallback: defaultPolicy(branchId)
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }

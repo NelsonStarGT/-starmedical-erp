@@ -22,7 +22,11 @@ import {
 } from "@prisma/client";
 import type { ClientContactRelationType, ClientNoteType, ClientNoteVisibility } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import {
+  isPrismaMissingTableError,
+  isPrismaSchemaMismatchError,
+  resolvePrismaSchemaFallback
+} from "@/lib/prisma/errors.server";
 import { getSessionUserFromCookies, type SessionUser } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
 import { canApproveDocsFromRoles, canEditClientProfileFromRoles, canEditDocsFromRoles } from "@/lib/clients/permissions";
@@ -1359,26 +1363,35 @@ async function createReferralIfNeeded(
   }
 }
 
-function isPrismaSchemaMismatchError(error: unknown): boolean {
-  if (!error) return false;
-
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = (error as { code?: unknown }).code;
-    if (code === "P2022") return true;
-  }
-
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return (
-    message.includes("unknown field") ||
-    message.includes("unknown argument") ||
-    message.includes("unknown arg") ||
-    (message.includes("column") && message.includes("does not exist"))
-  );
-}
-
 function warnDevClientsCompat(context: string, error: unknown) {
-  if (process.env.NODE_ENV === "production") return;
+  const code =
+    typeof error === "object" && error !== null && "code" in error && typeof (error as { code?: unknown }).code === "string"
+      ? String((error as { code?: unknown }).code)
+      : null;
   const message = error instanceof Error ? error.message : String(error);
+  queueMicrotask(() => {
+    void import("@/lib/ops/eventLog.server")
+      .then((mod) =>
+        mod.recordSystemEvent({
+          domain: "clients",
+          eventType: "CLIENT_ACTION_CONTROLLED_ERROR",
+          severity: "WARN",
+          code,
+          resource: context,
+          messageShort: "Error controlado en acción de Clientes con fallback de compatibilidad.",
+          digestKey: `clients-action-controlled:${context}:${code ?? "none"}`,
+          metaJson: {
+            actionHint: "Ejecuta migraciones pendientes y valida la acción en ERROR SYSTEMS.",
+            detail: message.slice(0, 600),
+            classification: "OPTIONAL"
+          }
+        })
+      )
+      .catch(() => {
+        // non-blocking telemetry
+      });
+  });
+  if (process.env.NODE_ENV === "production") return;
   console.warn(
     `[DEV][clients] ${context}: fallback por schema mismatch. ` +
       "Ejecuta `npm run db:migrate:deploy` y `npm run db:generate`. " +
@@ -1398,13 +1411,18 @@ async function safeSupportsClientContactExtendedColumns(context = "clients.actio
     });
     return true;
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable(`${context}.clientContact.findFirst`, error);
-      return false;
-    }
-    if (isPrismaSchemaMismatchError(error)) {
-      warnDevClientsCompat(`${context}.clientContact.findFirst`, error);
-      return false;
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: `${context}.clientContact.findFirst`,
+      requirement: "OPTIONAL",
+      error,
+      fallback: false
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      if (resolution.issue === "legacy_schema") {
+        warnDevClientsCompat(`${context}.clientContact.findFirst`, error);
+      }
+      return resolution.value;
     }
     throw error;
   }
@@ -1422,13 +1440,18 @@ async function safeSupportsClientNoteExtendedColumns(context = "clients.actions.
     });
     return true;
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable(`${context}.clientNote.findFirst`, error);
-      return false;
-    }
-    if (isPrismaSchemaMismatchError(error)) {
-      warnDevClientsCompat(`${context}.clientNote.findFirst`, error);
-      return false;
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: `${context}.clientNote.findFirst`,
+      requirement: "OPTIONAL",
+      error,
+      fallback: false
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      if (resolution.issue === "legacy_schema") {
+        warnDevClientsCompat(`${context}.clientNote.findFirst`, error);
+      }
+      return resolution.value;
     }
     throw error;
   }
@@ -1496,8 +1519,13 @@ async function runRequiredDocRulesOperation<T>(context: string, operation: () =>
   try {
     return await operation();
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable(context, error);
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context,
+      requirement: "REQUIRED",
+      error
+    });
+    if (resolution.handled && resolution.requirement === "REQUIRED") {
       throw new Error(REQUIRED_DOCS_MIGRATION_ERROR);
     }
     throw error;
@@ -1906,7 +1934,7 @@ type AffiliationTx = Prisma.TransactionClient;
 async function resolveActivePersonProfile(tx: AffiliationTx, personClientId: string) {
   const person = await tx.clientProfile.findUnique({
     where: { id: personClientId },
-    select: { id: true, type: true, deletedAt: true }
+    select: { id: true, tenantId: true, type: true, deletedAt: true }
   });
   if (!person || person.type !== ClientProfileType.PERSON || person.deletedAt) throw new Error("Persona inválida.");
   return person;
@@ -1915,6 +1943,7 @@ async function resolveActivePersonProfile(tx: AffiliationTx, personClientId: str
 async function resolveAffiliationEntity(
   tx: AffiliationTx,
   entityClientId: string,
+  personTenantId: string,
   expectedType?: ClientProfileType
 ) {
   if (expectedType && !isAffiliationEntityType(expectedType)) {
@@ -1923,10 +1952,13 @@ async function resolveAffiliationEntity(
 
   const entity = await tx.clientProfile.findUnique({
     where: { id: entityClientId },
-    select: { id: true, type: true, deletedAt: true }
+    select: { id: true, tenantId: true, type: true, deletedAt: true }
   });
   if (!entity || entity.deletedAt || !isAffiliationEntityType(entity.type)) {
     throw new Error("Entidad inválida (solo empresas, instituciones o aseguradoras).");
+  }
+  if (entity.tenantId !== personTenantId) {
+    throw new Error("La entidad no pertenece al mismo tenant de la persona.");
   }
   if (expectedType && entity.type !== expectedType) {
     throw new Error("El tipo de afiliación no coincide con la entidad seleccionada.");
@@ -1936,11 +1968,12 @@ async function resolveAffiliationEntity(
 
 async function resolveAffiliationPayerClientId(params: {
   tx: AffiliationTx;
+  tenantId: string;
   payerType: ClientAffiliationPayerType;
   payerClientId?: string | null;
   defaultEntity: { id: string; type: ClientProfileType };
 }) {
-  const { tx, payerType, defaultEntity } = params;
+  const { tx, tenantId, payerType, defaultEntity } = params;
   let payerClientId = normalizeOptional(params.payerClientId);
 
   if (payerType === ClientAffiliationPayerType.PERSON) return null;
@@ -1955,9 +1988,9 @@ async function resolveAffiliationPayerClientId(params: {
 
   const payer = await tx.clientProfile.findUnique({
     where: { id: payerClientId },
-    select: { id: true, type: true, deletedAt: true }
+    select: { id: true, tenantId: true, type: true, deletedAt: true }
   });
-  if (!payer || payer.deletedAt || payer.type !== payerProfileType) {
+  if (!payer || payer.deletedAt || payer.type !== payerProfileType || payer.tenantId !== tenantId) {
     throw new Error("Responsable de pago inválido.");
   }
 
@@ -2067,6 +2100,7 @@ export async function actionCreatePersonClient(input: {
     entityType?: ClientProfileType;
     entityClientId: string;
     role?: string;
+    notes?: string;
     status?: ClientAffiliationStatus;
     payerType?: ClientAffiliationPayerType;
     payerClientId?: string;
@@ -2631,11 +2665,14 @@ export async function actionCreatePersonClient(input: {
 
       const internalAffiliation = await tx.clientAffiliation.create({
         data: {
+          tenantId,
           personClientId: created.id,
           entityType: ClientProfileType.PERSON,
           entityClientId: created.id,
           role: "INTERNAL",
+          notes: null,
           status: ClientAffiliationStatus.ACTIVE,
+          lastVerifiedAt: new Date(),
           payerType: ClientAffiliationPayerType.PERSON,
           payerClientId: null,
           isPrimaryPayer: true
@@ -2652,16 +2689,18 @@ export async function actionCreatePersonClient(input: {
           const entityType = item.entityType;
           const entityClientId = normalizeRequired(item.entityClientId, "Entidad inválida.");
 
-          const entity = await resolveAffiliationEntity(tx, entityClientId, entityType);
+          const entity = await resolveAffiliationEntity(tx, entityClientId, tenantId, entityType);
           const uniqueKey = `${entity.type}:${entityClientId}`;
           if (seen.has(uniqueKey)) throw new Error("Afiliación duplicada.");
           seen.add(uniqueKey);
 
           const role = normalizeOptional(item.role);
+          const notes = normalizeOptional(item.notes);
           const status = item.status ?? ClientAffiliationStatus.ACTIVE;
           const payerType = item.payerType ?? ClientAffiliationPayerType.PERSON;
           const payerClientId = await resolveAffiliationPayerClientId({
             tx,
+            tenantId,
             payerType,
             payerClientId: item.payerClientId,
             defaultEntity: entity
@@ -2670,11 +2709,14 @@ export async function actionCreatePersonClient(input: {
 
           const createdAffiliation = await tx.clientAffiliation.create({
             data: {
+              tenantId,
               personClientId: created.id,
               entityType: entity.type,
               entityClientId,
               role,
+              notes,
               status,
+              lastVerifiedAt: status === ClientAffiliationStatus.ACTIVE ? new Date() : null,
               payerType,
               payerClientId,
               isPrimaryPayer
@@ -5368,6 +5410,7 @@ export async function actionAddClientAffiliation(input: {
   entityType?: ClientProfileType;
   entityClientId: string;
   role?: string;
+  notes?: string;
   status?: ClientAffiliationStatus;
   payerType?: ClientAffiliationPayerType;
   payerClientId?: string;
@@ -5379,30 +5422,36 @@ export async function actionAddClientAffiliation(input: {
   const entityClientId = normalizeRequired(input.entityClientId, "Entidad inválida.");
 
   const role = normalizeOptional(input.role);
+  const notes = normalizeOptional(input.notes);
   const status = input.status ?? ClientAffiliationStatus.ACTIVE;
   const payerType = input.payerType ?? ClientAffiliationPayerType.PERSON;
   const requestedPrimary = Boolean(input.isPrimaryPayer);
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      await resolveActivePersonProfile(tx, personClientId);
-      const entity = await resolveAffiliationEntity(tx, entityClientId, entityType);
+      const person = await resolveActivePersonProfile(tx, personClientId);
+      const entity = await resolveAffiliationEntity(tx, entityClientId, person.tenantId, entityType);
       const payerClientId = await resolveAffiliationPayerClientId({
         tx,
+        tenantId: person.tenantId,
         payerType,
         payerClientId: input.payerClientId,
         defaultEntity: entity
       });
 
       const isPrimaryPayer = status === ClientAffiliationStatus.ACTIVE ? requestedPrimary : false;
+      const lastVerifiedAt = status === ClientAffiliationStatus.ACTIVE ? new Date() : null;
 
       const created = await tx.clientAffiliation.create({
         data: {
+          tenantId: person.tenantId,
           personClientId,
           entityType: entity.type,
           entityClientId,
           role,
+          notes,
           status,
+          lastVerifiedAt,
           payerType,
           payerClientId,
           isPrimaryPayer
@@ -5427,6 +5476,7 @@ export async function actionAddClientAffiliation(input: {
 
       return {
         createdId: created.id,
+        tenantId: person.tenantId,
         entityType: entity.type,
         payerClientId,
         isPrimaryPayer
@@ -5443,6 +5493,7 @@ export async function actionAddClientAffiliation(input: {
         entityType: result.entityType,
         entityClientId,
         role,
+        notes,
         status,
         payerType,
         payerClientId: result.payerClientId,
@@ -5471,6 +5522,7 @@ export async function actionUpdateClientAffiliation(input: {
   affiliationId: string;
   personClientId: string;
   role?: string;
+  notes?: string;
   status?: ClientAffiliationStatus;
   payerType?: ClientAffiliationPayerType;
   payerClientId?: string;
@@ -5488,11 +5540,14 @@ export async function actionUpdateClientAffiliation(input: {
         where: { id: affiliationId, personClientId, deletedAt: null },
         select: {
           id: true,
+          tenantId: true,
           personClientId: true,
           entityType: true,
           entityClientId: true,
           role: true,
+          notes: true,
           status: true,
+          lastVerifiedAt: true,
           payerType: true,
           payerClientId: true,
           isPrimaryPayer: true
@@ -5501,20 +5556,33 @@ export async function actionUpdateClientAffiliation(input: {
       if (!existing) throw new Error("Afiliación no encontrada.");
 
       const role = input.role === undefined ? existing.role : normalizeOptional(input.role);
+      const notes = input.notes === undefined ? existing.notes : normalizeOptional(input.notes);
       const status = input.status ?? existing.status;
       const payerType = input.payerType ?? existing.payerType;
       const payerClientId = await resolveAffiliationPayerClientId({
         tx,
+        tenantId: existing.tenantId,
         payerType,
         payerClientId: input.payerClientId,
         defaultEntity: { id: existing.entityClientId, type: existing.entityType }
       });
       const requestedPrimary = input.isPrimaryPayer ?? existing.isPrimaryPayer;
       const isPrimaryPayer = status === ClientAffiliationStatus.ACTIVE ? requestedPrimary : false;
+      const shouldRefreshVerification =
+        status === ClientAffiliationStatus.ACTIVE &&
+        (input.status === ClientAffiliationStatus.ACTIVE || existing.status !== ClientAffiliationStatus.ACTIVE);
+      const lastVerifiedAt =
+        status === ClientAffiliationStatus.ACTIVE
+          ? shouldRefreshVerification
+            ? new Date()
+            : existing.lastVerifiedAt ?? new Date()
+          : existing.lastVerifiedAt;
 
       const update = {
         role,
+        notes,
         status,
+        lastVerifiedAt,
         payerType,
         payerClientId,
         isPrimaryPayer
@@ -5572,6 +5640,84 @@ export async function actionUpdateClientAffiliation(input: {
     }
     throw err;
   }
+}
+
+function appendAffiliationNote(existing: string | null | undefined, nextNote: string | null | undefined) {
+  const trimmedNext = (nextNote ?? "").trim();
+  if (!trimmedNext) return existing ?? null;
+  const trimmedExisting = (existing ?? "").trim();
+  if (!trimmedExisting) return trimmedNext;
+  return `${trimmedExisting}\n${trimmedNext}`;
+}
+
+export async function actionConfirmClientAffiliation(input: {
+  affiliationId: string;
+  personClientId: string;
+  note?: string;
+}) {
+  const user = await requireAdminUser();
+  const affiliationId = normalizeRequired(input.affiliationId, "Afiliación inválida.");
+  const personClientId = normalizeRequired(input.personClientId, "Persona inválida.");
+  const note = normalizeOptional(input.note);
+
+  const verifiedAt = new Date();
+
+  const result = await prisma.$transaction(async (tx) => {
+    await resolveActivePersonProfile(tx, personClientId);
+
+    const existing = await tx.clientAffiliation.findFirst({
+      where: { id: affiliationId, personClientId, deletedAt: null },
+      select: {
+        id: true,
+        entityType: true,
+        entityClientId: true,
+        notes: true,
+        isPrimaryPayer: true
+      }
+    });
+    if (!existing) throw new Error("Afiliación no encontrada.");
+
+    const nextNotes = appendAffiliationNote(existing.notes, note);
+
+    const updated = await tx.clientAffiliation.update({
+      where: { id: affiliationId },
+      data: {
+        status: ClientAffiliationStatus.ACTIVE,
+        lastVerifiedAt: verifiedAt,
+        notes: nextNotes
+      },
+      select: { id: true }
+    });
+
+    await enforceSinglePrimaryPayer(tx, personClientId, existing.isPrimaryPayer ? existing.id : undefined);
+
+    return {
+      id: updated.id,
+      entityType: existing.entityType,
+      entityClientId: existing.entityClientId,
+      notes: nextNotes
+    };
+  });
+
+  await logClientAudit({
+    actorUserId: user.id,
+    actorRole: user.roles?.[0] ?? null,
+    clientId: personClientId,
+    action: "CLIENT_AFFILIATION_CONFIRMED",
+    metadata: {
+      affiliationId: result.id,
+      entityType: result.entityType,
+      entityClientId: result.entityClientId,
+      verifiedAt: verifiedAt.toISOString()
+    }
+  });
+
+  revalidatePath(`/admin/clientes/${personClientId}`);
+  return {
+    ok: true,
+    id: result.id,
+    verifiedAt: verifiedAt.toISOString()
+  };
 }
 
 export async function actionDeleteClientAffiliation(input: { affiliationId: string; personClientId: string }) {

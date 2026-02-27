@@ -19,7 +19,7 @@ import { enforceRateLimit } from "@/lib/api/rateLimit";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function canManageLegalEntities(user: ReturnType<typeof requireConfigCentralCapability>["user"]) {
+function canManageLegalEntities(user: Awaited<ReturnType<typeof requireConfigCentralCapability>>["user"]) {
   if (!user) return false;
   return isAdmin(user) || isOwner(user);
 }
@@ -59,7 +59,7 @@ function toUiEntity(row: {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_READ");
   if (auth.response) return auth.response;
 
   const includeInactive = req.nextUrl.searchParams.get("includeInactive") === "1";
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
   if (!canManageLegalEntities(auth.user)) {
     return NextResponse.json(

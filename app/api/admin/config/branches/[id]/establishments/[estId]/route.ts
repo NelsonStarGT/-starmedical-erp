@@ -33,7 +33,7 @@ export async function PUT(
     | { params: { id: string; estId: string } }
     | { params: Promise<{ id: string; estId: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
@@ -142,7 +142,7 @@ export async function PATCH(
     | { params: { id: string; estId: string } }
     | { params: Promise<{ id: string; estId: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);

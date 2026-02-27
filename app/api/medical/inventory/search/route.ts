@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 
 type InventorySearchItem = {
   id: string;
@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
       const message = error instanceof Error ? error.message : "No se pudo buscar inventario";
       return NextResponse.json({ ok: false, error: message }, { status: 500 });
     }
-    warnDevMissingTable("medical-inventory-search", error);
+    logPrismaSchemaIssue("medical-inventory-search", error);
     const fallbackItems = filterFallbackItems(query);
     return NextResponse.json({
       ok: true,

@@ -40,7 +40,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_EMAIL_SANDBOX_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_EMAIL_SANDBOX_READ");
   if (auth.response) return auth.response;
 
   const id = String(params.id || "").trim();

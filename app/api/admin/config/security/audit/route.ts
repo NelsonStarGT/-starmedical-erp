@@ -17,7 +17,7 @@ function parseDate(value: string | null) {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_AUDIT_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_AUDIT_READ");
   if (auth.response) return auth.response;
 
   const tenantId = normalizeTenantId(auth.user?.tenantId);

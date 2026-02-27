@@ -1,7 +1,7 @@
 # Recepcion vs Ingreso (Intake)
 
 ## Recepcion (modulo principal)
-- Ruta: `/admin/recepcion`
+- Ruta canonical: `/admin/reception`
 - Objetivo: flujo operativo de ingreso, colas, check-in, turnos, SLA y dashboard en tiempo real.
 - Datos: Visit, Queue, QueueItem, VisitEvent, ServiceRequest.
 - Usuarios: recepcion, enfermeria, supervisores, administracion.
@@ -19,7 +19,8 @@
 - Diagnostico no importa ni ejecuta logica de Recepcion.
 
 ## Legacy / rutas anteriores
-- UI legacy: `/diagnostics/reception` ahora redirige a `/admin/recepcion`.
+- Alias legacy: `/admin/recepcion` ahora redirige a `/admin/reception`.
+- UI legacy: `/diagnostics/reception` ahora redirige a `/admin/reception`.
 - Intake oficial: `/diagnostics/intake`.
 - API intake legacy: `/api/diagnostics/reception/*` redirige a `/api/diagnostics/intake/*`.
 

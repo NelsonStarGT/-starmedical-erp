@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import type { Prisma, TextDocVersion } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { medicalDocumentSettingsSchema } from "@/lib/medical/schemas";
 import {
   defaultMedicalDocumentSettings,
@@ -59,7 +59,7 @@ async function withMemoryFallback<T>(dbOperation: () => Promise<T>, memoryOperat
     return await dbOperation();
   } catch (error) {
     if (!isPrismaMissingTableError(error)) throw error;
-    warnDevMissingTable("medical-document-settings", error);
+    logPrismaSchemaIssue("medical-document-settings", error);
     globalForMedical.medicalDocumentSettingsForceMemory = true;
     return memoryOperation();
   }

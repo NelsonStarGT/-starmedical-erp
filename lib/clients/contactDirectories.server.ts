@@ -1,5 +1,4 @@
 import { Prisma } from "@prisma/client";
-import { isPrismaSchemaMismatchError } from "@/lib/config-central/errors";
 import {
   buildFallbackClientContactDirectories,
   normalizeContactDirectoryCode,
@@ -9,7 +8,7 @@ import {
 } from "@/lib/clients/contactDirectories";
 import { isMissingPbxTableError } from "@/lib/clients/companyCreate";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 import { normalizeTenantId } from "@/lib/tenant";
 
 const DIRECTORY_SEARCH_LIMIT = 500;
@@ -216,12 +215,20 @@ export async function getClientContactDirectories(
           }
         });
       } catch (error) {
-        if (isPrismaMissingTableError(error) || isMissingPbxTableError(error)) {
-          warnDevMissingTable("clients.contactDirectories.get.pbxCategories", error);
-          return [] as PbxCategoryRow[];
-        }
-        if (isPrismaSchemaMismatchError(error)) {
-          return [] as PbxCategoryRow[];
+        const resolution = resolvePrismaSchemaFallback({
+          domain: "clients",
+          context: "clients.contactDirectories.get.pbxCategories",
+          requirement: "OPTIONAL",
+          error: isMissingPbxTableError(error)
+            ? {
+                code: "P2021",
+                message: error instanceof Error ? error.message : String(error)
+              }
+            : error,
+          fallback: [] as PbxCategoryRow[]
+        });
+        if (resolution.handled && resolution.requirement === "OPTIONAL") {
+          return resolution.value;
         }
         throw error;
       }
@@ -256,12 +263,15 @@ export async function getClientContactDirectories(
           }
         });
       } catch (error) {
-        if (isPrismaMissingTableError(error)) {
-          warnDevMissingTable("clients.contactDirectories.get.insurerLines", error);
-          return [] as InsurerLineRow[];
-        }
-        if (isPrismaSchemaMismatchError(error)) {
-          return [] as InsurerLineRow[];
+        const resolution = resolvePrismaSchemaFallback({
+          domain: "clients",
+          context: "clients.contactDirectories.get.insurerLines",
+          requirement: "OPTIONAL",
+          error,
+          fallback: [] as InsurerLineRow[]
+        });
+        if (resolution.handled && resolution.requirement === "OPTIONAL") {
+          return resolution.value;
         }
         throw error;
       }
@@ -373,12 +383,15 @@ export async function getClientContactDirectories(
       insurerLinesSource
     };
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("clients.contactDirectories.get", error);
-      return fallback;
-    }
-    if (isPrismaSchemaMismatchError(error)) {
-      return fallback;
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: "clients.contactDirectories.get",
+      requirement: "OPTIONAL",
+      error,
+      fallback
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }

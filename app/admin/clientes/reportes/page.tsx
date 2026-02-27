@@ -48,12 +48,13 @@ function parseDate(value: string | null | undefined, dateFormat: ClientsDateForm
   return parseIsoDateString(value);
 }
 
-function buildFilters(searchParams: SearchParams | undefined, dateFormat: ClientsDateFormat): ClientsReportFilters {
+function buildFilters(searchParams: SearchParams | undefined, dateFormat: ClientsDateFormat, tenantId: string): ClientsReportFilters {
   const page = Number(firstValue(searchParams?.page) || "1");
   const pageSize = Number(firstValue(searchParams?.pageSize) || "25");
   const rawType = firstValue(searchParams?.type);
 
   return {
+    tenantId,
     q: firstValue(searchParams?.q)?.trim() || undefined,
     type:
       rawType && rawType !== "ALL" && Object.values(ClientProfileType).includes(rawType as ClientProfileType)
@@ -86,8 +87,9 @@ export default async function ClientesReportesPage({
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const currentUser = await getSessionUserFromCookies(cookies());
-  const dateFormat = await getClientsDateFormat(tenantIdFromUser(currentUser));
-  const filters = buildFilters(resolvedSearchParams, dateFormat);
+  const tenantId = tenantIdFromUser(currentUser);
+  const dateFormat = await getClientsDateFormat(tenantId);
+  const filters = buildFilters(resolvedSearchParams, dateFormat, tenantId);
 
   const [summary, list, sources, sourceDetails, countries] = await Promise.all([
     getClientsReportSummary(filters),
@@ -303,12 +305,62 @@ export default async function ClientesReportesPage({
         )}
       </section>
 
-      <section className="grid gap-3 lg:grid-cols-2">
+      <section className="grid gap-3 lg:grid-cols-3">
+        <SimpleTable
+          title="Clientes por tipo"
+          rows={summary.byType.map((row) => ({
+            label:
+              row.type === ClientProfileType.PERSON
+                ? "Persona"
+                : row.type === ClientProfileType.COMPANY
+                  ? "Empresa"
+                  : row.type === ClientProfileType.INSTITUTION
+                    ? "Institución"
+                    : "Aseguradora",
+            value: row.total
+          }))}
+          emptyLabel="Sin datos por tipo"
+        />
         <SimpleTable
           title="Top canales"
           rows={summary.bySource.map((row) => ({ label: row.sourceName, value: row.total }))}
           emptyLabel="Sin canales para este rango"
         />
+        <SimpleTable
+          title="Aseguradoras por ramo"
+          rows={summary.insurersByLine.map((row) => ({ label: row.line, value: row.total }))}
+          emptyLabel="Sin aseguradoras en el rango"
+        />
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-3">
+        <SimpleTable
+          title="Geo por país"
+          rows={summary.byGeo.countries.map((row) => ({
+            label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
+            value: row.total
+          }))}
+          emptyLabel="Sin datos geográficos por país"
+        />
+        <SimpleTable
+          title="Geo por admin1"
+          rows={summary.byGeo.admin1.map((row) => ({
+            label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
+            value: row.total
+          }))}
+          emptyLabel="Sin datos geográficos por admin1"
+        />
+        <SimpleTable
+          title="Geo por admin2"
+          rows={summary.byGeo.admin2.map((row) => ({
+            label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
+            value: row.total
+          }))}
+          emptyLabel="Sin datos geográficos por admin2"
+        />
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-2">
         <SimpleTable
           title="Top referrers"
           rows={summary.referrals.topReferrers.map((row) => ({ label: row.referrerLabel, value: row.total }))}

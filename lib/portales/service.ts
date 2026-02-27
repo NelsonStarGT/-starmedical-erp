@@ -1,6 +1,6 @@
 import { AppointmentStatus, ClientProfileType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { type SessionUser } from "@/lib/auth";
 import {
   matchesPortalChannelFilter,
@@ -132,7 +132,7 @@ function warnDevPortalesFallback(context: string, error: unknown) {
   if (warnedPortalesContexts.has(context)) return;
   warnedPortalesContexts.add(context);
   if (isPrismaMissingTableError(error)) {
-    warnDevMissingTable(context, error);
+    logPrismaSchemaIssue(context, error);
     return;
   }
   console.warn(

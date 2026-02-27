@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 import { cn } from "@/lib/utils";
 
 type LegalEntityOption = {
@@ -83,7 +84,7 @@ function describeError<T>(payload: ApiEnvelope<T> | null, fallback: string) {
 }
 
 export default function BillingByLegalEntityPanel() {
-  const { toasts, dismiss, showToast } = useToast();
+  const { toasts, dismiss, showToast } = useConfigToast();
   const [loading, setLoading] = useState(false);
   const [savingPreference, setSavingPreference] = useState(false);
   const [savingSeries, setSavingSeries] = useState(false);
@@ -116,10 +117,10 @@ export default function BillingByLegalEntityPanel() {
     setLoading(true);
     try {
       const [legalRes, branchRes, prefRes, seriesRes] = await Promise.all([
-        fetch("/api/admin/config/legal-entities?includeInactive=1", { cache: "no-store" }),
-        fetch("/api/admin/config/branches?includeInactive=1", { cache: "no-store" }),
-        fetch("/api/admin/config/billing/preference", { cache: "no-store" }),
-        fetch("/api/admin/config/billing/series?includeInactive=1", { cache: "no-store" })
+        configApiFetch("/api/admin/config/legal-entities?includeInactive=1", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/branches?includeInactive=1", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/billing/preference", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/billing/series?includeInactive=1", { cache: "no-store" })
       ]);
 
       const [legalJson, branchJson, prefJson, seriesJson] = await Promise.all([
@@ -166,7 +167,7 @@ export default function BillingByLegalEntityPanel() {
   async function savePreference() {
     try {
       setSavingPreference(true);
-      const response = await fetch("/api/admin/config/billing/preference", {
+      const response = await configApiFetch("/api/admin/config/billing/preference", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -195,7 +196,7 @@ export default function BillingByLegalEntityPanel() {
       const endpoint = isEdit ? `/api/admin/config/billing/series/${seriesForm.id}` : "/api/admin/config/billing/series";
       const method = isEdit ? "PUT" : "POST";
 
-      const response = await fetch(endpoint, {
+      const response = await configApiFetch(endpoint, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -228,7 +229,7 @@ export default function BillingByLegalEntityPanel() {
 
   async function toggleSeries(row: BillingSeries) {
     try {
-      const response = await fetch(`/api/admin/config/billing/series/${row.id}`, {
+      const response = await configApiFetch(`/api/admin/config/billing/series/${row.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isActive: !row.isActive })
@@ -247,7 +248,7 @@ export default function BillingByLegalEntityPanel() {
   async function removeSeries(row: BillingSeries) {
     if (!window.confirm(`¿Eliminar serie ${row.prefix} · ${row.name}?`)) return;
     try {
-      const response = await fetch(`/api/admin/config/billing/series/${row.id}`, { method: "DELETE" });
+      const response = await configApiFetch(`/api/admin/config/billing/series/${row.id}`, { method: "DELETE" });
       const payload = await parseEnvelope<{ id: string }>(response);
       if (!response.ok || payload.ok === false) {
         throw new Error(describeError(payload, "No se pudo eliminar la serie."));

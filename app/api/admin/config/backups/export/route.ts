@@ -47,7 +47,7 @@ function serializeRun(row: {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BACKUP_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BACKUP_WRITE");
   if (auth.response) return auth.response;
   const delegates = getBackupDelegates();
   if (!delegates.adminBackupPolicy?.upsert || !delegates.adminBackupRun?.create) {

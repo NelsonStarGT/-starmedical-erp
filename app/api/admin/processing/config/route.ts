@@ -19,7 +19,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCapability(req, "CONFIG_PROCESSING_VIEW");
+  const auth = await requireConfigCapability(req, "CONFIG_PROCESSING_VIEW");
   if (auth.response) return auth.response;
 
   try {
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = requireConfigCapability(req, "CONFIG_PROCESSING_WRITE");
+  const auth = await requireConfigCapability(req, "CONFIG_PROCESSING_WRITE");
   if (auth.response) return auth.response;
 
   try {

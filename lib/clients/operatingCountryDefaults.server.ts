@@ -1,7 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
-import { isPrismaSchemaMismatchError } from "@/lib/config-central/errors";
+import { resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 import { normalizeTenantId } from "@/lib/tenant";
 import {
   buildOperatingCountryDefaults,
@@ -107,12 +106,15 @@ export async function getOperatingCountryDefaults(
     if (!row) return cacheSnapshot(buildOperatingCountryDefaults(tenantId));
     return cacheSnapshot(toSnapshot(row));
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("clients.operatingCountryDefaults.get", error);
-      return cacheSnapshot(buildOperatingCountryDefaults(tenantId));
-    }
-    if (isPrismaSchemaMismatchError(error)) {
-      return cacheSnapshot(buildOperatingCountryDefaults(tenantId));
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: "clients.operatingCountryDefaults.get",
+      requirement: "OPTIONAL",
+      error,
+      fallback: cacheSnapshot(buildOperatingCountryDefaults(tenantId))
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }
@@ -188,4 +190,3 @@ export async function updateOperatingCountryDefaults(input: {
 
   return cacheSnapshot(toSnapshot(row));
 }
-

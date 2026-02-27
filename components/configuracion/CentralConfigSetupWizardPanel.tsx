@@ -1,5 +1,6 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
@@ -81,11 +82,11 @@ export default function CentralConfigSetupWizardPanel({ onOpenAdvanced, onOpenOp
 
     try {
       const [smokeRes, appRes, branchesRes, emailRes, rbacRes] = await Promise.all([
-        fetch("/api/admin/config/smoke", { cache: "no-store" }),
-        fetch("/api/admin/config/app", { cache: "no-store" }),
-        fetch("/api/admin/config/branches?includeInactive=1", { cache: "no-store" }),
-        fetch("/api/admin/config/email/global", { cache: "no-store" }),
-        fetch("/api/admin/config/rbac", { cache: "no-store" })
+        configApiFetch("/api/admin/config/smoke", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/app", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/branches?includeInactive=1", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/email/global", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/rbac", { cache: "no-store" })
       ]);
 
       const smokeJson = await readJson<{ ok?: boolean; code?: string }>(smokeRes);

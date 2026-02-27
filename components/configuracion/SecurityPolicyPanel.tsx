@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 
 type SecurityPolicySnapshot = {
   tenantId: string;
@@ -90,7 +91,7 @@ function parseIpAllowlistInput(value: string) {
 }
 
 export default function SecurityPolicyPanel() {
-  const { toasts, dismiss, showToast } = useToast();
+  const { toasts, dismiss, showToast } = useConfigToast();
   const [loadingPolicy, setLoadingPolicy] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [policy, setPolicy] = useState<SecurityPolicySnapshot>(defaultPolicy);
@@ -111,7 +112,7 @@ export default function SecurityPolicyPanel() {
   const loadPolicy = useCallback(async () => {
     setLoadingPolicy(true);
     try {
-      const response = await fetch("/api/admin/config/security/policy", { cache: "no-store" });
+      const response = await configApiFetch("/api/admin/config/security/policy", { cache: "no-store" });
       const payload = await parseEnvelope<SecurityPolicySnapshot>(response);
       if (!response.ok || payload.ok === false || !payload.data) {
         throw new Error(describeError(payload, "No se pudo cargar política de seguridad."));
@@ -136,7 +137,7 @@ export default function SecurityPolicyPanel() {
       if (auditTo) search.set("dateTo", auditTo);
       search.set("take", "150");
 
-      const response = await fetch(`/api/admin/config/security/audit?${search.toString()}`, { cache: "no-store" });
+      const response = await configApiFetch(`/api/admin/config/security/audit?${search.toString()}`, { cache: "no-store" });
       const payload = await parseEnvelope<AuditRow[]>(response);
       if (!response.ok || payload.ok === false) {
         throw new Error(describeError(payload, "No se pudo cargar auditoría."));
@@ -161,7 +162,7 @@ export default function SecurityPolicyPanel() {
   async function savePolicy() {
     try {
       setSavingPolicy(true);
-      const response = await fetch("/api/admin/config/security/policy", {
+      const response = await configApiFetch("/api/admin/config/security/policy", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

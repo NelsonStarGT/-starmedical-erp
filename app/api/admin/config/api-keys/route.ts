@@ -91,7 +91,7 @@ function getAdminApiKeyDelegate() {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_API_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_API_READ");
   if (auth.response) return auth.response;
 
   const status = req.nextUrl.searchParams.get("status")?.trim() || "all";
@@ -134,7 +134,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_API_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_API_WRITE");
   if (auth.response) return auth.response;
   const delegate = getAdminApiKeyDelegate();
   if (!delegate?.create) {

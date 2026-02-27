@@ -13,6 +13,7 @@ Pestañas incluidas en esta guía:
 - Catálogos
 - Directorios
 - Validaciones
+- Logs y Diagnóstico (ERROR SYSTEMS)
 - Deprecación (flujo transversal desde Resumen)
 
 Fuera de alcance:
@@ -127,6 +128,21 @@ Resultado esperado:
 Captura esperada (descripción):
 - fila con badge `Deprecado` y botones `Abrir` + `Rehabilitar`.
 
+## 5.6 Logs y Diagnóstico (ERROR SYSTEMS)
+Pasos:
+1. Ir a `/admin/clientes/configuracion?section=diagnostico`.
+2. Confirmar tab `ERROR SYSTEMS` activo.
+3. Verificar cards de KPI y tabla de errores/fallback.
+4. Probar filtros por módulo/severidad/rango.
+5. Abrir `Ver detalle` en una fila y confirmar drawer de diagnóstico.
+
+Resultado esperado:
+- la sección carga en Clientes Configuración (no en Configuración Central),
+- filtros y detalle operan sin recargar toda la página.
+
+Captura esperada (descripción):
+- tab `ERROR SYSTEMS` activo, KPIs visibles y tabla de eventos por módulo.
+
 ## 6) Checklist QA manual (aceptación)
 Marcar cada punto como PASS/FAIL:
 
@@ -145,6 +161,7 @@ Marcar cada punto como PASS/FAIL:
 13. Rehabilitar revierte ocultamiento sin pérdida de datos.
 14. No se observan errores de permisos para admin válido.
 15. UI mantiene consistencia visual (rounded-xl, h-11, focus teal).
+16. `?section=diagnostico` abre ERROR SYSTEMS en Clientes Configuración.
 
 ## 7) Casos legacy (regresión controlada)
 Objetivo: asegurar compatibilidad sin romper operación previa.

@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { DataTable } from "@/components/ui/DataTable";
 import { listCompanies } from "@/lib/companies/services/company.service";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { parseCompanyListSearchParams, type CompanyListPageSearchParams } from "@/lib/companies/list/searchParams";
 
 const KIND_LABEL: Record<CompanyKind, string> = {
@@ -71,7 +71,7 @@ export async function CompanyListEngine({
       });
       return { missingCompanyTables: false, data };
     } catch (error) {
-      warnDevMissingTable("admin.empresas.list", error);
+      logPrismaSchemaIssue("admin.empresas.list", error);
       if (isPrismaMissingTableError(error)) {
         return {
           missingCompanyTables: true,

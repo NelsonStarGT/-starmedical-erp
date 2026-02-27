@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 
 const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{6})$/;
 const HOUR_MINUTE_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -502,7 +502,7 @@ export async function getPortalConfig(): Promise<PortalConfigSnapshot> {
       return rowToSnapshot(rawRow);
     } catch (error) {
       if (isPrismaMissingTableError(error)) {
-        warnDevMissingTable("portales.config.get.raw", error);
+        logPrismaSchemaIssue("portales.config.get.raw", error);
         return buildPortalConfigDefaults();
       }
       if (isPrismaSchemaMismatchError(error)) {
@@ -523,7 +523,7 @@ export async function getPortalConfig(): Promise<PortalConfigSnapshot> {
     return rowToSnapshot(row);
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portales.config.get", error);
+      logPrismaSchemaIssue("portales.config.get", error);
       return buildPortalConfigDefaults();
     }
     if (isPrismaSchemaMismatchError(error)) {
@@ -611,7 +611,7 @@ export async function updatePortalConfig(input: {
         });
       } catch (error) {
         if (isPrismaMissingTableError(error)) {
-          warnDevMissingTable("portales.config.audit.raw", error);
+          logPrismaSchemaIssue("portales.config.audit.raw", error);
         } else if (isPrismaSchemaMismatchError(error)) {
           warnDevPortalConfigFallback("portales.config.audit.raw", error);
         } else {
@@ -727,7 +727,7 @@ export async function updatePortalConfig(input: {
       });
     } catch (error) {
       if (isPrismaMissingTableError(error)) {
-        warnDevMissingTable("portales.config.audit", error);
+        logPrismaSchemaIssue("portales.config.audit", error);
       } else if (isPrismaSchemaMismatchError(error)) {
         warnDevPortalConfigFallback("portales.config.audit", error);
       } else {

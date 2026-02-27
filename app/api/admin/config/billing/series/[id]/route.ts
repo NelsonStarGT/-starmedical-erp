@@ -28,7 +28,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BILLING_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BILLING_WRITE");
   if (auth.response) return auth.response;
 
   const tenantId = normalizeTenantId(auth.user?.tenantId);
@@ -119,7 +119,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BILLING_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BILLING_WRITE");
   if (auth.response) return auth.response;
 
   const tenantId = normalizeTenantId(auth.user?.tenantId);
@@ -181,7 +181,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BILLING_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BILLING_WRITE");
   if (auth.response) return auth.response;
 
   const tenantId = normalizeTenantId(auth.user?.tenantId);

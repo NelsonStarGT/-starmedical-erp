@@ -1,5 +1,6 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import OpsOperationsNav from "@/components/configuracion/OpsOperationsNav";
 import type { OpsAlertEventRow, OpsMetricsHistoryRow, OpsSchedulerConfigPublic } from "@/lib/ops/types";
@@ -147,9 +148,9 @@ export default function OpsAlertsPanel() {
 
     try {
       const [healthRes, metricsRes, configRes] = await Promise.all([
-        fetch("/api/admin/config/ops/health?persist=0", { cache: "no-store" }),
-        fetch("/api/admin/config/ops/metrics?range=5m", { cache: "no-store" }),
-        fetch("/api/admin/config/ops/scheduler-config", { cache: "no-store" })
+        configApiFetch("/api/admin/config/ops/health?persist=0", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/ops/metrics?range=5m", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/ops/scheduler-config", { cache: "no-store" })
       ]);
 
       const [healthPayload, metricsPayload, configPayload] = (await Promise.all([
@@ -209,7 +210,7 @@ export default function OpsAlertsPanel() {
       if (metricsStatusFilter) params.set("status", metricsStatusFilter);
       if (metricsSampleFilter) params.set("sample", metricsSampleFilter);
 
-      const res = await fetch(`/api/admin/config/ops/metrics/history?${params.toString()}`, { cache: "no-store" });
+      const res = await configApiFetch(`/api/admin/config/ops/metrics/history?${params.toString()}`, { cache: "no-store" });
       const payload = (await res.json().catch(() => ({}))) as MetricsHistoryResponse;
       if (!res.ok) {
         throw new Error(payload.error || "No se pudo cargar historial de métricas");
@@ -236,7 +237,7 @@ export default function OpsAlertsPanel() {
       if (alertsLevelFilter) params.set("level", alertsLevelFilter);
       if (alertsServiceFilter) params.set("service", alertsServiceFilter);
 
-      const res = await fetch(`/api/admin/config/ops/alerts?${params.toString()}`, { cache: "no-store" });
+      const res = await configApiFetch(`/api/admin/config/ops/alerts?${params.toString()}`, { cache: "no-store" });
       const payload = (await res.json().catch(() => ({}))) as AlertsResponse;
       if (!res.ok) {
         throw new Error(payload.error || "No se pudo cargar alertas OPS");
@@ -294,7 +295,7 @@ export default function OpsAlertsPanel() {
         };
       }
 
-      const res = await fetch("/api/admin/config/ops/scheduler-config", {
+      const res = await configApiFetch("/api/admin/config/ops/scheduler-config", {
         method: "POST",
         headers: {
           "content-type": "application/json"
@@ -337,7 +338,7 @@ export default function OpsAlertsPanel() {
     setError(null);
 
     try {
-      const res = await fetch("/api/admin/config/ops/scheduler/run-now", {
+      const res = await configApiFetch("/api/admin/config/ops/scheduler/run-now", {
         method: "POST",
         headers: {
           "content-type": "application/json"

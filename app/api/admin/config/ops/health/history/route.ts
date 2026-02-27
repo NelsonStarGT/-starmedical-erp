@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthenticatedUser } from "@/lib/auth";
 import { canAccessOpsHealth, canExecuteOpsCritical } from "@/lib/ops/rbac";
 import { readOpsHealthHistory } from "@/lib/ops/store";
 import type { OpsHealthServiceStatus } from "@/lib/ops/types";
@@ -29,7 +29,7 @@ function parseStatus(value: string | null): OpsHealthServiceStatus | null {
 
 export async function GET(req: NextRequest) {
   const requestId = getOrCreateRequestId(req);
-  const auth = requireAuth(req);
+  const auth = await requireAuthenticatedUser(req);
   if (auth.errorResponse) return withRequestIdHeader(auth.errorResponse, requestId);
   if (!canAccessOpsHealth(auth.user)) {
     await auditLog({

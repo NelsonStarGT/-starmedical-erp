@@ -9,7 +9,7 @@ import {
   type Prisma
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 import { ACTIVE_QUEUE_ITEM_STATUSES } from "@/lib/reception/queue-guards";
 import { classifyQueueSla } from "@/lib/reception/sla-config";
 import { getReceptionSlaPolicy } from "@/lib/reception/sla-settings.service";
@@ -115,9 +115,12 @@ export async function getVisitStatusCounts(input: { siteId: string }): Promise<V
         onHold
     };
   } catch (error) {
-    if (process.env.NODE_ENV !== "production" && isPrismaMissingTableError(error)) {
-      warnDevMissingTable("Reception.getVisitStatusCounts", error);
-      return {
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "reception",
+      context: "Reception.getVisitStatusCounts",
+      requirement: "OPTIONAL",
+      error,
+      fallback: {
         siteId: input.siteId,
         dateKey,
         arrived: 0,
@@ -129,7 +132,10 @@ export async function getVisitStatusCounts(input: { siteId: string }): Promise<V
         readyForDischarge: 0,
         onHold: 0,
         totalActive: 0
-      };
+      }
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }
@@ -166,16 +172,22 @@ export async function getQueueStatusCounts(input: { siteId: string }): Promise<Q
       completed: counts.get(QueueItemStatus.COMPLETED) ?? 0
     };
   } catch (error) {
-    if (process.env.NODE_ENV !== "production" && isPrismaMissingTableError(error)) {
-      warnDevMissingTable("Reception.getQueueStatusCounts", error);
-      return {
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "reception",
+      context: "Reception.getQueueStatusCounts",
+      requirement: "OPTIONAL",
+      error,
+      fallback: {
         siteId: input.siteId,
         dateKey,
         waiting: 0,
         called: 0,
         inService: 0,
         completed: 0
-      };
+      }
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }
@@ -283,9 +295,12 @@ export async function getQueueOverview(input: { siteId: string }): Promise<Queue
       };
     });
   } catch (error) {
-    if (process.env.NODE_ENV !== "production" && isPrismaMissingTableError(error)) {
-      warnDevMissingTable("Reception.getQueueOverview", error);
-      return AREAS.map((area) => ({
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "reception",
+      context: "Reception.getQueueOverview",
+      requirement: "OPTIONAL",
+      error,
+      fallback: AREAS.map((area) => ({
         area,
         totalEnCola: 0,
         llamados: 0,
@@ -293,7 +308,10 @@ export async function getQueueOverview(input: { siteId: string }): Promise<Queue
         pausados: 0,
         tiempoPromedioEspera: null,
         ticketActualLlamado: null
-      }));
+      }))
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }
@@ -499,9 +517,15 @@ export async function getReceptionWorklist(input: {
 
     return filtered;
   } catch (error) {
-    if (process.env.NODE_ENV !== "production" && isPrismaMissingTableError(error)) {
-      warnDevMissingTable("Reception.getReceptionWorklist", error);
-      return [];
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "reception",
+      context: "Reception.getReceptionWorklist",
+      requirement: "OPTIONAL",
+      error,
+      fallback: [] as ReceptionWorklistItem[]
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }
@@ -684,9 +708,12 @@ export async function getAvailabilitySnapshot(input: { siteId: string }): Promis
       }))
     };
   } catch (error) {
-    if (process.env.NODE_ENV !== "production" && isPrismaMissingTableError(error)) {
-      warnDevMissingTable("Reception.getAvailabilitySnapshot", error);
-      return {
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "reception",
+      context: "Reception.getAvailabilitySnapshot",
+      requirement: "OPTIONAL",
+      error,
+      fallback: {
         siteId: input.siteId,
         dateKey,
         busyDoctors: 0,
@@ -697,7 +724,10 @@ export async function getAvailabilitySnapshot(input: { siteId: string }): Promis
         branchHoursConfigured: false,
         branchHoursMessage: "No se pudo validar el horario de la sede.",
         visitsInServiceByDoctor: []
-      };
+      }
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }
@@ -779,9 +809,15 @@ export async function getReceptionUpcomingAppointments(input: {
       };
     });
   } catch (error) {
-    if (process.env.NODE_ENV !== "production" && isPrismaMissingTableError(error)) {
-      warnDevMissingTable("Reception.getReceptionUpcomingAppointments", error);
-      return [];
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "reception",
+      context: "Reception.getReceptionUpcomingAppointments",
+      requirement: "OPTIONAL",
+      error,
+      fallback: [] as ReceptionUpcomingAppointment[]
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }
@@ -820,9 +856,15 @@ export async function getReceptionRecentEvents(input: { siteId: string; limit?: 
       ticketCode: row.visit.ticketCode ?? null
     }));
   } catch (error) {
-    if (process.env.NODE_ENV !== "production" && isPrismaMissingTableError(error)) {
-      warnDevMissingTable("Reception.getReceptionRecentEvents", error);
-      return [];
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "reception",
+      context: "Reception.getReceptionRecentEvents",
+      requirement: "OPTIONAL",
+      error,
+      fallback: [] as ReceptionRecentEvent[]
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }

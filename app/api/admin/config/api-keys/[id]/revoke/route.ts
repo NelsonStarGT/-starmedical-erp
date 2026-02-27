@@ -58,7 +58,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_API_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_API_WRITE");
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);

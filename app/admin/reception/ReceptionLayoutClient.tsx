@@ -92,10 +92,10 @@ function ReceptionLayoutContent({
       if (event.key.toLowerCase() === "c") {
         event.preventDefault();
         if (canNavigateOperational) {
-          router.push("/admin/recepcion/appointments");
+          router.push("/admin/reception/appointments");
           return;
         }
-        setPendingHref("/admin/recepcion/appointments");
+        setPendingHref("/admin/reception/appointments");
         setShowBranchPrompt(true);
       }
     };

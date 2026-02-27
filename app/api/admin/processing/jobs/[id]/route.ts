@@ -22,7 +22,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCapability(req, "CONFIG_PROCESSING_VIEW");
+  const auth = await requireConfigCapability(req, "CONFIG_PROCESSING_VIEW");
   if (auth.response) return auth.response;
 
   try {

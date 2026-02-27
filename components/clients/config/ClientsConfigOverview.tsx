@@ -41,6 +41,7 @@ const SECTION_LABELS: Record<Exclude<ClientsConfigSection, "resumen">, string> =
   canales: "Canales",
   reglas: "Reglas",
   validaciones: "Validaciones",
+  diagnostico: "ERROR SYSTEMS",
   futuro: "Futuro"
 };
 
@@ -59,7 +60,16 @@ const SCOPE_LABELS: Record<ClientsConfigScope, string> = {
 };
 
 const STORAGE_PREFIX = "star-clients-config:overview";
-const SECTION_FILTER_VALUES = new Set<OverviewSectionFilter>(["all", "catalogos", "directorios", "canales", "reglas", "validaciones", "futuro"]);
+const SECTION_FILTER_VALUES = new Set<OverviewSectionFilter>([
+  "all",
+  "catalogos",
+  "directorios",
+  "canales",
+  "reglas",
+  "validaciones",
+  "diagnostico",
+  "futuro"
+]);
 const SCOPE_FILTER_VALUES = new Set<OverviewScopeFilter>(["all", "tenant", "shared", "legacy", "future"]);
 const STATUS_FILTER_VALUES = new Set<OverviewStatusFilter>(["all", "db", "fallback", "defaults", "n/a", "fallback_any"]);
 const USE_FILTER_VALUES = new Set<OverviewUseFilter>(["all", "used", "unused"]);
@@ -314,6 +324,7 @@ export default function ClientsConfigOverview({
                 { value: "canales", label: "Canales" },
                 { value: "reglas", label: "Reglas" },
                 { value: "validaciones", label: "Validaciones" },
+                { value: "diagnostico", label: "ERROR SYSTEMS" },
                 { value: "futuro", label: "Futuro" }
               ]}
             />

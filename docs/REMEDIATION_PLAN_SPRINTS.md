@@ -17,6 +17,19 @@ Fuente: [TECH_DEBT_REGISTER](./TECH_DEBT_REGISTER.md)
 
 Regla: no aumentar baseline sin ticket, justificacion y sprint de remocion.
 
+Snapshot operativo preflight (Roadmap Integrado A+B, 2026-02-26):
+
+- `warnDevMissingTable(...)`: 1
+- `as unknown as`: 99
+- `eslint-disable`: 40
+- `TODO`: 41
+- `eslint-disable react-hooks` en Clientes/Recepcion: 1
+
+Evidencia:
+
+- [WORKLOG_STAGE0.md](./WORKLOG_STAGE0.md)
+- [ROADMAP_INTEGRADO_CLIENTES_V1_SPRINT3.md](./ROADMAP_INTEGRADO_CLIENTES_V1_SPRINT3.md)
+
 ## 3) Reglas no negociables
 - Mantener multi-tenant seguro (sin fuga de datos entre tenants).
 - No introducir fallbacks silenciosos nuevos.
@@ -42,7 +55,7 @@ Congelar baseline y formalizar decisiones canonicas para ejecutar sprints 1–4 
   - clasificacion por dominio (Clientes/Recepcion/Portales/Ops/Medical),
   - severidad (Alta/Media/Baja).
 - `S0.2` Definir baseline bloqueado + script guardrail (falla si sube conteo sin ticket).
-- `S0.3` Documentar canonical route: `/admin/recepcion` y alias temporal `/admin/reception`.
+- `S0.3` Documentar canonical route: `/admin/reception` y alias temporal `/admin/recepcion`.
 
 ### Entregables
 - `docs/TECH_DEBT_REGISTER.md`
@@ -71,7 +84,7 @@ Eliminar duplicidad visible de modulo/rutas sin romper compatibilidad.
 - Limpieza de referencias internas.
 
 ### Tareas
-- `S1.1` Redirect `308`: `/admin/reception/*` -> `/admin/recepcion/*`.
+- `S1.1` Redirect `308`: `/admin/recepcion/*` -> `/admin/reception/*`.
 - `S1.2` Consolidar `moduleNavRegistry` y contextual nav para mostrar un solo modulo "Recepcion".
 - `S1.3` Reemplazar enlaces internos legacy por canonical.
 - `S1.4` Agregar tests de redirect/rutas y QA manual en docs.
@@ -85,11 +98,12 @@ Eliminar duplicidad visible de modulo/rutas sin romper compatibilidad.
 ### Exit criteria
 - Un solo modulo visible para recepcion.
 - 0 links internos legacy (excepto alias tecnico).
+- Gate de legacy disponible y ejecutable: `npm run check:legacy:recepcion`.
 - CI verde.
 
 ### Checklist QA (manual)
-- [ ] Abrir `/admin/reception/queues` redirige a `/admin/recepcion/queues`.
-- [ ] Tabs/contextual nav apuntan a `/admin/recepcion/*`.
+- [ ] Abrir `/admin/recepcion/cola` redirige a `/admin/reception/queues`.
+- [ ] Tabs/contextual nav apuntan a `/admin/reception/*`.
 - [ ] Bookmarks legacy siguen funcionando via redirect.
 
 ---
@@ -226,7 +240,7 @@ Cerrar TODOs de impacto directo en operacion, venta y seguridad.
 
 ## KPIs operativos
 - Fallback silencioso en Clientes/Recepcion: 0
-- Rutas internas legacy `/admin/reception`: 0 (excepto alias tecnico)
+- Rutas internas legacy `/admin/recepcion`: 0 (excepto alias tecnico)
 - CI pass rate por sprint: 100%
 - Regresiones criticas post-release: 0
 
@@ -252,7 +266,7 @@ Cerrar TODOs de impacto directo en operacion, venta y seguridad.
 
 ## Sprint 1
 - `S1-PLAT-001` Redirect 308 y politica de alias legacy.
-- `S1-REC-001` Consolidacion nav/contextual a `/admin/recepcion`.
+- `S1-REC-001` Consolidacion nav/contextual a `/admin/reception`.
 - `S1-CLI-001` Limpieza enlaces cruzados Clientes -> Recepcion.
 - `S1-PORT-001` Limpieza enlaces Portales -> Recepcion canonical.
 - `S1-OPS-001` Verificacion observabilidad de redirects en entornos.

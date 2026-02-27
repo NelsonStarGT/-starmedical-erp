@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { MailModuleKey } from "@prisma/client";
 import { decryptSecret as decryptEmailSecret } from "./crypto";
 import { decryptSecret as decryptModuleSecret } from "@/lib/security/crypto";
-import { isPrismaMissingTableError } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError } from "@/lib/prisma/errors.server";
 import {
   buildTenantAliasAddress,
   getEmailSandboxSettingsSafe,

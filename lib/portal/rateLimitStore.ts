@@ -1,4 +1,4 @@
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { PORTAL_RATE_LIMIT_MAX, PORTAL_RATE_LIMIT_WINDOW_MS } from "@/lib/portal/constants";
 import { dbPortalRateLimitStore } from "@/lib/portal/rateLimit.db";
 import { memoryPortalRateLimitStore } from "@/lib/portal/rateLimit.memory";
@@ -55,7 +55,7 @@ export async function consumePortalRateLimit(
     return await consumeWithStore(primary, key, resolvedOptions);
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.rateLimit.consume.primary", error);
+      logPrismaSchemaIssue("portal.rateLimit.consume.primary", error);
     } else {
       warnDevRateLimitFallback("consume.primary.failed", error);
     }

@@ -18,7 +18,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCapability(req, "CONFIG_PROCESSING_WRITE");
+  const auth = await requireConfigCapability(req, "CONFIG_PROCESSING_WRITE");
   if (auth.response) return auth.response;
 
   try {

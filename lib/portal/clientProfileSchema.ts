@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 
 const warnedPhotoColumnContexts = new Set<string>();
 
@@ -84,7 +84,7 @@ export async function safeSupportsClientProfilePhotoColumns(context = "portal.cl
     return true;
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable(`${context}.clientProfile.findFirst`, error);
+      logPrismaSchemaIssue(`${context}.clientProfile.findFirst`, error);
       return false;
     }
     if (isClientProfilePhotoColumnsUnavailableError(error)) {

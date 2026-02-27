@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthenticatedUser } from "@/lib/auth";
 import { auditLog } from "@/lib/audit";
 import { consumePortalRateLimit } from "@/lib/portal/rateLimitStore";
 import { resolveOpsAdminRecipient } from "@/lib/ops/adminRecipient";
@@ -55,7 +55,7 @@ async function getFallbackRecipient(tenantId: string) {
 
 export async function GET(req: NextRequest) {
   const requestId = getOrCreateRequestId(req);
-  const auth = requireAuth(req);
+  const auth = await requireAuthenticatedUser(req);
   if (auth.errorResponse) return withRequestIdHeader(auth.errorResponse, requestId);
   const user = auth.user;
 
@@ -137,7 +137,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const requestId = getOrCreateRequestId(req);
-  const auth = requireAuth(req);
+  const auth = await requireAuthenticatedUser(req);
   if (auth.errorResponse) return withRequestIdHeader(auth.errorResponse, requestId);
   const user = auth.user;
 

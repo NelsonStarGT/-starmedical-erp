@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { safeCreatePortalAuditLog } from "@/lib/portal/audit";
 import { PORTAL_CHALLENGE_MAX_ATTEMPTS } from "@/lib/portal/constants";
 import { consumePortalRateLimit } from "@/lib/portal/rateLimitStore";
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.auth.verify.challenge.findFirst", error);
+      logPrismaSchemaIssue("portal.auth.verify.challenge.findFirst", error);
       return responsePortalUnavailable();
     }
     throw error;
@@ -208,7 +208,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.auth.verify.session.create", error);
+      logPrismaSchemaIssue("portal.auth.verify.session.create", error);
       return responsePortalUnavailable();
     }
     throw error;

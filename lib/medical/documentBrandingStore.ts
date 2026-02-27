@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import type { Prisma, TextDocVersion } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { documentBrandingUpsertSchema } from "@/lib/medical/schemas";
 import {
   createDefaultDocumentBrandingTemplate,
@@ -68,7 +68,7 @@ async function withMemoryFallback<T>(dbOperation: () => Promise<T>, memoryOperat
     return await dbOperation();
   } catch (error) {
     if (!isPrismaMissingTableError(error)) throw error;
-    warnDevMissingTable("document-branding", error);
+    logPrismaSchemaIssue("document-branding", error);
     globalForMedical.documentBrandingStoreForceMemory = true;
     return await memoryOperation();
   }

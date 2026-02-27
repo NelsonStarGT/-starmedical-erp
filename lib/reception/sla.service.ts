@@ -2,7 +2,7 @@ import "server-only";
 
 import { OperationalArea, QueueItemStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 import { getTicketDateKey } from "@/lib/reception/ticketing.service";
 import { RECEPTION_AREA_LABELS } from "@/lib/reception/constants";
 import { classifyQueueSla } from "@/lib/reception/sla-config";
@@ -84,9 +84,15 @@ export async function getSlaAlerts(input: { siteId: string }): Promise<SlaAlert[
       }
     });
   } catch (error) {
-    if (process.env.NODE_ENV !== "production" && isPrismaMissingTableError(error)) {
-      warnDevMissingTable("Reception.getSlaAlerts", error);
-      return [];
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "reception",
+      context: "Reception.getSlaAlerts",
+      requirement: "OPTIONAL",
+      error,
+      fallback: [] as SlaAlert[]
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }

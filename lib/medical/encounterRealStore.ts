@@ -9,7 +9,7 @@ import type {
   EncounterSupplyItem
 } from "@/components/medical/encounter/types";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 
 export type EncounterRecord = {
   id: string;
@@ -246,7 +246,7 @@ async function withMissingTableFallback<T>(context: string, dbOperation: () => P
     return await dbOperation();
   } catch (error) {
     if (!isPrismaMissingTableError(error)) throw error;
-    warnDevMissingTable(context, error);
+    logPrismaSchemaIssue(context, error);
     return fallbackOperation();
   }
 }
@@ -285,7 +285,7 @@ export async function getEncounterRecordLookup(encounterId: string): Promise<Enc
     };
   } catch (error) {
     if (!isPrismaMissingTableError(error)) throw error;
-    warnDevMissingTable("medical-encounter", error);
+    logPrismaSchemaIssue("medical-encounter", error);
     return { source: "missing_table", record: null };
   }
 }
@@ -641,7 +641,7 @@ export async function closeEncounterInDb(
     return { ok: true, closedAt: signedAt.toISOString() };
   } catch (error) {
     if (!isPrismaMissingTableError(error)) throw error;
-    warnDevMissingTable("medical-encounter-close", error);
+    logPrismaSchemaIssue("medical-encounter-close", error);
     return { ok: false, reason: "missing_table" };
   }
 }

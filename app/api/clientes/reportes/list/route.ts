@@ -3,6 +3,7 @@ import { ClientProfileType } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
 import { getClientsReportList, type ClientsReportFilters } from "@/lib/clients/reports.service";
+import { tenantIdFromUser } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,13 +14,14 @@ function parseDate(value: string | null) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function buildFilters(req: NextRequest): ClientsReportFilters {
+function buildFilters(req: NextRequest, tenantId: string): ClientsReportFilters {
   const { searchParams } = new URL(req.url);
   const rawType = searchParams.get("type");
   const page = Number(searchParams.get("page") || "1");
   const pageSize = Number(searchParams.get("pageSize") || "25");
 
   return {
+    tenantId,
     q: searchParams.get("q") || undefined,
     type:
       rawType && rawType !== "ALL" && Object.values(ClientProfileType).includes(rawType as ClientProfileType)
@@ -44,7 +46,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const filters = buildFilters(req);
+    const filters = buildFilters(req, tenantIdFromUser(auth.user));
     const list = await getClientsReportList(filters);
     return NextResponse.json({ ok: true, data: list });
   } catch (error) {

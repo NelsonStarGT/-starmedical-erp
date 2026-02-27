@@ -35,7 +35,7 @@ export async function PATCH(
     | { params: { id: string; hoursId: string } }
     | { params: Promise<{ id: string; hoursId: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);

@@ -29,7 +29,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);

@@ -19,11 +19,12 @@ function parseDate(value: string | null, dateFormat: ClientsDateFormat) {
   return parseIsoDateString(value);
 }
 
-function buildFilters(req: NextRequest, dateFormat: ClientsDateFormat): ClientsReportFilters {
+function buildFilters(req: NextRequest, dateFormat: ClientsDateFormat, tenantId: string): ClientsReportFilters {
   const { searchParams } = new URL(req.url);
   const rawType = searchParams.get("type");
 
   return {
+    tenantId,
     q: searchParams.get("q") || undefined,
     type:
       rawType && rawType !== "ALL" && Object.values(ClientProfileType).includes(rawType as ClientProfileType)
@@ -60,7 +61,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const format = (searchParams.get("format") || "csv").toLowerCase();
     const dateFormat = await getClientsDateFormat(tenantIdFromUser(auth.user));
-    const filters = buildFilters(req, dateFormat);
+    const filters = buildFilters(req, dateFormat, tenantIdFromUser(auth.user));
     const list = await getClientsReportList(filters);
 
     const header = [

@@ -4,7 +4,7 @@ import {
   isCentralConfigCompatError,
   warnDevCentralCompat
 } from "@/lib/config-central";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthenticatedUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hasPermission, isAdmin } from "@/lib/rbac";
 
@@ -76,7 +76,7 @@ async function runCountCheck(params: {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireAuth(req);
+  const auth = await requireAuthenticatedUser(req);
   if (auth.errorResponse) return auth.errorResponse;
 
   const user = auth.user!;

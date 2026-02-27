@@ -24,7 +24,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_THEME_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_THEME_READ");
   if (auth.response) return auth.response;
 
   try {
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_THEME_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_THEME_WRITE");
   if (auth.response) return auth.response;
 
   try {

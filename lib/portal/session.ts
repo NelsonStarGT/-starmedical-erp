@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import {
   buildPortalClientProfileSelect,
   readPortalClientProfilePhotoUrl,
@@ -262,7 +262,7 @@ export async function createPortalSession(input: {
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.session.create", error);
+      logPrismaSchemaIssue("portal.session.create", error);
     }
     throw error;
   }
@@ -286,7 +286,7 @@ export async function findPortalSessionByAccessToken(rawAccessToken: string) {
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.session.findByAccessToken", error);
+      logPrismaSchemaIssue("portal.session.findByAccessToken", error);
       return null;
     }
     throw error;
@@ -305,7 +305,7 @@ export async function findPortalSessionByRefreshToken(rawRefreshToken: string) {
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.session.findByRefreshToken", error);
+      logPrismaSchemaIssue("portal.session.findByRefreshToken", error);
       return null;
     }
     throw error;
@@ -403,7 +403,7 @@ export async function rotatePortalSessionByRefreshToken(input: {
     };
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.session.rotateByRefresh", error);
+      logPrismaSchemaIssue("portal.session.rotateByRefresh", error);
       return { ok: false as const, reason: "MISSING_TABLE" as const };
     }
     throw error;
@@ -458,7 +458,7 @@ export async function revokePortalSession(input: { accessToken?: string | null; 
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.session.revoke.findFirst", error);
+      logPrismaSchemaIssue("portal.session.revoke.findFirst", error);
       return null;
     }
     throw error;
@@ -472,7 +472,7 @@ export async function revokePortalSession(input: { accessToken?: string | null; 
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.session.revoke.update", error);
+      logPrismaSchemaIssue("portal.session.revoke.update", error);
       return null;
     }
     throw error;

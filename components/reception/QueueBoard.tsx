@@ -163,7 +163,7 @@ export function QueueBoard({ siteId, initialData, capabilities, focusArea }: Pro
                 <span className="rounded-full bg-[#4aadf5]/10 px-3 py-1 font-semibold text-[#2e75ba]">
                   Filtrado: {RECEPTION_AREA_LABELS[focusArea] ?? focusArea}
                 </span>
-                <Link href="/admin/recepcion/queues" className="font-semibold text-[#2e75ba] hover:text-[#4aadf5]">
+                <Link href="/admin/reception/queues" className="font-semibold text-[#2e75ba] hover:text-[#4aadf5]">
                   Ver todas
                 </Link>
               </>
@@ -344,7 +344,7 @@ function QueueSection({
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Link
-                      href={`/admin/recepcion/visit/${item.visitId}`}
+                      href={`/admin/reception/visit/${item.visitId}`}
                       className="text-sm font-semibold text-[#2e75ba] hover:text-[#4aadf5]"
                     >
                       {item.ticketCode ?? "—"}
@@ -471,7 +471,7 @@ function QueueSection({
                     </>
                   )}
                   <Link
-                    href={`/admin/recepcion/visit/${item.visitId}`}
+                    href={`/admin/reception/visit/${item.visitId}`}
                     className="inline-flex items-center gap-1 rounded-full border border-transparent bg-transparent px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-[#2e75ba]"
                     aria-label="Ver detalle de visita"
                   >

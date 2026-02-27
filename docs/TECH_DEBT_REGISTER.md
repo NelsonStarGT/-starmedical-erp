@@ -1,6 +1,6 @@
 # TECH DEBT REGISTER
 
-Updated: 2026-02-26 19:48:16 CST  
+Updated: 2026-02-26 21:12:28 CST  
 Scope: `app`, `components`, `lib`, `prisma`, `tests`
 
 ## Baseline (Sprint 0)
@@ -12,20 +12,25 @@ Scope: `app`, `components`, `lib`, `prisma`, `tests`
 | ESLint suppressions | `eslint-disable` occurrences | 40 |
 | Pending implementation notes | `TODO` occurrences | 47 |
 
+## Current Snapshot (Roadmap A+B Preflight)
+
+| Category | Metric | Count |
+| --- | --- | ---: |
+| Fallback DB guards | `warnDevMissingTable(` occurrences | 1 |
+| Type escapes | `as unknown as` occurrences | 99 |
+| ESLint suppressions | `eslint-disable` occurrences | 40 |
+| Pending implementation notes | `TODO` occurrences | 41 |
+| React hooks suppressions (Clientes/Recepcion scope) | `eslint-disable react-hooks` occurrences | 1 |
+
 ## Top 10 Files By Category
 
 ### 1) Fallback DB guards (`warnDevMissingTable(`)
 
-1. `lib/ops/store.ts` (11)
-2. `lib/reception/dashboard.service.ts` (7)
-3. `lib/portal/session.ts` (6)
-4. `lib/portales/config.ts` (4)
-5. `app/admin/clientes/[id]/page.tsx` (4)
-6. `lib/portal/data.ts` (3)
-7. `lib/medical/encounterRealStore.ts` (3)
-8. `lib/home-dashboard/service.ts` (3)
-9. `lib/clients/contactDirectories.server.ts` (3)
-10. `app/admin/clientes/actions.ts` (3)
+1. `lib/prisma/errors.ts` (1, wrapper de compatibilidad)
+
+Todos los callsites runtime fueron migrados a helpers centrales:
+- `resolvePrismaSchemaFallback(...)` for REQUIRED/OPTIONAL handling
+- `logPrismaSchemaIssue(...)` for explicit visible logging
 
 ### 2) Type escapes (`as unknown as`)
 
@@ -56,15 +61,15 @@ Scope: `app`, `components`, `lib`, `prisma`, `tests`
 ### 4) Pending implementation notes (`TODO`)
 
 1. `app/modulo-medico/(suite)/agenda/page.tsx` (7)
-2. `components/recepcion/CitasBoardV1.tsx` (6)
-3. `components/medical/encounter/ClinicalDiagnosticsPanel.tsx` (6)
-4. `app/modulo-medico/(suite)/diagnostico/page.tsx` (4)
-5. `prisma/seeds/geo-postal-codes.json` (2)
-6. `prisma/schema.prisma` (2)
-7. `app/modulo-medico/consultaM/[encounterId]/page.tsx` (2)
-8. `app/modulo-medico/(suite)/dashboard/page.tsx` (2)
-9. `app/marcaje/layout.tsx` (2)
-10. `app/admin/reception/actions.ts` (2)
+2. `components/medical/encounter/ClinicalDiagnosticsPanel.tsx` (6)
+3. `app/modulo-medico/(suite)/diagnostico/page.tsx` (4)
+4. `prisma/seeds/geo-postal-codes.json` (2)
+5. `prisma/schema.prisma` (2)
+6. `app/modulo-medico/consultaM/[encounterId]/page.tsx` (2)
+7. `app/modulo-medico/(suite)/dashboard/page.tsx` (2)
+8. `app/marcaje/layout.tsx` (2)
+9. `app/admin/reception/actions.ts` (2)
+10. `lib/portal/data.ts` (1)
 
 ## Governance Policy
 
@@ -82,4 +87,3 @@ Scope: `app`, `components`, `lib`, `prisma`, `tests`
 2. Sprint 2: replace `as unknown as` in business services (non-test first).
 3. Sprint 3: eliminate `eslint-disable` in operational/admin modules.
 4. Sprint 4: convert `TODO` in medical/reception flows into tracked tickets or implement.
-

@@ -547,7 +547,7 @@ export function WorklistTable({ siteId, initialItems, initialNextByArea, capabil
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap justify-end gap-2">
                           <Link
-                            href={`/admin/recepcion/visit/${row.visitId}`}
+                            href={`/admin/reception/visit/${row.visitId}`}
                             className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
                           >
                             Detalle <ArrowUpRight size={14} />

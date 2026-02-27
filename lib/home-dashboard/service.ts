@@ -11,7 +11,7 @@ import {
   readHomeDashboardSettings,
   readHomeDashboardSnapshot
 } from "@/lib/home-dashboard/storage";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 
 const DEFAULT_COMPANY_NAME = "StarMedical ERP";
 
@@ -26,7 +26,7 @@ export async function getHomeDashboardSettings(roleNames?: string[]): Promise<Ho
     const config = await prisma.appConfig.findFirst({ orderBy: { createdAt: "desc" }, select: { openingHours: true } });
     return readHomeDashboardSettings(config?.openingHours, roleNames);
   } catch (error) {
-    warnDevMissingTable("home-dashboard.get.appConfig", error);
+    logPrismaSchemaIssue("home-dashboard.get.appConfig", error);
     if (isPrismaMissingTableError(error) || isPrismaUnknownArgumentError(error)) {
       return { ...DEFAULT_HOME_DASHBOARD_SETTINGS };
     }
@@ -42,7 +42,7 @@ export async function getHomeDashboardSettingsSnapshot(): Promise<{
     const config = await prisma.appConfig.findFirst({ orderBy: { createdAt: "desc" }, select: { openingHours: true } });
     return readHomeDashboardSnapshot(config?.openingHours);
   } catch (error) {
-    warnDevMissingTable("home-dashboard.snapshot.appConfig", error);
+    logPrismaSchemaIssue("home-dashboard.snapshot.appConfig", error);
     if (isPrismaMissingTableError(error) || isPrismaUnknownArgumentError(error)) {
       return {
         global: { ...DEFAULT_HOME_DASHBOARD_SETTINGS },
@@ -86,7 +86,7 @@ export async function saveHomeDashboardSettings(
     });
     return normalized;
   } catch (error) {
-    warnDevMissingTable("home-dashboard.save.appConfig", error);
+    logPrismaSchemaIssue("home-dashboard.save.appConfig", error);
     if (isPrismaMissingTableError(error) || isPrismaUnknownArgumentError(error)) {
       return normalized;
     }

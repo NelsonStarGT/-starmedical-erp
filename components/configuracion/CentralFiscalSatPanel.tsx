@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 import { cn } from "@/lib/utils";
 
 type PanelTab = "legal_entities" | "trade_units" | "billing_profiles";
@@ -177,7 +178,7 @@ const defaultBillingProfileForm: BillingProfileForm = {
 const DEFAULT_PENDING_MESSAGE = "Aún no disponible en este entorno. Falta migración y prisma generate.";
 
 export default function CentralFiscalSatPanel() {
-  const { toasts, showToast, dismiss } = useToast();
+  const { toasts, showToast, dismiss } = useConfigToast();
   const [tab, setTab] = useState<PanelTab>("legal_entities");
   const [loading, setLoading] = useState(false);
   const [pendingModules, setPendingModules] = useState<PendingModuleState>({
@@ -220,7 +221,7 @@ export default function CentralFiscalSatPanel() {
         return;
       }
 
-      const response = await fetch(`/api/admin/config/branches/${normalizedBranchId}/establishments`, {
+      const response = await configApiFetch(`/api/admin/config/branches/${normalizedBranchId}/establishments`, {
         cache: "no-store"
       });
       const payload = await parseEnvelope<{ items: SatEstablishmentOption[] }>(response);
@@ -237,10 +238,10 @@ export default function CentralFiscalSatPanel() {
     setLoading(true);
     try {
       const [branchesRes, legalRes, tradeRes, profilesRes] = await Promise.all([
-        fetch("/api/admin/config/branches?includeInactive=1", { cache: "no-store" }),
-        fetch("/api/admin/config/legal-entities?includeInactive=1", { cache: "no-store" }),
-        fetch("/api/admin/config/trade-units?includeInactive=1", { cache: "no-store" }),
-        fetch("/api/admin/config/billing-profiles?includeInactive=1", { cache: "no-store" })
+        configApiFetch("/api/admin/config/branches?includeInactive=1", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/legal-entities?includeInactive=1", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/trade-units?includeInactive=1", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/billing-profiles?includeInactive=1", { cache: "no-store" })
       ]);
 
       const [branchesJson, legalJson, tradeJson, profilesJson] = await Promise.all([
@@ -358,7 +359,7 @@ export default function CentralFiscalSatPanel() {
       : "/api/admin/config/legal-entities";
     const method = isEdit ? "PUT" : "POST";
 
-    const response = await fetch(endpoint, {
+    const response = await configApiFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -383,7 +384,7 @@ export default function CentralFiscalSatPanel() {
   }
 
   async function toggleLegalEntity(row: LegalEntityRow) {
-    const response = await fetch(`/api/admin/config/legal-entities/${row.id}`, {
+    const response = await configApiFetch(`/api/admin/config/legal-entities/${row.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ isActive: !row.isActive })
@@ -405,7 +406,7 @@ export default function CentralFiscalSatPanel() {
     const endpoint = isEdit ? `/api/admin/config/trade-units/${tradeForm.id}` : "/api/admin/config/trade-units";
     const method = isEdit ? "PUT" : "POST";
 
-    const response = await fetch(endpoint, {
+    const response = await configApiFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -433,7 +434,7 @@ export default function CentralFiscalSatPanel() {
   }
 
   async function toggleTradeUnit(row: TradeUnitRow) {
-    const response = await fetch(`/api/admin/config/trade-units/${row.id}`, {
+    const response = await configApiFetch(`/api/admin/config/trade-units/${row.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ isActive: !row.isActive })
@@ -467,7 +468,7 @@ export default function CentralFiscalSatPanel() {
       }
     }
 
-    const response = await fetch(endpoint, {
+    const response = await configApiFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -494,7 +495,7 @@ export default function CentralFiscalSatPanel() {
   }
 
   async function toggleBillingProfile(row: BillingProfileRow) {
-    const response = await fetch(`/api/admin/config/billing-profiles/${row.id}`, {
+    const response = await configApiFetch(`/api/admin/config/billing-profiles/${row.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ isActive: !row.isActive })

@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import {
   HEX_COLOR_REGEX,
   tenantThemePatchSchema,
@@ -407,7 +407,7 @@ export async function getTenantThemeConfig(tenantIdInput: unknown = "global"): P
     return rowToSnapshot(created);
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("config.theme.get", error);
+      logPrismaSchemaIssue("config.theme.get", error);
       return defaults;
     }
 

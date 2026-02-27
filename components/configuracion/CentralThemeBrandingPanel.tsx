@@ -1,10 +1,11 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import UploadField from "@/components/ui/UploadField";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 import { contrastRatio, isRecommendedContrast, isValidHexColor } from "@/lib/theme/utils";
 
 type ThemeSnapshot = {
@@ -91,7 +92,7 @@ function buildApiErrorMessage(payload: unknown, fallback: string) {
 }
 
 export default function CentralThemeBrandingPanel() {
-  const { toasts, showToast, dismiss } = useToast();
+  const { toasts, showToast, dismiss } = useConfigToast();
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -149,7 +150,7 @@ export default function CentralThemeBrandingPanel() {
   const loadTheme = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch("/api/admin/config/theme", { cache: "no-store" });
+      const res = await configApiFetch("/api/admin/config/theme", { cache: "no-store" });
       const json = await readJson<{ ok?: boolean; error?: string; data?: ThemeSnapshot }>(res);
       if (!res.ok || !json.ok || !json.data) {
         throw new Error(buildApiErrorMessage(json, "No se pudo cargar configuración de tema."));
@@ -210,7 +211,7 @@ export default function CentralThemeBrandingPanel() {
       setIsSaving(true);
       showToast({ tone: "info", title: "Guardando tema...", durationMs: 900 });
 
-      const res = await fetch("/api/admin/config/theme", {
+      const res = await configApiFetch("/api/admin/config/theme", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

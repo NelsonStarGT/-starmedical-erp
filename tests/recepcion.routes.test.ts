@@ -6,12 +6,12 @@ import { resolveModuleNavConfig } from "@/components/nav/moduleNavRegistry";
 import { RECEPCION_ROUTE_PATHS } from "@/lib/recepcion/routes";
 
 const REQUIRED_PATHS = [
-  "/admin/recepcion",
-  "/admin/recepcion/cola",
-  "/admin/recepcion/citas",
-  "/admin/recepcion/admisiones",
-  "/admin/recepcion/caja",
-  "/admin/recepcion/registros"
+  "/admin/reception/dashboard",
+  "/admin/reception/queues",
+  "/admin/reception/appointments",
+  "/admin/reception/check-in",
+  "/admin/reception/caja",
+  "/admin/reception/registros"
 ];
 
 test("recepcion routes: incluye rutas v1 esperadas", () => {
@@ -21,13 +21,13 @@ test("recepcion routes: incluye rutas v1 esperadas", () => {
 });
 
 test("recepcion routes: nav contextual resuelve módulo y tabs", () => {
-  const config = resolveModuleNavConfig("/admin/recepcion/cola");
+  const config = resolveModuleNavConfig("/admin/reception/queues");
 
   assert.ok(config);
   assert.equal(config?.moduleKey, "recepcion");
   assert.ok((config?.items.length || 0) >= 6);
-  assert.ok(config?.items.some((item) => item.href === "/admin/recepcion/appointments"));
-  assert.ok(config?.items.some((item) => item.href === "/admin/recepcion/queues"));
+  assert.ok(config?.items.some((item) => item.href === "/admin/reception/appointments"));
+  assert.ok(config?.items.some((item) => item.href === "/admin/reception/queues"));
 });
 
 test("recepcion routes: archivos page.tsx existen para todas las rutas", () => {
@@ -35,11 +35,24 @@ test("recepcion routes: archivos page.tsx existen para todas las rutas", () => {
 
   const files = [
     "app/admin/recepcion/page.tsx",
-    "app/admin/recepcion/cola/page.tsx",
-    "app/admin/recepcion/citas/page.tsx",
-    "app/admin/recepcion/admisiones/page.tsx",
-    "app/admin/recepcion/caja/page.tsx",
-    "app/admin/recepcion/registros/page.tsx"
+    "app/admin/recepcion/[...slug]/page.tsx"
+  ];
+
+  for (const file of files) {
+    assert.equal(existsSync(join(cwd, file)), true, `missing file: ${file}`);
+  }
+});
+
+test("reception routes: archivos canonical principales existen", () => {
+  const cwd = process.cwd();
+  const files = [
+    "app/admin/reception/page.tsx",
+    "app/admin/reception/dashboard/page.tsx",
+    "app/admin/reception/queues/page.tsx",
+    "app/admin/reception/check-in/page.tsx",
+    "app/admin/reception/appointments/page.tsx",
+    "app/admin/reception/registros/page.tsx",
+    "app/admin/reception/caja/page.tsx"
   ];
 
   for (const file of files) {

@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 import { cn } from "@/lib/utils";
 
 type LegalEntityRow = {
@@ -60,7 +61,7 @@ function describeError<T>(payload: ApiEnvelope<T> | null, fallback: string) {
 }
 
 export default function LegalEntitiesPanel() {
-  const { toasts, dismiss, showToast } = useToast();
+  const { toasts, dismiss, showToast } = useConfigToast();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<LegalEntityRow[]>([]);
@@ -69,7 +70,7 @@ export default function LegalEntitiesPanel() {
   const loadEntities = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/config/legal-entities?includeInactive=1", { cache: "no-store" });
+      const response = await configApiFetch("/api/admin/config/legal-entities?includeInactive=1", { cache: "no-store" });
       const payload = await parseEnvelope<LegalEntityRow[]>(response);
       if (!response.ok || payload.ok === false) {
         throw new Error(describeError(payload, "No se pudieron cargar patentes."));
@@ -93,7 +94,7 @@ export default function LegalEntitiesPanel() {
       const endpoint = isEdit ? `/api/admin/config/legal-entities/${form.id}` : "/api/admin/config/legal-entities";
       const method = isEdit ? "PUT" : "POST";
 
-      const response = await fetch(endpoint, {
+      const response = await configApiFetch(endpoint, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -121,7 +122,7 @@ export default function LegalEntitiesPanel() {
 
   async function toggle(row: LegalEntityRow) {
     try {
-      const response = await fetch(`/api/admin/config/legal-entities/${row.id}`, {
+      const response = await configApiFetch(`/api/admin/config/legal-entities/${row.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isActive: !row.isActive })
@@ -141,7 +142,7 @@ export default function LegalEntitiesPanel() {
   async function remove(row: LegalEntityRow) {
     if (!window.confirm(`¿Eliminar patente ${row.legalName}?`)) return;
     try {
-      const response = await fetch(`/api/admin/config/legal-entities/${row.id}`, {
+      const response = await configApiFetch(`/api/admin/config/legal-entities/${row.id}`, {
         method: "DELETE"
       });
       const payload = await parseEnvelope<{ id: string }>(response);

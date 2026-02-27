@@ -1,5 +1,6 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 
@@ -125,7 +126,7 @@ export default function CentralEmailSandboxPanel() {
     setBusy("settings", true);
     resetMessages();
     try {
-      const res = await fetch("/api/admin/config/email/sandbox/settings", {
+      const res = await configApiFetch("/api/admin/config/email/sandbox/settings", {
         headers: adminHeaders,
         cache: "no-store"
       });
@@ -153,7 +154,7 @@ export default function CentralEmailSandboxPanel() {
         limit: "50",
         start: "0"
       });
-      const res = await fetch(`/api/admin/config/email/sandbox/inbox?${query.toString()}`, {
+      const res = await configApiFetch(`/api/admin/config/email/sandbox/inbox?${query.toString()}`, {
         headers: adminHeaders,
         cache: "no-store"
       });
@@ -196,7 +197,7 @@ export default function CentralEmailSandboxPanel() {
       resetMessages();
       try {
         const query = new URLSearchParams({ tenantId: tenantId.trim() || "global" });
-        const res = await fetch(`/api/admin/config/email/sandbox/inbox/${encodeURIComponent(id)}?${query.toString()}`, {
+        const res = await configApiFetch(`/api/admin/config/email/sandbox/inbox/${encodeURIComponent(id)}?${query.toString()}`, {
           headers: adminHeaders,
           cache: "no-store"
         });
@@ -260,7 +261,7 @@ export default function CentralEmailSandboxPanel() {
         blockPhi: settings.blockPhi
       };
 
-      const res = await fetch("/api/admin/config/email/sandbox/settings", {
+      const res = await configApiFetch("/api/admin/config/email/sandbox/settings", {
         method: "PUT",
         headers: { ...adminHeaders, "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -295,7 +296,7 @@ export default function CentralEmailSandboxPanel() {
         emailType: testType.trim() || "test",
         moduleKey: testModuleKey.trim().toUpperCase() || "ADMIN"
       };
-      const res = await fetch("/api/admin/config/email/test", {
+      const res = await configApiFetch("/api/admin/config/email/test", {
         method: "POST",
         headers: { ...adminHeaders, "Content-Type": "application/json" },
         body: JSON.stringify(payload)

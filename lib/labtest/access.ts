@@ -1,6 +1,6 @@
 import { LabRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError } from "@/lib/prisma/errors.server";
 
 export async function getLabRoleForUser(userId: string, branchId?: string | null): Promise<LabRole | null> {
   // Prisma client puede no estar generado si migraciones no han corrido

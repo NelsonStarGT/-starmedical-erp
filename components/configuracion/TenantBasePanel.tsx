@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 
 type AppConfigSnapshot = {
   id: string;
@@ -68,7 +69,7 @@ function describeError<T>(payload: ApiEnvelope<T> | null, fallback: string) {
 }
 
 export default function TenantBasePanel() {
-  const { toasts, dismiss, showToast } = useToast();
+  const { toasts, dismiss, showToast } = useConfigToast();
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -78,7 +79,7 @@ export default function TenantBasePanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/config/app", { cache: "no-store" });
+      const response = await configApiFetch("/api/admin/config/app", { cache: "no-store" });
       const payload = await parseEnvelope<AppConfigSnapshot>(response);
       if (!response.ok || payload.ok === false) {
         throw new Error(describeError(payload, "No se pudo cargar empresa base."));
@@ -115,7 +116,7 @@ export default function TenantBasePanel() {
   async function save() {
     try {
       setSaving(true);
-      const response = await fetch("/api/admin/config/app", {
+      const response = await configApiFetch("/api/admin/config/app", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

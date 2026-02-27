@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthenticatedUser } from "@/lib/auth";
 import { auditLog } from "@/lib/audit";
 import { consumePortalRateLimit } from "@/lib/portal/rateLimitStore";
 import { canAccessOpsHealth, canExecuteOpsCritical } from "@/lib/ops/rbac";
@@ -53,7 +53,7 @@ function resolveTenantId(input: {
 
 export async function GET(req: NextRequest) {
   const requestId = getOrCreateRequestId(req);
-  const auth = requireAuth(req);
+  const auth = await requireAuthenticatedUser(req);
   if (auth.errorResponse) return withRequestIdHeader(auth.errorResponse, requestId);
   const user = auth.user;
 

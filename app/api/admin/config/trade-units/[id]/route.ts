@@ -71,7 +71,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
@@ -220,7 +220,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);
@@ -313,7 +313,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
 
   const resolved = await resolveParams(params);

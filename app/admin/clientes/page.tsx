@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { ClientProfileType } from "@prisma/client";
-import { ArrowRight, Building2, FileBarChart2, UserPlus } from "lucide-react";
+import { ArrowRight, Building2, ClipboardCheck, FileBarChart2, ListChecks, UserPlus, UserRoundCheck } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { getClientsHomeKpis } from "@/lib/clients/dashboard.service";
@@ -176,6 +176,27 @@ export default async function ClientesDashboardPage() {
             >
               <FileBarChart2 size={16} />
               Ir a reportes
+            </Link>
+            <Link
+              href="/admin/reception/check-in?mode=existing"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+            >
+              <UserRoundCheck size={16} />
+              Check-in
+            </Link>
+            <Link
+              href="/admin/reception/queues"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+            >
+              <ListChecks size={16} />
+              Cola
+            </Link>
+            <Link
+              href="/admin/reception/registros"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+            >
+              <ClipboardCheck size={16} />
+              Registros
             </Link>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError } from "@/lib/prisma/errors.server";
 import type {
   OpsDataResetModule,
   OpsDataResetModuleSummary,

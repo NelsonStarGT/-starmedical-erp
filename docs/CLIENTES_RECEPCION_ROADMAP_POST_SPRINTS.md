@@ -4,6 +4,9 @@ Updated: 2026-02-27
 Owner: Tech Lead (Clientes + Recepcion)
 Status: Ready for execution
 
+Nota: para ejecucion integrada Camino A + Camino B (Clientes v1 operativo + Sprint 3), usar como fuente canonica:
+[ROADMAP_INTEGRADO_CLIENTES_V1_SPRINT3.md](./ROADMAP_INTEGRADO_CLIENTES_V1_SPRINT3.md)
+
 ## 1) Objetivo
 Cerrar el ciclo operativo real entre Clientes y Recepcion despues de la estabilizacion tecnica (sprints 0-4), con entregas por fases y QA medible.
 
@@ -253,4 +256,3 @@ Nota: lista orientativa; puede ajustarse segun implementacion final.
 - Afiliaciones verificables con auditoria
 - Self check-in E2E operativo
 - Reportes y dashboard geo funcionales con datos reales
-

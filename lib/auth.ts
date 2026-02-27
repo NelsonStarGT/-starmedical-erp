@@ -23,6 +23,48 @@ export type SessionUser = {
   legalEntityId?: string | null;
 };
 
+type CookieReaderLike = {
+  get?: (name: string) => { value?: string } | undefined;
+};
+
+function toSessionUser(decoded: unknown): SessionUser | null {
+  if (!decoded || typeof decoded !== "object") return null;
+  const value = decoded as Record<string, unknown>;
+  if (typeof value.id !== "string" || typeof value.email !== "string") return null;
+  return {
+    id: value.id,
+    email: value.email,
+    name: typeof value.name === "string" ? value.name : null,
+    roles: Array.isArray(value.roles) ? value.roles.filter((item): item is string => typeof item === "string") : [],
+    permissions: Array.isArray(value.permissions)
+      ? value.permissions.filter((item): item is string => typeof item === "string")
+      : [],
+    deniedPermissions: Array.isArray(value.deniedPermissions)
+      ? value.deniedPermissions.filter((item): item is string => typeof item === "string")
+      : [],
+    branchId: typeof value.branchId === "string" ? value.branchId : null,
+    tenantId: typeof value.tenantId === "string" ? value.tenantId : null,
+    branchAccessMode: value.branchAccessMode === "LOCKED" || value.branchAccessMode === "SWITCH" ? value.branchAccessMode : null,
+    allowedBranchIds: Array.isArray(value.allowedBranchIds)
+      ? value.allowedBranchIds.filter((item): item is string => typeof item === "string")
+      : [],
+    canSwitchBranch: Boolean(value.canSwitchBranch),
+    legalEntityId: typeof value.legalEntityId === "string" ? value.legalEntityId : null
+  };
+}
+
+function resolveTokenFromCookieReader(reader: CookieReaderLike | null | undefined): string | null {
+  if (!reader || typeof reader.get !== "function") return null;
+  const raw = reader.get(AUTH_COOKIE_NAME)?.value;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
+}
+
+function resolveSessionUserFromToken(token: string | null | undefined): SessionUser | null {
+  if (!token) return null;
+  const decoded = verifyToken(token);
+  return toSessionUser(decoded);
+}
+
 function signToken(payload: SessionUser, ttlSeconds = SESSION_TTL_SECONDS) {
   return jwt.sign(payload, AUTH_SECRET, { expiresIn: ttlSeconds });
 }
@@ -36,24 +78,7 @@ function verifyToken(token: string) {
 }
 
 export function getSessionUser(req: NextRequest): SessionUser | null {
-  const token = req.cookies.get(AUTH_COOKIE_NAME)?.value;
-  if (!token) return null;
-  const decoded = verifyToken(token);
-  if (!decoded?.id || !decoded?.email) return null;
-  return {
-    id: decoded.id,
-    email: decoded.email,
-    name: decoded.name,
-    roles: decoded.roles || [],
-    permissions: decoded.permissions || [],
-    deniedPermissions: decoded.deniedPermissions || [],
-    branchId: decoded.branchId || null,
-    tenantId: decoded.tenantId || null,
-    branchAccessMode: decoded.branchAccessMode || null,
-    allowedBranchIds: Array.isArray(decoded.allowedBranchIds) ? decoded.allowedBranchIds : [],
-    canSwitchBranch: Boolean(decoded.canSwitchBranch),
-    legalEntityId: decoded.legalEntityId || null
-  };
+  return resolveSessionUserFromToken(resolveTokenFromCookieReader(req.cookies as unknown as CookieReaderLike));
 }
 
 export function requireAuth(req: NextRequest) {
@@ -135,22 +160,19 @@ export async function getSessionUserFromCookies(
 ) {
   const storeCandidate = typeof cookieStore === "function" ? (cookieStore as any)() : cookieStore || nextCookies();
   const resolvedStore = await storeCandidate;
-  const token = typeof (resolvedStore as any).get === "function" ? resolvedStore.get(AUTH_COOKIE_NAME)?.value : undefined;
-  if (!token) return null;
-  const decoded = verifyToken(token);
-  if (!decoded?.id || !decoded?.email) return null;
-  return {
-    id: decoded.id,
-    email: decoded.email,
-    name: decoded.name,
-    roles: decoded.roles || [],
-    permissions: decoded.permissions || [],
-    deniedPermissions: decoded.deniedPermissions || [],
-    branchId: decoded.branchId || null,
-    tenantId: decoded.tenantId || null,
-    branchAccessMode: decoded.branchAccessMode || null,
-    allowedBranchIds: Array.isArray(decoded.allowedBranchIds) ? decoded.allowedBranchIds : [],
-    canSwitchBranch: Boolean(decoded.canSwitchBranch),
-    legalEntityId: decoded.legalEntityId || null
-  } as SessionUser;
+  const token = resolveTokenFromCookieReader(resolvedStore as unknown as CookieReaderLike);
+  return resolveSessionUserFromToken(token);
+}
+
+export async function requireAuthenticatedUser(reqOrCookieStore?: NextRequest | Awaited<ReturnType<typeof nextCookies>> | Promise<Awaited<ReturnType<typeof nextCookies>>>) {
+  const user =
+    reqOrCookieStore && typeof reqOrCookieStore === "object" && "cookies" in reqOrCookieStore
+      ? await getSessionUserFromCookies((reqOrCookieStore as NextRequest).cookies as unknown as Awaited<ReturnType<typeof nextCookies>>)
+      : await getSessionUserFromCookies(reqOrCookieStore as Awaited<ReturnType<typeof nextCookies>> | Promise<Awaited<ReturnType<typeof nextCookies>>> | undefined);
+
+  if (!user) {
+    return { user: null, errorResponse: NextResponse.json({ error: "No autenticado" }, { status: 401 }) };
+  }
+
+  return { user, errorResponse: null };
 }

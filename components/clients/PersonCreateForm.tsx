@@ -356,9 +356,22 @@ const SERVICE_SEGMENT_OPTIONS: Array<{ value: ClientServiceSegment; label: strin
 
 const PROFILE_PHOTO_MAX_BYTES = 3 * 1024 * 1024;
 const PROFILE_PHOTO_ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
+const SESSION_EXPIRED_MESSAGE = "Sesión expirada. Inicia sesión nuevamente.";
 
 function randomId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function parseActionError(error: unknown, fallbackMessage: string) {
+  const rawMessage =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const normalizedMessage = rawMessage.trim();
+  const message = normalizedMessage.length ? normalizedMessage : fallbackMessage;
+  const unauthenticated = message.toLowerCase().includes("no autenticado");
+  return {
+    message: unauthenticated ? SESSION_EXPIRED_MESSAGE : message,
+    unauthenticated
+  };
 }
 
 export default function PersonCreateForm({
@@ -379,6 +392,7 @@ export default function PersonCreateForm({
   const [geoErrors, setGeoErrors] = useState<GeoCascadeErrors>({});
   const [birthGeoErrors, setBirthGeoErrors] = useState<GeoCascadeErrors>({});
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const [identityStatus, setIdentityStatus] = useState<IdentityStatus>({ state: "idle" });
   const [lastCheckedIdentityKey, setLastCheckedIdentityKey] = useState("");
@@ -657,9 +671,15 @@ export default function PersonCreateForm({
           });
         }
       } catch (err) {
+        const parsed = parseActionError(err, "No se pudo validar el documento.");
+        if (parsed.unauthenticated) {
+          setSessionExpired(true);
+          setError(parsed.message);
+          return;
+        }
         setIdentityStatus({
           state: "invalid",
-          message: (err as Error)?.message || "No se pudo validar el documento."
+          message: parsed.message
         });
       }
     },
@@ -671,6 +691,17 @@ export default function PersonCreateForm({
       selectedIdentityDocumentSensitive
     ]
   );
+
+  const handleAsyncError = useCallback((err: unknown, fallbackMessage: string) => {
+    const parsed = parseActionError(err, fallbackMessage);
+    if (parsed.unauthenticated) {
+      setSessionExpired(true);
+      setError(parsed.message);
+      return parsed;
+    }
+    setError(parsed.message);
+    return parsed;
+  }, []);
 
   useEffect(() => {
     if (!form.identityDocumentTypeId) {
@@ -728,14 +759,14 @@ export default function PersonCreateForm({
         );
       } catch (err) {
         if (!mounted) return;
-        setError((err as Error)?.message || "No se pudo cargar catálogos de persona.");
+        handleAsyncError(err, "No se pudo cargar catálogos de persona.");
       }
     })();
 
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [handleAsyncError]);
 
   useEffect(() => {
     let mounted = true;
@@ -764,14 +795,14 @@ export default function PersonCreateForm({
       } catch (err) {
         if (!mounted) return;
         setIdentityDocumentOptions([]);
-        setError((err as Error)?.message || "No se pudo cargar tipos de documento.");
+        handleAsyncError(err, "No se pudo cargar tipos de documento.");
       }
     })();
 
     return () => {
       mounted = false;
     };
-  }, [form.identityCountryId]);
+  }, [form.identityCountryId, handleAsyncError]);
 
   useEffect(() => {
     if (!initialOperatingDefaults?.isOperatingCountryPinned) return;
@@ -913,14 +944,14 @@ export default function PersonCreateForm({
         setAcquisitionDetails(result.items as AcquisitionDetailOption[]);
       } catch (err) {
         if (!mounted) return;
-        setError((err as Error)?.message || "No se pudo cargar detalles del canal.");
+        handleAsyncError(err, "No se pudo cargar detalles del canal.");
       }
     })();
 
     return () => {
       mounted = false;
     };
-  }, [form.acquisitionSourceId, sourceNeedsSocialDetail]);
+  }, [form.acquisitionSourceId, handleAsyncError, sourceNeedsSocialDetail]);
 
   useEffect(() => {
     if (!sourceNeedsReferral) {
@@ -1400,8 +1431,9 @@ export default function PersonCreateForm({
         const nextTab = affiliations.length ? "afiliaciones" : "resumen";
         router.push(`/admin/clientes/${result.id}?tab=${nextTab}`);
       } catch (err) {
-        const message = (err as Error)?.message || "No se pudo crear la persona.";
-        setError(message);
+        const parsed = handleAsyncError(err, "No se pudo crear la persona.");
+        if (parsed.unauthenticated) return;
+        const message = parsed.message;
 
         if (message.toLowerCase().includes("país")) {
           setGeoErrors((prev) => ({ ...prev, geoCountryId: message }));
@@ -1475,6 +1507,18 @@ export default function PersonCreateForm({
           ) : null}
         </div>
       </div>
+
+      {sessionExpired ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p>{SESSION_EXPIRED_MESSAGE}</p>
+          <Link
+            href="/login"
+            className="inline-flex h-9 items-center rounded-lg border border-amber-300 bg-white px-3 text-xs font-semibold text-amber-800 hover:border-amber-400"
+          >
+            Ir a login
+          </Link>
+        </div>
+      ) : null}
 
       {step === 1 && !canGoStep2 ? (
         <p className="text-xs text-slate-500">
@@ -2562,10 +2606,10 @@ export default function PersonCreateForm({
             <button
               type="button"
               onClick={goToNextStep}
-              disabled={isPending || isPhotoUploading || (step === 1 && (isIdentityChecking || !canGoStep2))}
+              disabled={sessionExpired || isPending || isPhotoUploading || (step === 1 && (isIdentityChecking || !canGoStep2))}
               className={cn(
                 "inline-flex items-center gap-2 rounded-lg bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#4aadf5]",
-                (isPending || isPhotoUploading || (step === 1 && (isIdentityChecking || !canGoStep2))) &&
+                (sessionExpired || isPending || isPhotoUploading || (step === 1 && (isIdentityChecking || !canGoStep2))) &&
                   "cursor-not-allowed opacity-60 hover:bg-[#4aa59c]"
               )}
             >
@@ -2575,10 +2619,11 @@ export default function PersonCreateForm({
             <button
               type="button"
               onClick={submit}
-              disabled={isPending || isIdentityChecking || isPhotoUploading}
+              disabled={sessionExpired || isPending || isIdentityChecking || isPhotoUploading}
               className={cn(
                 "inline-flex items-center gap-2 rounded-lg bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#4aadf5]",
-                (isPending || isIdentityChecking || isPhotoUploading) && "cursor-not-allowed opacity-60 hover:bg-[#4aa59c]"
+                (sessionExpired || isPending || isIdentityChecking || isPhotoUploading) &&
+                  "cursor-not-allowed opacity-60 hover:bg-[#4aa59c]"
               )}
             >
               <UserPlus size={16} />

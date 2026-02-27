@@ -12,7 +12,9 @@ import {
   hasCapability
 } from "@/lib/reception/permissions";
 
-const OPERATOR_ROLES = new Set(["RECEPTION", "RECEPTION_OPERATOR", "SECRETARY", "NURSE"]);
+const ADMIN_ROLES = new Set(["SUPER_ADMIN", "ADMIN", "RECEPTION_ADMIN", "TENANT_ADMIN"]);
+const SUPERVISOR_ROLES = new Set(["SUPERVISOR", "RECEPTION_SUPERVISOR", "OPS"]);
+const OPERATOR_ROLES = new Set(["RECEPTION", "RECEPTIONIST", "RECEPTION_OPERATOR", "SECRETARY", "NURSE", "CASHIER"]);
 
 const ROLE_RANK: Record<ReceptionRole, number> = {
   RECEPTION_OPERATOR: 1,
@@ -22,10 +24,10 @@ const ROLE_RANK: Record<ReceptionRole, number> = {
 
 export function resolveReceptionRole(roles: string[] = []): ReceptionRole | null {
   const normalized = roles.map(normalizeRoleName);
-  if (normalized.includes("SUPER_ADMIN") || normalized.includes("ADMIN") || normalized.includes("RECEPTION_ADMIN")) {
+  if (normalized.some((role) => ADMIN_ROLES.has(role))) {
     return "RECEPTION_ADMIN";
   }
-  if (normalized.includes("SUPERVISOR") || normalized.includes("RECEPTION_SUPERVISOR")) {
+  if (normalized.some((role) => SUPERVISOR_ROLES.has(role))) {
     return "RECEPTION_SUPERVISOR";
   }
   if (normalized.some((role) => OPERATOR_ROLES.has(role))) return "RECEPTION_OPERATOR";

@@ -32,7 +32,7 @@ function parseIntSafe(value: string | null, fallback: number, min: number, max: 
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCapability(req, "CONFIG_PROCESSING_VIEW");
+  const auth = await requireConfigCapability(req, "CONFIG_PROCESSING_VIEW");
   if (auth.response) return auth.response;
 
   try {

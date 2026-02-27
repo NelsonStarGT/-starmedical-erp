@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 
 const warnedPhotoColumnContexts = new Set<string>();
 
@@ -97,9 +97,15 @@ export async function safeSupportsClientProfilePhotoColumns(context = "clients.c
     });
     return true;
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable(`${context}.clientProfile.findFirst`, error);
-      return false;
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: `${context}.clientProfile.findFirst`,
+      requirement: "OPTIONAL",
+      error,
+      fallback: false
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     if (isClientProfilePhotoColumnsUnavailableError(error)) {
       warnDevPhotoColumnsUnavailable(`${context}.clientProfile.findFirst`, error);

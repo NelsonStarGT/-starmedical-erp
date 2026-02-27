@@ -1,10 +1,11 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ProcessingServiceAuthMode } from "@prisma/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 
 type ProcessingServiceConfig = {
   tenantId: string;
@@ -75,7 +76,7 @@ function describeError<T>(payload: ApiEnvelope<T> | null, fallback: string) {
 }
 
 export default function ServicesProcessingPanel() {
-  const { toasts, dismiss, showToast } = useToast();
+  const { toasts, dismiss, showToast } = useConfigToast();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -98,8 +99,8 @@ export default function ServicesProcessingPanel() {
     setLoading(true);
     try {
       const [processingRes, sandboxRes] = await Promise.all([
-        fetch("/api/admin/config/services/processing", { cache: "no-store" }),
-        fetch("/api/admin/config/email/sandbox/settings", { cache: "no-store" })
+        configApiFetch("/api/admin/config/services/processing", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/email/sandbox/settings", { cache: "no-store" })
       ]);
 
       const [processingJson, sandboxJson] = await Promise.all([
@@ -160,7 +161,7 @@ export default function ServicesProcessingPanel() {
         patch.hmacSecretRef = hmacRefInput.trim();
       }
 
-      const response = await fetch("/api/admin/config/services/processing", {
+      const response = await configApiFetch("/api/admin/config/services/processing", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch)
@@ -186,7 +187,7 @@ export default function ServicesProcessingPanel() {
   async function healthCheck() {
     try {
       setChecking(true);
-      const response = await fetch("/api/admin/config/services/processing/health", {
+      const response = await configApiFetch("/api/admin/config/services/processing/health", {
         method: "POST"
       });
       const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;

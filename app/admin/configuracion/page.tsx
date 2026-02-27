@@ -118,6 +118,11 @@ const quickActions: Array<{ href: string; label: string; description: string }> 
     href: "/admin/configuracion/procesamiento",
     label: "Auditar procesamiento",
     description: "Consulta jobs, artefactos y límites por tenant."
+  },
+  {
+    href: "/admin/clientes/configuracion?section=diagnostico",
+    label: "ERROR SYSTEMS (Clientes)",
+    description: "Abre observabilidad operativa de Clientes/Recepción sin salir del flujo de configuración."
   }
 ];
 
@@ -188,7 +193,7 @@ export default function ConfiguracionPage() {
   return (
     <div className="space-y-4 text-[#0f172a]" style={{ fontFamily: '"Inter", "Nunito Sans", var(--font-sans)' }}>
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2e75ba]">Configuración central</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2e75ba]">Configuración Central</p>
         <h1 className="text-xl font-semibold" style={{ fontFamily: '"Montserrat", "Poppins", var(--font-sans)' }}>
           Inicio (Checklist de configuración)
         </h1>

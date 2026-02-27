@@ -4,7 +4,7 @@ import Image from "next/image";
 import { ClientCatalogType, ClientProfileType, Prisma } from "@prisma/client";
 import { Building2, CalendarClock, Landmark, MapPin, Shield, ShieldCheck, UserRound } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { CLIENT_TYPE_LABELS } from "@/lib/clients/constants";
 import { formatDateForClients } from "@/lib/clients/dateFormat";
@@ -36,6 +36,7 @@ import { ClientArchiveAction } from "@/components/clients/ClientArchiveAction";
 import ClientIdentityCard from "@/components/clients/ClientIdentityCard";
 import { tenantIdFromUser } from "@/lib/tenant";
 import { isCompanySsoDocumentType, mapCompanyDocumentTypeLabel } from "@/lib/clients/companyDocumentTypes";
+import { normalizeAffiliationVerifyMonths, resolveAffiliationEffectiveStatus } from "@/lib/clients/affiliations";
 
 type SearchParams = { tab?: string | string[] };
 
@@ -51,6 +52,8 @@ const TABS: Array<{ key: string; label: string; show?: (type: ClientProfileType)
   { key: "notas", label: "Notas / Historial" },
   { key: "actividad", label: "Actividad" }
 ];
+
+const AFFILIATION_VERIFY_MONTHS = normalizeAffiliationVerifyMonths(process.env.CLIENT_AFFILIATION_VERIFY_MONTHS);
 
 type RequiredDocRuleRow = Prisma.ClientRequiredDocumentRuleGetPayload<{
   select: {
@@ -151,23 +154,6 @@ function firstValue(value?: string | string[]) {
   return value;
 }
 
-function isPrismaSchemaMismatchError(error: unknown): boolean {
-  if (!error) return false;
-
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = (error as { code?: unknown }).code;
-    if (code === "P2022") return true;
-  }
-
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return (
-    message.includes("unknown field") ||
-    message.includes("unknown argument") ||
-    message.includes("unknown arg") ||
-    (message.includes("column") && message.includes("does not exist"))
-  );
-}
-
 function warnDevClientsCompat(context: string, error: unknown) {
   if (process.env.NODE_ENV === "production") return;
   const message = error instanceof Error ? error.message : String(error);
@@ -190,13 +176,18 @@ async function safeSupportsClientContactExtendedColumns(context = "clients.detai
     });
     return true;
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable(`${context}.clientContact.findFirst`, error);
-      return false;
-    }
-    if (isPrismaSchemaMismatchError(error)) {
-      warnDevClientsCompat(`${context}.clientContact.findFirst`, error);
-      return false;
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: `${context}.clientContact.findFirst`,
+      requirement: "OPTIONAL",
+      error,
+      fallback: false
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      if (resolution.issue === "legacy_schema") {
+        warnDevClientsCompat(`${context}.clientContact.findFirst`, error);
+      }
+      return resolution.value;
     }
     throw error;
   }
@@ -214,13 +205,18 @@ async function safeSupportsClientNoteExtendedColumns(context = "clients.detail.n
     });
     return true;
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable(`${context}.clientNote.findFirst`, error);
-      return false;
-    }
-    if (isPrismaSchemaMismatchError(error)) {
-      warnDevClientsCompat(`${context}.clientNote.findFirst`, error);
-      return false;
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: `${context}.clientNote.findFirst`,
+      requirement: "OPTIONAL",
+      error,
+      fallback: false
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      if (resolution.issue === "legacy_schema") {
+        warnDevClientsCompat(`${context}.clientNote.findFirst`, error);
+      }
+      return resolution.value;
     }
     throw error;
   }
@@ -236,9 +232,15 @@ async function safeRequiredDocRulesFindMany(args: Prisma.ClientRequiredDocumentR
   try {
     return await delegate.findMany(args);
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("clients.detail.requiredDocs.rules.findMany", error);
-      return [];
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: "clients.detail.requiredDocs.rules.findMany",
+      requirement: "OPTIONAL",
+      error,
+      fallback: [] as RequiredDocRuleRow[]
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }
@@ -551,9 +553,19 @@ export default async function ClientePortalPage({
         }))
       };
     } catch (error) {
-      if (isPrismaMissingTableError(error)) {
-        warnDevMissingTable("clients.detail.referrals", error);
-        return { source: "compat" as const, referredBy: null, generated: [] as Array<{ id: string; createdAt: Date; clientId: string; label: string }> };
+      const resolution = resolvePrismaSchemaFallback({
+        domain: "clients",
+        context: "clients.detail.referrals",
+        requirement: "OPTIONAL",
+        error,
+        fallback: {
+          source: "compat" as const,
+          referredBy: null,
+          generated: [] as Array<{ id: string; createdAt: Date; clientId: string; label: string }>
+        }
+      });
+      if (resolution.handled && resolution.requirement === "OPTIONAL") {
+        return resolution.value;
       }
       throw error;
     }
@@ -823,6 +835,12 @@ export default async function ClientePortalPage({
 
             <div className="flex flex-wrap justify-end gap-2">
               <Link
+                href={`/admin/reception/check-in?mode=existing&clientId=${client.id}`}
+                className="inline-flex rounded-full bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#4aadf5]"
+              >
+                Iniciar check-in
+              </Link>
+              <Link
                 href={tabHref(client.id, "resumen")}
                 className="inline-flex rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
               >
@@ -1012,13 +1030,15 @@ export default async function ClientePortalPage({
         <ClientAffiliationsPanel
           clientId={client.id}
           affiliations={(await prisma.clientAffiliation.findMany({
-            where: { personClientId: clientId, deletedAt: null },
+            where: { tenantId, personClientId: clientId, deletedAt: null },
             orderBy: [{ isPrimaryPayer: "desc" }, { status: "asc" }, { createdAt: "desc" }],
             select: {
               id: true,
               entityType: true,
               role: true,
+              notes: true,
               status: true,
+              lastVerifiedAt: true,
               payerType: true,
               payerClientId: true,
               isPrimaryPayer: true,
@@ -1057,7 +1077,14 @@ export default async function ClientePortalPage({
             entityType: aff.entityType,
             entityLabel: getEntityLabel(aff.entity),
             role: aff.role,
+            notes: aff.notes,
             status: aff.status,
+            effectiveStatus: resolveAffiliationEffectiveStatus({
+              status: aff.status,
+              lastVerifiedAt: aff.lastVerifiedAt,
+              verifyAfterMonths: AFFILIATION_VERIFY_MONTHS
+            }),
+            lastVerifiedAt: aff.lastVerifiedAt ? aff.lastVerifiedAt.toISOString() : null,
             payerType: aff.payerType,
             payerClientId: aff.payerClientId,
             payerLabel: aff.payerClient ? getEntityLabel(aff.payerClient) : null,

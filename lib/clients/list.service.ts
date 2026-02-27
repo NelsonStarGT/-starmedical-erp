@@ -1,6 +1,6 @@
 import { ClientDocumentApprovalStatus, ClientProfileType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 import { safeGetClientRulesConfig } from "@/lib/clients/rulesConfig";
 import {
   buildIncompleteWhere,
@@ -191,9 +191,15 @@ async function safeRequiredDocRulesFindMany(args: Prisma.ClientRequiredDocumentR
   try {
     return await delegate.findMany(args);
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("clients.requiredDocs.rules.findMany", error);
-      return [];
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: "clients.requiredDocs.rules.findMany",
+      requirement: "OPTIONAL",
+      error,
+      fallback: [] as RequiredDocRuleRow[]
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
     throw error;
   }

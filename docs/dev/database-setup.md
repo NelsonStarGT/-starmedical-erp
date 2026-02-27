@@ -62,6 +62,5 @@ Para Prisma CLI:
 ## Checklist antes de trabajar Diagnóstico/Lab
 
 - `npm run db:check` (schema + migrate status OK)
-- `/admin/recepcion` carga sin crash
+- `/admin/reception/dashboard` carga sin crash
 - Tablas críticas existen: `Visit`, `Queue`, `QueueItem`, `VisitEvent`, `ServiceRequest`
-

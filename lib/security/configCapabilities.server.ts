@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, type SessionUser } from "@/lib/auth";
+import { requireAuthenticatedUser, type SessionUser } from "@/lib/auth";
 import { hasConfigCapability, type ConfigCapability } from "@/lib/security/configCapabilities";
 
-export function requireConfigCapability(
+export async function requireConfigCapability(
   req: NextRequest,
   capability: ConfigCapability
-): {
+): Promise<{
   user: SessionUser | null;
   response: NextResponse | null;
-} {
-  const auth = requireAuth(req);
+}> {
+  const auth = await requireAuthenticatedUser(req);
   if (auth.errorResponse) {
     return { user: null, response: auth.errorResponse };
   }

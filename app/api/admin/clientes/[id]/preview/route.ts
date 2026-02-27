@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ClientDocumentApprovalStatus, ClientProfileType, Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { isAdmin } from "@/lib/rbac";
 import { CLIENT_TYPE_LABELS } from "@/lib/clients/constants";
 import { safeGetClientRulesConfig } from "@/lib/clients/rulesConfig";
@@ -114,7 +114,7 @@ async function safeRequiredDocRulesFindMany(args: Prisma.ClientRequiredDocumentR
     return await delegate.findMany(args);
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("clients.preview.requiredDocs.rules.findMany", error);
+      logPrismaSchemaIssue("clients.preview.requiredDocs.rules.findMany", error);
       return [];
     }
     throw error;

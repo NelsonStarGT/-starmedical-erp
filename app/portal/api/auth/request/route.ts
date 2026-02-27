@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { sendMail } from "@/lib/email/mailer";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { PORTAL_RESEND_COOLDOWN_SECONDS } from "@/lib/portal/constants";
 import { resolvePortalPersonByIdentity } from "@/lib/portal/identity";
 import { safeCreatePortalAuditLog } from "@/lib/portal/audit";
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.auth.request.challenge.create", error);
+      logPrismaSchemaIssue("portal.auth.request.challenge.create", error);
       return responsePortalUnavailable();
     }
     throw error;

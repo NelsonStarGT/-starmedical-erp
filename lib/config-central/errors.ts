@@ -1,21 +1,10 @@
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import {
+  isPrismaMissingTableError,
+  isPrismaSchemaMismatchError,
+  logPrismaSchemaIssue
+} from "@/lib/prisma/errors.server";
 
-export function isPrismaSchemaMismatchError(error: unknown): boolean {
-  if (!error) return false;
-
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = (error as { code?: unknown }).code;
-    if (code === "P2022") return true;
-  }
-
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return (
-    message.includes("unknown field") ||
-    message.includes("unknown argument") ||
-    message.includes("unknown arg") ||
-    (message.includes("column") && message.includes("does not exist"))
-  );
-}
+export { isPrismaSchemaMismatchError };
 
 export function isCentralConfigCompatError(error: unknown): boolean {
   return isPrismaMissingTableError(error) || isPrismaSchemaMismatchError(error);
@@ -23,7 +12,7 @@ export function isCentralConfigCompatError(error: unknown): boolean {
 
 export function warnDevCentralCompat(context: string, error: unknown) {
   if (isPrismaMissingTableError(error)) {
-    warnDevMissingTable(context, error);
+    logPrismaSchemaIssue(context, error, { domain: "global", issue: "missing_table", dedupe: false });
     return;
   }
 

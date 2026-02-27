@@ -19,7 +19,7 @@ function dbNotReadyResponse() {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BRANCH_READ");
   if (auth.response) return auth.response;
 
   try {
@@ -58,7 +58,7 @@ function normalizeOptionalString(value: unknown) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
   if (auth.response) return auth.response;
 
   try {

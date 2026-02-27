@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import {
   AppointmentStatus,
+  ClientAffiliationStatus,
   ClientCatalogType,
   ClientSelfRegistrationStatus,
   ClientProfileType,
@@ -77,6 +78,11 @@ import {
 import { INSTITUTIONAL_REGIMES } from "@/lib/catalogs/institutionalRegimes";
 import { INSTITUTION_TYPES } from "@/lib/catalogs/institutionTypes";
 import { tenantIdFromUser } from "@/lib/tenant";
+import { reserveNextClientCodeTx } from "@/lib/clients/clientCode";
+import {
+  normalizeAffiliationVerifyMonths,
+  resolveAffiliationEffectiveStatus
+} from "@/lib/clients/affiliations";
 import {
   assertCapabilities,
   assertCapability,
@@ -329,11 +335,26 @@ type QueueBoardArea = {
 
 type PatientSearchResult = {
   id: string;
+  clientCode: string | null;
   firstName: string | null;
   lastName: string | null;
   phone: string | null;
+  email: string | null;
   dpi: string | null;
   nit: string | null;
+  pendingAffiliationsCount: number;
+};
+
+type ReceptionPendingAffiliation = {
+  id: string;
+  entityClientId: string;
+  entityType: ClientProfileType;
+  entityLabel: string;
+  status: ClientAffiliationStatus;
+  effectiveStatus: ClientAffiliationStatus;
+  lastVerifiedAt: string | null;
+  notes: string | null;
+  isPrimaryPayer: boolean;
 };
 
 type PatientCreateInput = {
@@ -349,6 +370,7 @@ type PatientCreateInput = {
 const AREA_SET = new Set(Object.values(OperationalArea));
 const PRIORITY_SET = new Set(Object.values(VisitPriority));
 const STATUS_SET = new Set(Object.values(VisitStatus));
+const AFFILIATION_VERIFY_MONTHS = normalizeAffiliationVerifyMonths(process.env.CLIENT_AFFILIATION_VERIFY_MONTHS);
 
 async function requireUser(): Promise<SessionUser> {
   const user = await getSessionUserFromCookies(cookies());
@@ -413,16 +435,16 @@ function normalizeFilters(filters?: WorklistFilters): WorklistFilters | undefine
 
 function revalidateReception(paths?: string[]) {
   const targets = paths && paths.length ? paths : [
-    "/admin/recepcion/dashboard",
-    "/admin/recepcion",
-    "/admin/recepcion/companies",
-    "/admin/recepcion/worklist",
-    "/admin/recepcion/queues",
-    "/admin/recepcion/check-in",
-    "/admin/recepcion/appointments",
-    "/admin/recepcion/solicitudes-portal",
-    "/admin/recepcion/registros",
-    "/admin/recepcion/settings"
+    "/admin/reception/dashboard",
+    "/admin/reception",
+    "/admin/reception/companies",
+    "/admin/reception/worklist",
+    "/admin/reception/queues",
+    "/admin/reception/check-in",
+    "/admin/reception/appointments",
+    "/admin/reception/solicitudes-portal",
+    "/admin/reception/registros",
+    "/admin/reception/settings"
   ];
   targets.forEach((path) => revalidatePath(path));
 }
@@ -448,6 +470,7 @@ async function requireQueueItemInActiveSite(input: { queueItemId: string; siteId
 export async function actionCreateAdmission(input: AdmissionInput) {
   const user = await requireUser();
   assertCapabilities(user, ["VISIT_CREATE", "VISIT_CHECKIN", "QUEUE_ENQUEUE"]);
+  const tenantId = tenantIdFromUser(user);
 
   const mode = input.mode === "existing"
     ? "existing"
@@ -496,7 +519,7 @@ export async function actionCreateAdmission(input: AdmissionInput) {
 
       // DPI es obligatorio: bloquea duplicados con DPI
       const existingByDpi = await tx.clientProfile.findFirst({
-        where: { dpi },
+        where: { tenantId, deletedAt: null, dpi },
         select: { id: true }
       });
       if (existingByDpi) {
@@ -506,7 +529,7 @@ export async function actionCreateAdmission(input: AdmissionInput) {
       // NIT opcional: si viene, también cuidamos duplicados por NIT
       if (nit) {
         const existingByNit = await tx.clientProfile.findFirst({
-          where: { nit },
+          where: { tenantId, deletedAt: null, nit },
           select: { id: true }
         });
         if (existingByNit) {
@@ -514,9 +537,16 @@ export async function actionCreateAdmission(input: AdmissionInput) {
         }
       }
 
+      const reservedClientCode = await reserveNextClientCodeTx(tx, {
+        tenantId,
+        clientType: ClientProfileType.PERSON
+      });
+
       const created = await tx.clientProfile.create({
         data: {
+          tenantId,
           type: ClientProfileType.PERSON,
+          clientCode: reservedClientCode.code,
           firstName,
           lastName,
           phone,
@@ -532,8 +562,13 @@ export async function actionCreateAdmission(input: AdmissionInput) {
     } else {
       const selectedId = input.patientId?.trim();
       if (!selectedId) throw new Error("Paciente requerido para admisión existente.");
-      const exists = await tx.clientProfile.findUnique({
-        where: { id: selectedId },
+      const exists = await tx.clientProfile.findFirst({
+        where: {
+          id: selectedId,
+          tenantId,
+          deletedAt: null,
+          type: ClientProfileType.PERSON
+        },
         select: { id: true }
       });
       if (!exists) throw new Error("Paciente no encontrado.");
@@ -1174,7 +1209,7 @@ export async function actionMarkAppointmentArrival(input: MarkAppointmentArrival
     };
   });
 
-  revalidateReception(["/admin/recepcion"]);
+  revalidateReception(["/admin/reception"]);
   return result;
 }
 
@@ -1313,6 +1348,19 @@ function formatClientDisplayLabel(input: {
   }
   const businessName = input.companyName?.trim() || input.tradeName?.trim() || "Cliente";
   return `${codeTag}${businessName}`;
+}
+
+function formatAffiliationEntityLabel(input: {
+  type: ClientProfileType;
+  clientCode: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  secondLastName: string | null;
+  companyName: string | null;
+  tradeName: string | null;
+}) {
+  return formatClientDisplayLabel(input);
 }
 
 function normalizeClientSelfRegistrationStatusFilter(value?: string | null) {
@@ -1650,7 +1698,7 @@ export async function actionCreateReceptionAppointment(input: CreateReceptionApp
   });
 
   // Revalidate agenda views in Recepción.
-  revalidateReception(["/admin/recepcion", "/admin/recepcion/appointments"]);
+  revalidateReception(["/admin/reception", "/admin/reception/appointments"]);
 
   const shouldArrive = Boolean(input.arrivedToday);
   if (!shouldArrive) {
@@ -1875,7 +1923,7 @@ export async function actionConfirmPortalAppointmentRequest(input: ConfirmPortal
     }
   });
 
-  revalidateReception(["/admin/recepcion/solicitudes-portal", "/admin/recepcion/appointments", "/admin/recepcion"]);
+  revalidateReception(["/admin/reception/solicitudes-portal", "/admin/reception/appointments", "/admin/reception"]);
   revalidatePath("/portal/app");
   revalidatePath("/portal/app/appointments");
   return {
@@ -1959,7 +2007,7 @@ export async function actionRejectPortalAppointmentRequest(input: RejectPortalAp
     }
   });
 
-  revalidateReception(["/admin/recepcion/solicitudes-portal", "/admin/recepcion/appointments", "/admin/recepcion"]);
+  revalidateReception(["/admin/reception/solicitudes-portal", "/admin/reception/appointments", "/admin/reception"]);
   revalidatePath("/portal/app");
   revalidatePath("/portal/app/appointments");
   return {
@@ -2087,7 +2135,7 @@ export async function actionSaveReceptionAppointmentVitals(input: SaveReceptionA
     }
   });
 
-  revalidateReception(["/admin/recepcion/appointments", "/admin/recepcion"]);
+  revalidateReception(["/admin/reception/appointments", "/admin/reception"]);
   return saved;
 }
 
@@ -2156,44 +2204,85 @@ export async function actionSaveReceptionVisitVitals(input: SaveReceptionVisitVi
     }
   });
 
-  revalidateReception(["/admin/recepcion", "/admin/recepcion/worklist", "/admin/recepcion/companies"]);
+  revalidateReception(["/admin/reception", "/admin/reception/worklist", "/admin/reception/companies"]);
   return saved;
 }
 
 export async function actionSearchPatients(query: string): Promise<PatientSearchResult[]> {
   const user = await requireUser();
   assertCapability(user, "VISIT_CREATE");
+  const tenantId = tenantIdFromUser(user);
   if (!query || query.trim().length < 2) return [];
 
   const q = query.trim();
   const results = await prisma.clientProfile.findMany({
     where: {
+      tenantId,
+      deletedAt: null,
+      type: ClientProfileType.PERSON,
       OR: [
+        { id: q },
+        { clientCode: { contains: q, mode: "insensitive" } },
         { firstName: { contains: q, mode: "insensitive" } },
         { lastName: { contains: q, mode: "insensitive" } },
         { phone: { contains: q } },
+        { email: { contains: q, mode: "insensitive" } },
         { dpi: { contains: q } },
-        { nit: { contains: q } }
+        { nit: { contains: q } },
+        { clientEmails: { some: { isActive: true, valueNormalized: { contains: q.toLowerCase() } } } }
       ]
     },
     orderBy: { updatedAt: "desc" },
     take: 12,
     select: {
       id: true,
+      clientCode: true,
       firstName: true,
       lastName: true,
       phone: true,
+      email: true,
       dpi: true,
-      nit: true
+      nit: true,
+      affiliationsAsPerson: {
+        where: {
+          deletedAt: null,
+          status: {
+            in: [ClientAffiliationStatus.ACTIVE, ClientAffiliationStatus.PENDING_VERIFY]
+          }
+        },
+        select: {
+          id: true,
+          status: true,
+          lastVerifiedAt: true
+        }
+      }
     }
   });
 
-  return results;
+  return results.map((row) => ({
+    id: row.id,
+    clientCode: row.clientCode,
+    firstName: row.firstName,
+    lastName: row.lastName,
+    phone: row.phone,
+    email: row.email,
+    dpi: row.dpi,
+    nit: row.nit,
+    pendingAffiliationsCount: row.affiliationsAsPerson.filter(
+      (item) =>
+        resolveAffiliationEffectiveStatus({
+          status: item.status,
+          lastVerifiedAt: item.lastVerifiedAt,
+          verifyAfterMonths: AFFILIATION_VERIFY_MONTHS
+        }) === ClientAffiliationStatus.PENDING_VERIFY
+    ).length
+  }));
 }
 
 export async function actionCreatePatient(input: PatientCreateInput): Promise<PatientSearchResult> {
   const user = await requireUser();
   assertCapability(user, "VISIT_CREATE");
+  const tenantId = tenantIdFromUser(user);
   const firstName = input.firstName?.trim();
   if (!firstName) throw new Error("Nombre requerido.");
 
@@ -2218,7 +2307,7 @@ export async function actionCreatePatient(input: PatientCreateInput): Promise<Pa
   if (nit) uniqueOr.push({ nit });
   if (uniqueOr.length) {
     const existing = await prisma.clientProfile.findFirst({
-      where: { OR: uniqueOr },
+      where: { tenantId, deletedAt: null, OR: uniqueOr },
       select: { id: true }
     });
     if (existing) {
@@ -2226,29 +2315,229 @@ export async function actionCreatePatient(input: PatientCreateInput): Promise<Pa
     }
   }
 
-  const saved = await prisma.clientProfile.create({
-    data: {
-      type: ClientProfileType.PERSON,
-      firstName,
-      lastName,
-      phone,
-      sex,
-      birthDate,
-      dpi,
-      nit
+  const saved = await prisma.$transaction(async (tx) => {
+    const reservedClientCode = await reserveNextClientCodeTx(tx, {
+      tenantId,
+      clientType: ClientProfileType.PERSON
+    });
+
+    return tx.clientProfile.create({
+      data: {
+        tenantId,
+        type: ClientProfileType.PERSON,
+        clientCode: reservedClientCode.code,
+        firstName,
+        lastName,
+        phone,
+        sex,
+        birthDate,
+        dpi,
+        nit
+      },
+      select: {
+        id: true,
+        clientCode: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        email: true,
+        dpi: true,
+        nit: true
+      }
+    });
+  });
+
+  revalidateReception(["/admin/reception/check-in"]);
+  return {
+    ...saved,
+    pendingAffiliationsCount: 0
+  };
+}
+
+export async function actionListPendingAffiliations(patientId: string): Promise<ReceptionPendingAffiliation[]> {
+  const user = await requireUser();
+  assertCapability(user, "VISIT_CHECKIN");
+  const tenantId = tenantIdFromUser(user);
+  const normalizedPatientId = patientId.trim();
+  if (!normalizedPatientId) return [];
+
+  const rows = await prisma.clientAffiliation.findMany({
+    where: {
+      tenantId,
+      personClientId: normalizedPatientId,
+      deletedAt: null,
+      status: {
+        in: [ClientAffiliationStatus.ACTIVE, ClientAffiliationStatus.PENDING_VERIFY]
+      }
     },
+    orderBy: [{ isPrimaryPayer: "desc" }, { updatedAt: "desc" }],
     select: {
       id: true,
-      firstName: true,
-      lastName: true,
-      phone: true,
-      dpi: true,
-      nit: true
+      entityClientId: true,
+      entityType: true,
+      status: true,
+      lastVerifiedAt: true,
+      notes: true,
+      isPrimaryPayer: true,
+      entity: {
+        select: {
+          type: true,
+          clientCode: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          secondLastName: true,
+          companyName: true,
+          tradeName: true
+        }
+      }
     }
   });
 
-  revalidateReception(["/admin/recepcion/check-in"]);
-  return saved;
+  return rows
+    .map((row) => {
+      const effectiveStatus = resolveAffiliationEffectiveStatus({
+        status: row.status,
+        lastVerifiedAt: row.lastVerifiedAt,
+        verifyAfterMonths: AFFILIATION_VERIFY_MONTHS
+      });
+
+      return {
+        id: row.id,
+        entityClientId: row.entityClientId,
+        entityType: row.entityType,
+        entityLabel: formatAffiliationEntityLabel({
+          type: row.entity.type,
+          clientCode: row.entity.clientCode,
+          firstName: row.entity.firstName,
+          middleName: row.entity.middleName,
+          lastName: row.entity.lastName,
+          secondLastName: row.entity.secondLastName,
+          companyName: row.entity.companyName,
+          tradeName: row.entity.tradeName
+        }),
+        status: row.status,
+        effectiveStatus,
+        lastVerifiedAt: row.lastVerifiedAt ? row.lastVerifiedAt.toISOString() : null,
+        notes: row.notes,
+        isPrimaryPayer: row.isPrimaryPayer
+      } satisfies ReceptionPendingAffiliation;
+    })
+    .filter((row) => row.effectiveStatus === ClientAffiliationStatus.PENDING_VERIFY);
+}
+
+export async function actionConfirmReceptionAffiliation(input: {
+  patientId: string;
+  affiliationId: string;
+  note?: string;
+}) {
+  const user = await requireUser();
+  assertCapability(user, "VISIT_CHECKIN");
+  const tenantId = tenantIdFromUser(user);
+  const patientId = input.patientId.trim();
+  const affiliationId = input.affiliationId.trim();
+  if (!patientId || !affiliationId) throw new Error("Afiliación inválida.");
+
+  const note = input.note?.trim() || "Confirmada en check-in";
+  const verifiedAt = new Date();
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const existing = await tx.clientAffiliation.findFirst({
+      where: {
+        id: affiliationId,
+        tenantId,
+        personClientId: patientId,
+        deletedAt: null
+      },
+      select: {
+        id: true,
+        notes: true
+      }
+    });
+    if (!existing) throw new Error("Afiliación no encontrada.");
+
+    await tx.clientAffiliation.update({
+      where: { id: existing.id },
+      data: {
+        status: ClientAffiliationStatus.ACTIVE,
+        lastVerifiedAt: verifiedAt,
+        notes: appendReceptionNote(existing.notes, [note])
+      }
+    });
+
+    return existing.id;
+  });
+
+  await auditLog({
+    action: "RECEPTION_AFFILIATION_CONFIRMED",
+    entityType: "ClientAffiliation",
+    entityId: updated,
+    user,
+    metadata: {
+      patientId,
+      verifiedAt: verifiedAt.toISOString()
+    }
+  });
+
+  revalidateReception(["/admin/reception/check-in"]);
+  revalidatePath(`/admin/clientes/${patientId}`);
+  return { ok: true, verifiedAt: verifiedAt.toISOString() };
+}
+
+export async function actionDeactivateReceptionAffiliation(input: {
+  patientId: string;
+  affiliationId: string;
+  note?: string;
+}) {
+  const user = await requireUser();
+  assertCapability(user, "VISIT_CHECKIN");
+  const tenantId = tenantIdFromUser(user);
+  const patientId = input.patientId.trim();
+  const affiliationId = input.affiliationId.trim();
+  if (!patientId || !affiliationId) throw new Error("Afiliación inválida.");
+
+  const note = input.note?.trim() || "Desvinculada en check-in";
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const existing = await tx.clientAffiliation.findFirst({
+      where: {
+        id: affiliationId,
+        tenantId,
+        personClientId: patientId,
+        deletedAt: null
+      },
+      select: {
+        id: true,
+        notes: true
+      }
+    });
+    if (!existing) throw new Error("Afiliación no encontrada.");
+
+    await tx.clientAffiliation.update({
+      where: { id: existing.id },
+      data: {
+        status: ClientAffiliationStatus.INACTIVE,
+        isPrimaryPayer: false,
+        notes: appendReceptionNote(existing.notes, [note])
+      }
+    });
+
+    return existing.id;
+  });
+
+  await auditLog({
+    action: "RECEPTION_AFFILIATION_DEACTIVATED",
+    entityType: "ClientAffiliation",
+    entityId: updated,
+    user,
+    metadata: {
+      patientId
+    }
+  });
+
+  revalidateReception(["/admin/reception/check-in"]);
+  revalidatePath(`/admin/clientes/${patientId}`);
+  return { ok: true };
 }
 
 export async function actionGetReceptionSlaSettings(siteId?: string) {
@@ -2287,7 +2576,7 @@ export async function actionSaveReceptionSlaSimple(input: ReceptionSlaSimpleInpu
     }
   });
 
-  revalidateReception(["/admin/recepcion/settings", "/admin/recepcion", "/admin/recepcion/dashboard"]);
+  revalidateReception(["/admin/reception/settings", "/admin/reception", "/admin/reception/dashboard"]);
   return result.after;
 }
 
@@ -2322,7 +2611,7 @@ export async function actionSaveReceptionSlaAdvanced(input: ReceptionSlaAdvanced
     }
   });
 
-  revalidateReception(["/admin/recepcion/settings", "/admin/recepcion", "/admin/recepcion/dashboard"]);
+  revalidateReception(["/admin/reception/settings", "/admin/reception", "/admin/reception/dashboard"]);
   return result.after;
 }
 
@@ -2350,7 +2639,7 @@ export async function actionRestoreReceptionSlaRecommended(siteId?: string) {
     }
   });
 
-  revalidateReception(["/admin/recepcion/settings", "/admin/recepcion", "/admin/recepcion/dashboard"]);
+  revalidateReception(["/admin/reception/settings", "/admin/reception", "/admin/reception/dashboard"]);
   return result.after;
 }
 
@@ -2422,7 +2711,7 @@ export async function actionSetReceptionActiveBranch(branchId: string) {
     httpOnly: false,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    path: "/admin/recepcion",
+    path: "/admin/reception",
     maxAge: 60 * 60 * 24 * 30
   });
 
@@ -2500,7 +2789,7 @@ export async function actionCreateClientRegistrationInvite(input: {
     }
   });
 
-  revalidateReception(["/admin/recepcion/registros"]);
+  revalidateReception(["/admin/reception/registros"]);
 
   return {
     inviteId: created.id,
@@ -2868,7 +3157,7 @@ export async function actionApproveClientSelfRegistration(input: { registrationI
     }
   });
 
-  revalidateReception(["/admin/recepcion/registros"]);
+  revalidateReception(["/admin/reception/registros"]);
   revalidatePath(`/admin/clientes/${createdClientId}`);
   revalidatePath("/admin/clientes");
 
@@ -2918,7 +3207,7 @@ export async function actionRejectClientSelfRegistration(input: {
     }
   });
 
-  revalidateReception(["/admin/recepcion/registros"]);
+  revalidateReception(["/admin/reception/registros"]);
   return {
     registrationId,
     status: ClientSelfRegistrationStatus.REJECTED

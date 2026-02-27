@@ -7,6 +7,7 @@ export type ClientsConfigSection =
   | "canales"
   | "reglas"
   | "validaciones"
+  | "diagnostico"
   | "futuro";
 
 export type ClientsConfigScope = "tenant" | "shared" | "legacy" | "future";
@@ -35,6 +36,7 @@ export const CLIENTS_CONFIG_SECTION_ORDER: ClientsConfigSection[] = [
   "canales",
   "reglas",
   "validaciones",
+  "diagnostico",
   "futuro"
 ];
 

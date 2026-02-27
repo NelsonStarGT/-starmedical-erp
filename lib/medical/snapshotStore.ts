@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import type { Prisma } from "@prisma/client";
 import type { EncounterSnapshot } from "@/components/medical/encounter/types";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { getDefaultDocumentBrandingTemplate } from "@/lib/medical/documentBrandingStore";
 import { renderEncounterSnapshotHtmlWithBranding } from "@/lib/medical/snapshot";
 
@@ -37,7 +37,7 @@ async function withMemoryFallback<T>(dbOperation: () => Promise<T>, memoryOperat
     return await dbOperation();
   } catch (error) {
     if (!isPrismaMissingTableError(error)) throw error;
-    warnDevMissingTable("encounter-snapshot", error);
+    logPrismaSchemaIssue("encounter-snapshot", error);
     globalForMedical.encounterSnapshotForceMemory = true;
     return await memoryOperation();
   }

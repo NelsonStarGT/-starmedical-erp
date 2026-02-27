@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 
 export type ClientRulesConfigSnapshot = {
   alertDays30: number;
@@ -126,9 +126,15 @@ export async function safeGetClientRulesConfig(context: string): Promise<ClientR
     if (!raw || typeof raw !== "object") return { ...DEFAULT_RULES_CONFIG };
     return normalizeRulesConfig(raw as Record<string, unknown>);
   } catch (error) {
-    if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable(`${context}.clientRulesConfig.findUnique`, error);
-      return { ...DEFAULT_RULES_CONFIG };
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: `${context}.clientRulesConfig.findUnique`,
+      requirement: "OPTIONAL",
+      error,
+      fallback: { ...DEFAULT_RULES_CONFIG }
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") {
+      return resolution.value;
     }
 
     if (!isRulesConfigWeightsUnavailableError(error)) {
@@ -142,9 +148,15 @@ export async function safeGetClientRulesConfig(context: string): Promise<ClientR
       if (!legacyRaw || typeof legacyRaw !== "object") return { ...DEFAULT_RULES_CONFIG };
       return normalizeRulesConfig(legacyRaw as Record<string, unknown>);
     } catch (legacyError) {
-      if (isPrismaMissingTableError(legacyError)) {
-        warnDevMissingTable(`${context}.clientRulesConfig.findUnique.legacy`, legacyError);
-        return { ...DEFAULT_RULES_CONFIG };
+      const legacyResolution = resolvePrismaSchemaFallback({
+        domain: "clients",
+        context: `${context}.clientRulesConfig.findUnique.legacy`,
+        requirement: "OPTIONAL",
+        error: legacyError,
+        fallback: { ...DEFAULT_RULES_CONFIG }
+      });
+      if (legacyResolution.handled && legacyResolution.requirement === "OPTIONAL") {
+        return legacyResolution.value;
       }
       throw legacyError;
     }

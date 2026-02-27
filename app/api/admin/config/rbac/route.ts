@@ -32,7 +32,7 @@ type RoleInput = {
   permissions?: string[];
 };
 
-function canManageRbac(user: ReturnType<typeof requireConfigCentralCapability>["user"]): boolean {
+function canManageRbac(user: Awaited<ReturnType<typeof requireConfigCentralCapability>>["user"]): boolean {
   if (!user) return false;
   return isAdmin(user) || hasPermission(user, "SYSTEM:ADMIN");
 }
@@ -210,7 +210,7 @@ function dbNotReadyResponse() {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BRANCH_READ");
   if (auth.response) return auth.response;
 
   try {
@@ -231,7 +231,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
   if (auth.response) return auth.response;
   if (!canManageRbac(auth.user)) {
     return forbidden403("Solo SYSTEM:ADMIN o ADMIN puede editar roles y permisos.");
@@ -375,7 +375,7 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BRANCH_WRITE");
   if (auth.response) return auth.response;
   if (!canManageRbac(auth.user)) {
     return forbidden403("Solo SYSTEM:ADMIN o ADMIN puede eliminar roles.");

@@ -42,7 +42,7 @@ function maskEmail(value: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_EMAIL_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_EMAIL_WRITE");
   if (auth.response) return auth.response;
 
   const delegate = getGlobalEmailConfigDelegate();

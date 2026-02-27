@@ -69,7 +69,7 @@ function dbNotReadyResponse() {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_READ");
   if (auth.response) return auth.response;
   const tenantId = auth.user?.tenantId || "global";
 
@@ -135,7 +135,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
   const tenantId = auth.user?.tenantId || "global";
 

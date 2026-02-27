@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { CIE10_LOCAL_SEED } from "@/lib/medical/cie10Seed";
 
 type Icd10Source = "WHO_OPS_PDF" | "LOCAL";
@@ -103,7 +103,7 @@ async function withMemoryFallback<T>(dbOperation: () => Promise<T>, memoryOperat
     return await dbOperation();
   } catch (error) {
     if (!isPrismaMissingTableError(error)) throw error;
-    warnDevMissingTable("medical-cie10", error);
+    logPrismaSchemaIssue("medical-cie10", error);
     globalForMedical.cie10StoreForceMemory = true;
     return memoryOperation();
   }

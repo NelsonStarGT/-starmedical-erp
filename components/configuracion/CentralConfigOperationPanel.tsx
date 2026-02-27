@@ -1,5 +1,6 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
@@ -123,10 +124,10 @@ export default function CentralConfigOperationPanel({ onOpenAdvanced }: Props) {
 
     try {
       const [smokeRes, activeBranchRes, themeRes, flagsRes] = await Promise.all([
-        fetch("/api/admin/config/smoke", { cache: "no-store" }),
-        fetch("/api/admin/session/active-branch", { cache: "no-store" }),
-        fetch("/api/admin/config/theme", { cache: "no-store" }),
-        fetch("/api/admin/config/system-flags", { cache: "no-store" })
+        configApiFetch("/api/admin/config/smoke", { cache: "no-store" }),
+        configApiFetch("/api/admin/session/active-branch", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/theme", { cache: "no-store" }),
+        configApiFetch("/api/admin/config/system-flags", { cache: "no-store" })
       ]);
 
       const smokeJson = await readJson<SmokePayload>(smokeRes);
@@ -160,8 +161,8 @@ export default function CentralConfigOperationPanel({ onOpenAdvanced }: Props) {
       }
 
       const [hoursRes, satRes] = await Promise.all([
-        fetch(`/api/admin/config/branches/${resolvedActiveBranch.id}/hours`, { cache: "no-store" }),
-        fetch(`/api/admin/config/branches/${resolvedActiveBranch.id}/establishments`, { cache: "no-store" })
+        configApiFetch(`/api/admin/config/branches/${resolvedActiveBranch.id}/hours`, { cache: "no-store" }),
+        configApiFetch(`/api/admin/config/branches/${resolvedActiveBranch.id}/establishments`, { cache: "no-store" })
       ]);
 
       const hoursJson = await readJson<HoursPayload>(hoursRes);

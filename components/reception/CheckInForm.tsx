@@ -10,6 +10,9 @@ import { DateField } from "@/components/ui/DateField";
 import { PRIORITY_LABELS, VISIT_PRIORITIES, type ReceptionArea, type ReceptionPriority } from "@/lib/reception/constants";
 import {
   actionCreateAdmission,
+  actionConfirmReceptionAffiliation,
+  actionDeactivateReceptionAffiliation,
+  actionListPendingAffiliations,
   actionSearchPatients
 } from "@/app/admin/reception/actions";
 import { useReceptionBranch } from "@/app/admin/reception/BranchContext";
@@ -18,18 +21,24 @@ import type { ReceptionCapability } from "@/lib/reception/permissions";
 
 type Patient = {
   id: string;
+  clientCode: string | null;
   firstName: string | null;
   lastName: string | null;
   phone: string | null;
+  email: string | null;
   dpi: string | null;
   nit: string | null;
+  pendingAffiliationsCount: number;
 };
+
+type PendingAffiliation = Awaited<ReturnType<typeof actionListPendingAffiliations>>[number];
 
 type Props = {
   siteId: string | null;
   capabilities: ReceptionCapability[];
   mode: "new" | "existing";
   initialQuery?: string;
+  autoSearch?: boolean;
 };
 
 type NewPatientForm = {
@@ -42,7 +51,7 @@ type NewPatientForm = {
   nit: string;
 };
 
-export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: Props) {
+export function CheckInForm({ siteId, capabilities, mode, initialQuery = "", autoSearch = false }: Props) {
   const isNewMode = mode === "new";
   const headerTitle = isNewMode ? "Admisión nueva" : "Admisión existente";
   const headerSubtitle = isNewMode ? "Registro de paciente" : "Registro de visita";
@@ -53,6 +62,7 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
   const [searchQuery, setSearchQuery] = useState(() => initialQuery);
   const [searchResults, setSearchResults] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [pendingAffiliations, setPendingAffiliations] = useState<PendingAffiliation[]>([]);
   const [newPatient, setNewPatient] = useState<NewPatientForm>({
     firstName: "",
     lastName: "",
@@ -71,7 +81,9 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
   const [vitalsSaved, setVitalsSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isAffiliationPending, startAffiliationTransition] = useTransition();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const autoSearchExecutedRef = useRef(false);
   const canCreate = capabilities.includes("VISIT_CREATE");
   const canCheckIn = capabilities.includes("VISIT_CHECKIN");
   const canEnqueue = capabilities.includes("QUEUE_ENQUEUE");
@@ -83,7 +95,7 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
     const params = new URLSearchParams();
     params.set("mode", "existing");
     if (effectiveSearchQuery) params.set("q", effectiveSearchQuery);
-    return `/admin/recepcion/check-in?${params.toString()}`;
+    return `/admin/reception/check-in?${params.toString()}`;
   }, [effectiveSearchQuery]);
 
   useEffect(() => {
@@ -91,6 +103,23 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
     window.addEventListener("reception:focus-search", focusSearch as EventListener);
     return () => window.removeEventListener("reception:focus-search", focusSearch as EventListener);
   }, []);
+
+  useEffect(() => {
+    if (!autoSearch || autoSearchExecutedRef.current) return;
+    if (!canCreate) return;
+    if (effectiveSearchQuery.length < 2) return;
+
+    autoSearchExecutedRef.current = true;
+    startTransition(async () => {
+      try {
+        const results = await actionSearchPatients(effectiveSearchQuery);
+        setSearchResults(results);
+        setError(null);
+      } catch (err) {
+        setError((err as Error)?.message || "No se pudo buscar pacientes.");
+      }
+    });
+  }, [autoSearch, canCreate, effectiveSearchQuery, startTransition]);
 
   const runSearch = () => {
     if (!canCreate) {
@@ -104,6 +133,53 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
         setError(null);
       } catch (err) {
         setError((err as Error)?.message || "No se pudo buscar pacientes.");
+      }
+    });
+  };
+
+  useEffect(() => {
+    const patientId = selectedPatient?.id;
+    if (!patientId) {
+      setPendingAffiliations([]);
+      return;
+    }
+
+    startAffiliationTransition(async () => {
+      try {
+        const rows = await actionListPendingAffiliations(patientId);
+        setPendingAffiliations(rows);
+      } catch (err) {
+        setError((err as Error)?.message || "No se pudieron cargar afiliaciones.");
+      }
+    });
+  }, [selectedPatient?.id]);
+
+  const confirmAffiliation = (affiliationId: string) => {
+    const patientId = selectedPatient?.id;
+    if (!patientId) return;
+    startAffiliationTransition(async () => {
+      try {
+        await actionConfirmReceptionAffiliation({ patientId, affiliationId });
+        const rows = await actionListPendingAffiliations(patientId);
+        setPendingAffiliations(rows);
+        setError(null);
+      } catch (err) {
+        setError((err as Error)?.message || "No se pudo confirmar la afiliación.");
+      }
+    });
+  };
+
+  const deactivateAffiliation = (affiliationId: string) => {
+    const patientId = selectedPatient?.id;
+    if (!patientId) return;
+    startAffiliationTransition(async () => {
+      try {
+        await actionDeactivateReceptionAffiliation({ patientId, affiliationId });
+        const rows = await actionListPendingAffiliations(patientId);
+        setPendingAffiliations(rows);
+        setError(null);
+      } catch (err) {
+        setError((err as Error)?.message || "No se pudo desvincular la afiliación.");
       }
     });
   };
@@ -189,8 +265,8 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
   };
 
   const searchHelp = isNewMode
-    ? "Busca por nombre, teléfono, DPI o NIT para evitar duplicados."
-    : "Busca y selecciona un paciente existente para crear la visita.";
+    ? "Busca por correlativo, nombre, teléfono, DPI, NIT o email para evitar duplicados."
+    : "Busca por correlativo, nombre, teléfono, DPI, NIT o email para crear la visita.";
 
   const primaryDisabled = useMemo(() => {
     if (isPending || !canSubmit || !canOperate) return true;
@@ -230,9 +306,9 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
               ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Nombre, teléfono, DPI o NIT"
+              placeholder="Código, nombre, teléfono, DPI, NIT o email"
               className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm"
-              aria-label="Buscar paciente por nombre, teléfono, DPI o NIT"
+              aria-label="Buscar paciente por correlativo, nombre, teléfono, DPI, NIT o email"
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return;
                 if (!effectiveSearchQuery.trim()) return;
@@ -265,10 +341,16 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
                   <div>
                     <p className="font-semibold text-slate-800">
                       {[patient.firstName, patient.lastName].filter(Boolean).join(" ") || "Paciente"}
+                      {patient.clientCode ? <span className="ml-2 font-mono text-xs text-slate-500">{patient.clientCode}</span> : null}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {patient.phone || patient.dpi || patient.nit || "Sin contacto"}
+                      {patient.phone || patient.email || patient.dpi || patient.nit || "Sin contacto"}
                     </p>
+                    {patient.pendingAffiliationsCount > 0 ? (
+                      <p className="mt-1 text-[11px] font-semibold text-amber-700">
+                        Afiliaciones pendientes: {patient.pendingAffiliationsCount}
+                      </p>
+                    ) : null}
                   </div>
                   <span className="text-xs text-slate-500">Seleccionar</span>
                 </button>
@@ -351,10 +433,56 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
                     {[selectedPatient.firstName, selectedPatient.lastName].filter(Boolean).join(" ") || "Paciente"}
                   </p>
                   <p className="mt-1 text-xs text-slate-600">
+                    {selectedPatient.clientCode ? `Código: ${selectedPatient.clientCode}` : "Código: —"}
+                    {selectedPatient.email ? ` · Email: ${selectedPatient.email}` : ""}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600">
                     {selectedPatient.phone ? `Tel: ${selectedPatient.phone}` : "Tel: —"}
                     {selectedPatient.dpi ? ` · DPI: ${selectedPatient.dpi}` : ""}
                     {selectedPatient.nit ? ` · NIT: ${selectedPatient.nit}` : ""}
                   </p>
+                  {pendingAffiliations.length > 0 ? (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                      <p className="font-semibold">
+                        Afiliaciones pendientes de confirmar: {pendingAffiliations.length}
+                      </p>
+                      <div className="mt-2 space-y-2">
+                        {pendingAffiliations.map((affiliation) => (
+                          <div
+                            key={affiliation.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white px-2 py-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-slate-800">{affiliation.entityLabel}</p>
+                              <p className="text-[11px] text-slate-500">
+                                {affiliation.lastVerifiedAt
+                                  ? `Últ. verificación: ${new Date(affiliation.lastVerifiedAt).toLocaleDateString()}`
+                                  : "Sin verificación previa"}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={isAffiliationPending}
+                                onClick={() => confirmAffiliation(affiliation.id)}
+                                className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Confirmar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isAffiliationPending}
+                                onClick={() => deactivateAffiliation(affiliation.id)}
+                                className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[11px] font-semibold text-rose-700 hover:border-rose-300 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Desvincular
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   <p className="mt-2 text-xs text-slate-500">Datos del paciente en solo lectura desde Admisión.</p>
                 </div>
               ) : (
@@ -446,7 +574,7 @@ export function CheckInForm({ siteId, capabilities, mode, initialQuery = "" }: P
               {vitalsSaved ? "Ver signos" : "Registrar signos (obligatorio)"}
             </button>
             <Link
-              href={`/admin/recepcion/visit/${visitId}`}
+              href={`/admin/reception/visit/${visitId}`}
               className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-[#2e75ba] hover:text-[#4aadf5]"
             >
               Ver detalle <ArrowUpRight size={16} />

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCompanyDetail } from "@/lib/companies/services/company.service";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 
 function fmtDate(value: Date | null) {
   if (!value) return "—";
@@ -16,7 +16,7 @@ export default async function CompanyDetailPage({ params }: { params: Params } |
     try {
       return await getCompanyDetail({ companyId: resolved.id, tenantId: "default", includeArchived: true });
     } catch (error) {
-      warnDevMissingTable("admin.empresas.detail", error);
+      logPrismaSchemaIssue("admin.empresas.detail", error);
       if (isPrismaMissingTableError(error)) return "MISSING_TABLE";
       throw error;
     }

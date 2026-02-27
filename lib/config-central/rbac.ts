@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, type SessionUser } from "@/lib/auth";
+import { requireAuthenticatedUser, type SessionUser } from "@/lib/auth";
 import { hasPermission, isAdmin, isOwner } from "@/lib/rbac";
 import { forbidden403 } from "@/lib/config-central/http";
 
@@ -39,14 +39,14 @@ export function hasConfigCentralCapability(
   return hasPermission(user, capability);
 }
 
-export function requireConfigCentralCapability(
+export async function requireConfigCentralCapability(
   req: NextRequest,
   capability: ConfigCentralCapability
-): {
+): Promise<{
   user: SessionUser | null;
   response: NextResponse | null;
-} {
-  const auth = requireAuth(req);
+}> {
+  const auth = await requireAuthenticatedUser(req);
   if (auth.errorResponse) {
     return { user: null, response: auth.errorResponse };
   }

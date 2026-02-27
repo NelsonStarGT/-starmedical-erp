@@ -1,5 +1,6 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -43,7 +44,7 @@ export default function CentralConfigSmokePanel() {
   async function runSmoke() {
     setIsRunning(true);
     try {
-      const res = await fetch("/api/admin/config/smoke", { cache: "no-store" });
+      const res = await configApiFetch("/api/admin/config/smoke", { cache: "no-store" });
       const json = await readJson<SmokeResult>(res);
       if (!res.ok && res.status === 403) {
         setResult({

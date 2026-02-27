@@ -91,17 +91,18 @@ const CONTEXTUAL_MODULES: ContextualNavModule[] = [
   },
   {
     id: "recepcion",
-    label: "Recepcion",
-    matchPrefixes: ["/admin/recepcion", "/admin/reception"],
+    label: "Recepción",
+    matchPrefixes: ["/admin/reception"],
     items: [
-      { id: "dashboard", label: "Dashboard", href: "/admin/recepcion" },
-      { id: "checkin", label: "Check-in", href: "/admin/recepcion/check-in" },
-      { id: "appointments", label: "Citas", href: "/admin/recepcion/appointments" },
-      { id: "availability", label: "Disponibilidad", href: "/admin/recepcion/availability" },
-      { id: "queues", label: "Colas", href: "/admin/recepcion/queues" },
-      { id: "registros", label: "Registros", href: "/admin/recepcion/registros" },
-      { id: "incidents", label: "Incidentes", href: "/admin/recepcion/incidents" },
-      { id: "settings", label: "Configuracion", href: "/admin/recepcion/settings" }
+      { id: "dashboard", label: "Dashboard", href: "/admin/reception/dashboard" },
+      { id: "checkin", label: "Check-in", href: "/admin/reception/check-in" },
+      { id: "appointments", label: "Citas", href: "/admin/reception/appointments" },
+      { id: "availability", label: "Disponibilidad", href: "/admin/reception/availability" },
+      { id: "queues", label: "Colas", href: "/admin/reception/queues" },
+      { id: "caja", label: "Caja", href: "/admin/reception/caja" },
+      { id: "registros", label: "Registros", href: "/admin/reception/registros" },
+      { id: "incidents", label: "Incidentes", href: "/admin/reception/incidents" },
+      { id: "settings", label: "Configuracion", href: "/admin/reception/settings" }
     ]
   },
   {

@@ -1,6 +1,6 @@
 import { ClientProfileType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { resolvePrismaSchemaFallback } from "@/lib/prisma/errors.server";
 
 export type ClientsHomeKpis = {
   totalClients: number;
@@ -53,8 +53,14 @@ async function safeClientDocumentCount(args: unknown): Promise<number> {
   try {
     return await delegate.count(args);
   } catch (error) {
-    warnDevMissingTable("clients.dashboard.clientDocument.count", error);
-    if (isPrismaMissingTableError(error)) return 0;
+    const resolution = resolvePrismaSchemaFallback({
+      domain: "clients",
+      context: "clients.dashboard.clientDocument.count",
+      requirement: "OPTIONAL",
+      error,
+      fallback: 0
+    });
+    if (resolution.handled && resolution.requirement === "OPTIONAL") return resolution.value;
     throw error;
   }
 }

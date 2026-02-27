@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import type { SessionUser } from "@/lib/auth";
 import type {
   OpsAlertEventRow,
@@ -362,7 +362,7 @@ export async function storeOpsHealthSnapshot(input: OpsHealthWriteInput): Promis
     return { id: created.id };
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.health.store", error);
+      logPrismaSchemaIssue("ops.health.store", error);
       return null;
     }
     throw error;
@@ -434,7 +434,7 @@ export async function readOpsHealthHistory(input?: OpsHealthHistoryInput): Promi
     }));
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.health.history", error);
+      logPrismaSchemaIssue("ops.health.history", error);
       return [];
     }
     throw error;
@@ -478,7 +478,7 @@ export async function readLatestOpsHealthState(input?: { tenantId?: string | nul
     };
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.health.latest", error);
+      logPrismaSchemaIssue("ops.health.latest", error);
       return null;
     }
     throw error;
@@ -521,7 +521,7 @@ export async function storeOpsMetricsSnapshot(input: OpsMetricsWriteInput): Prom
     return { id: created.id };
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.metrics.store", error);
+      logPrismaSchemaIssue("ops.metrics.store", error);
       return null;
     }
     throw error;
@@ -558,7 +558,7 @@ export async function readLatestOpsMetricsSnapshot(input?: {
     };
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.metrics.latest", error);
+      logPrismaSchemaIssue("ops.metrics.latest", error);
       return null;
     }
     throw error;
@@ -643,7 +643,7 @@ export async function readOpsMetricsHistory(input?: OpsMetricsHistoryInput): Pro
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.metrics.history", error);
+      logPrismaSchemaIssue("ops.metrics.history", error);
       return [];
     }
     throw error;
@@ -696,7 +696,7 @@ export async function createOpsAlertEvent(input: OpsAlertCreateInput): Promise<{
     return { created: true, id: String(created.id) };
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.alert.create", error);
+      logPrismaSchemaIssue("ops.alert.create", error);
       return { created: false, id: null };
     }
     throw error;
@@ -747,7 +747,7 @@ export async function readOpsAlertEvents(input?: OpsAlertReadInput): Promise<Ops
     }));
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.alert.read", error);
+      logPrismaSchemaIssue("ops.alert.read", error);
       return [];
     }
     throw error;
@@ -824,7 +824,7 @@ export async function readOpsSchedulerConfig(input?: OpsSchedulerConfigReadInput
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.scheduler.config.read", error);
+      logPrismaSchemaIssue("ops.scheduler.config.read", error);
       return defaults;
     }
     throw error;
@@ -887,7 +887,7 @@ export async function writeOpsSchedulerConfig(input: OpsSchedulerConfigWriteInpu
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.scheduler.config.write", error);
+      logPrismaSchemaIssue("ops.scheduler.config.write", error);
       return buildSchedulerConfigRecord({
         tenantId,
         enabled: input.enabled,
@@ -968,7 +968,7 @@ export async function listActiveOpsTenants(): Promise<string[]> {
     return [normalizeTenantId(process.env.TENANT_ID)];
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("ops.scheduler.tenants", error);
+      logPrismaSchemaIssue("ops.scheduler.tenants", error);
       return [normalizeTenantId(process.env.TENANT_ID)];
     }
     throw error;

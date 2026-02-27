@@ -45,7 +45,7 @@ function parseNumberQuery(value: string | null, fallback: number, min: number, m
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_EMAIL_SANDBOX_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_EMAIL_SANDBOX_READ");
   if (auth.response) return auth.response;
 
   const authTenantId = normalizeTenantId(auth.user?.tenantId || "global");

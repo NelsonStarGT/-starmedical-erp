@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 
 type SystemFeatureFlags = {
   portal: {
@@ -55,7 +56,7 @@ async function readJson<T>(res: Response): Promise<T> {
 }
 
 export default function CentralSystemFlagsPanel() {
-  const { toasts, showToast, dismiss } = useToast();
+  const { toasts, showToast, dismiss } = useConfigToast();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [config, setConfig] = useState<SystemFeatureConfigSnapshot>(emptyConfig());
@@ -63,7 +64,7 @@ export default function CentralSystemFlagsPanel() {
   const loadConfig = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch("/api/admin/config/system-flags", { cache: "no-store" });
+      const res = await configApiFetch("/api/admin/config/system-flags", { cache: "no-store" });
       const json = await readJson<{ ok?: boolean; error?: string; data?: SystemFeatureConfigSnapshot }>(res);
       if (!res.ok || !json.ok || !json.data) {
         throw new Error(json.error || "No se pudo cargar feature flags.");
@@ -106,7 +107,7 @@ export default function CentralSystemFlagsPanel() {
       setIsSaving(true);
       showToast({ tone: "info", title: "Guardando feature flags...", durationMs: 900 });
 
-      const res = await fetch("/api/admin/config/system-flags", {
+      const res = await configApiFetch("/api/admin/config/system-flags", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -87,7 +87,7 @@ export default function AdmissionModal() {
   const selectedPatientLabel = useMemo(() => {
     if (!selectedPatient) return "Sin paciente seleccionado";
     const name = [selectedPatient.firstName, selectedPatient.lastName].filter(Boolean).join(" ") || "Paciente";
-    const identity = selectedPatient.dpi || selectedPatient.phone || selectedPatient.nit || "Sin identificador";
+    const identity = selectedPatient.clientCode || selectedPatient.dpi || selectedPatient.phone || selectedPatient.nit || "Sin identificador";
     return `${name} · ${identity}`;
   }, [selectedPatient]);
 
@@ -143,7 +143,7 @@ export default function AdmissionModal() {
           notes: notes.trim() || undefined
         });
         closeAdmission();
-        router.push(`/admin/recepcion/visit/${result.visitId}`);
+        router.push(`/admin/reception/visit/${result.visitId}`);
       } catch (err) {
         setError((err as Error)?.message || "No se pudo registrar la admisión.");
       }
@@ -200,9 +200,9 @@ export default function AdmissionModal() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Buscar por nombre, DPI o teléfono"
+                placeholder="Buscar por código, nombre, DPI o teléfono"
                 className={cn(fieldClasses(isPending), "pl-9")}
-                aria-label="Buscar paciente por nombre, DPI o teléfono"
+                aria-label="Buscar paciente por código, nombre, DPI o teléfono"
               />
             </div>
 
@@ -214,7 +214,7 @@ export default function AdmissionModal() {
               {results.map((patient) => {
                 const active = selectedPatient?.id === patient.id;
                 const name = [patient.firstName, patient.lastName].filter(Boolean).join(" ") || "Paciente";
-                const meta = patient.dpi || patient.phone || patient.nit || "Sin identificador";
+                const meta = patient.clientCode || patient.dpi || patient.phone || patient.nit || "Sin identificador";
                 return (
                   <button
                     key={patient.id}

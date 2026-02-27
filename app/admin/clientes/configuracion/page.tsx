@@ -29,12 +29,20 @@ import ClientsConfigCatalogFocus from "@/components/clients/config/ClientsConfig
 import ClientsConfigDirectoriesSummary from "@/components/clients/config/ClientsConfigDirectoriesSummary";
 import ClientsConfigChannelsSummary from "@/components/clients/config/ClientsConfigChannelsSummary";
 import ClientsConfigValidationsSummary from "@/components/clients/config/ClientsConfigValidationsSummary";
+import ClientsConfigDiagnosticsPanel from "@/components/clients/config/ClientsConfigDiagnosticsPanel";
 import ClientsConfigTabsNav from "@/components/clients/config/ClientsConfigTabsNav";
+import ConfigAccessDeniedCard from "@/components/configuracion/ConfigAccessDeniedCard";
 import type {
   ClientsConfigManagerPayload,
   ConfigCatalogItem,
   ConfigRequiredDocumentRule
 } from "@/components/clients/config/ClientsConfigManagerRenderer";
+import {
+  canViewClientsConfigDiagnostics,
+  canViewGlobalClientsConfigDiagnostics
+} from "@/lib/clients/configDiagnostics";
+import { getDomainSchemaHealthSnapshot, recordSchemaHealthSnapshotEvents } from "@/lib/prisma/domainSchemaHealth";
+import { listSystemEventLogs } from "@/lib/ops/eventLog.server";
 import { cn } from "@/lib/utils";
 
 type Section = ClientsConfigSection;
@@ -62,6 +70,7 @@ const SECTION_LABELS: Record<Section, string> = {
   canales: "Canales y comercial",
   reglas: "Reglas",
   validaciones: "Validaciones por país",
+  diagnostico: "ERROR SYSTEMS",
   futuro: "Futuro"
 };
 
@@ -331,6 +340,9 @@ function buildSectionDescription(section: Section, entries: ReadonlyArray<Client
   if (section === "resumen") {
     return "Vista maestra de todos los catálogos/directorios con filtros, uso, dependencias y acceso rápido a managers.";
   }
+  if (section === "diagnostico") {
+    return "Observabilidad operativa por módulo: schema-health, fallbacks clasificados y errores controlados.";
+  }
   if (section === "futuro") {
     return "Funcionalidades reservadas para activar cuando estén disponibles módulos dependientes.";
   }
@@ -341,7 +353,8 @@ function buildSectionDescription(section: Section, entries: ReadonlyArray<Client
     directorios: "Directorios tenant-scoped para contactos empresariales.",
     canales: "Canales de adquisición y catálogos comerciales legacy.",
     reglas: "Reglas operativas de score, documentos y defaults.",
-    validaciones: "Consola técnica de geografía y validaciones por país."
+    validaciones: "Consola técnica de geografía y validaciones por país.",
+    diagnostico: "Consola ERROR SYSTEMS por dominio (Clientes/Recepción/Portales/Ops/Medical)."
   } as const;
 
   if (!activeEntries.length) {
@@ -363,6 +376,8 @@ export default async function ClientesConfiguracionPage({
   const cookieStore = await cookies();
   const currentUser = await getSessionUserFromCookies(cookieStore);
   const tenantId = tenantIdFromUser(currentUser);
+  const canViewDiagnostics = canViewClientsConfigDiagnostics(currentUser);
+  const canViewGlobalDiagnostics = canViewGlobalClientsConfigDiagnostics(currentUser);
   const preferenceScope = `${tenantId}:${currentUser?.id ?? "anon"}`;
 
   const deprecatedKeys = parseClientsConfigDeprecatedCookie(cookieStore.get(CLIENTS_CONFIG_DEPRECATED_COOKIE)?.value ?? null);
@@ -370,6 +385,7 @@ export default async function ClientesConfiguracionPage({
 
   const visibleTabs = CLIENTS_CONFIG_SECTION_ORDER.filter((key) => {
     if (key === "resumen") return true;
+    if (key === "diagnostico") return true;
     if (key === "futuro") return true;
     return getRegistryEntriesBySection(registryEntries, key, false).length > 0;
   });
@@ -836,6 +852,101 @@ export default async function ClientesConfiguracionPage({
     sectionContent = <ClientsConfigValidationsSummary entries={entries} payload={payload} />;
   }
 
+  if (section === "diagnostico") {
+    if (!canViewDiagnostics) {
+      sectionContent = (
+        <ConfigAccessDeniedCard
+          sectionLabel="ERROR SYSTEMS"
+          requirementLabel="rol SUPER_ADMIN/ADMIN/OPS/TENANT_ADMIN o permiso CLIENTS_CONFIG_VIEW"
+          backHref="/admin/clientes/configuracion?section=resumen"
+          backLabel="Volver a Clientes · Configuración"
+        />
+      );
+    } else {
+      const schemaHealthResult = await (async () => {
+        try {
+          return {
+            source: "db" as const,
+            snapshot: await getDomainSchemaHealthSnapshot()
+          };
+        } catch {
+          return {
+            source: "fallback" as const,
+            snapshot: {
+              generatedAt: new Date().toISOString(),
+              schema: "unknown",
+              domains: [
+                {
+                  domain: "clients" as const,
+                  status: "Missing" as const,
+                  requiredMissing: ["schema_health_unavailable"],
+                  optionalMissing: [],
+                  tables: []
+                },
+                {
+                  domain: "reception" as const,
+                  status: "Missing" as const,
+                  requiredMissing: ["schema_health_unavailable"],
+                  optionalMissing: [],
+                  tables: []
+                },
+                {
+                  domain: "portals" as const,
+                  status: "Missing" as const,
+                  requiredMissing: ["schema_health_unavailable"],
+                  optionalMissing: [],
+                  tables: []
+                },
+                {
+                  domain: "ops" as const,
+                  status: "Missing" as const,
+                  requiredMissing: ["schema_health_unavailable"],
+                  optionalMissing: [],
+                  tables: []
+                },
+                {
+                  domain: "medical" as const,
+                  status: "Missing" as const,
+                  requiredMissing: ["schema_health_unavailable"],
+                  optionalMissing: [],
+                  tables: []
+                }
+              ]
+            }
+          };
+        }
+      })();
+      const schemaHealthSource = schemaHealthResult.source;
+      const schemaSnapshot = schemaHealthResult.snapshot;
+      const schemaHealthIsFallback = schemaHealthSource === "fallback";
+      if (!schemaHealthIsFallback) {
+        await recordSchemaHealthSnapshotEvents(schemaSnapshot, { tenantId });
+      }
+      const diagnosticsEvents = await listSystemEventLogs({
+        tenantId: canViewGlobalDiagnostics ? undefined : tenantId,
+        domains: ["clients", "reception", "portal", "portals", "ops", "medical"],
+        limit: 600
+      });
+
+      sectionSources = [
+        ...(schemaHealthIsFallback ? [{ id: "schemaHealth", label: "Schema health", source: "fallback" as SourceState }] : []),
+        ...(diagnosticsEvents.source === "fallback"
+          ? [{ id: "eventLog", label: "Eventos operativos", source: "fallback" as SourceState }]
+          : [])
+      ];
+
+      sectionContent = (
+        <ClientsConfigDiagnosticsPanel
+          schemaSnapshot={schemaSnapshot}
+          schemaHealthSource={schemaHealthIsFallback ? "fallback" : schemaHealthSource}
+          events={diagnosticsEvents.items}
+          eventsSource={diagnosticsEvents.source}
+          eventsNotice={diagnosticsEvents.notice}
+        />
+      );
+    }
+  }
+
   if (section === "futuro") {
     sectionContent = (
       <section className="rounded-2xl border border-[#dce7f5] bg-white p-5 shadow-sm">
@@ -883,10 +994,10 @@ export default async function ClientesConfiguracionPage({
       <section className="rounded-2xl border border-[#dce7f5] bg-white p-5 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#2e75ba]">Clientes</p>
         <h1 className="mt-1 text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
-          Configuración · Data Console
+          Clientes · Configuración
         </h1>
         <p className="mt-1 text-sm text-slate-600">
-          Consola de gobierno de datos para formularios, reglas y validaciones de Clientes. Enfocada en lectura rápida y administración por contexto.
+          Data Console para gobierno de datos, reglas y validaciones de Clientes. Enfocada en lectura rápida y administración por contexto.
         </p>
       </section>
 

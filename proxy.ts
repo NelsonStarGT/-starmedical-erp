@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "./lib/constants";
+import { resolveReceptionAliasPath } from "./lib/reception/alias";
 
 const IS_PROD = process.env.NODE_ENV === "production";
 
@@ -36,26 +37,8 @@ function withSecurityHeaders(response: NextResponse) {
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isReceptionLegacyPath = pathname === "/admin/reception" || pathname.startsWith("/admin/reception/");
-  const isReceptionCanonicalPath = pathname === "/admin/recepcion" || pathname.startsWith("/admin/recepcion/");
-  const isReceptionV2CanonicalPath =
-    pathname === "/admin/recepcion" ||
-    pathname === "/admin/recepcion/dashboard" ||
-    pathname === "/admin/recepcion/check-in" ||
-    pathname === "/admin/recepcion/appointments" ||
-    pathname === "/admin/recepcion/availability" ||
-    pathname === "/admin/recepcion/queues" ||
-    pathname === "/admin/recepcion/registros" ||
-    pathname === "/admin/recepcion/incidents" ||
-    pathname === "/admin/recepcion/worklist" ||
-    pathname === "/admin/recepcion/settings" ||
-    pathname === "/admin/recepcion/companies" ||
-    pathname === "/admin/recepcion/solicitudes-portal" ||
-    pathname.startsWith("/admin/recepcion/visit/");
-  const receptionCanonicalPathname = isReceptionLegacyPath ? pathname.replace("/admin/reception", "/admin/recepcion") : null;
-  const receptionRewritePathname = isReceptionV2CanonicalPath ? pathname.replace("/admin/recepcion", "/admin/reception") : null;
-
-  if (isReceptionLegacyPath && receptionCanonicalPathname) {
+  const receptionCanonicalPathname = resolveReceptionAliasPath(pathname);
+  if (receptionCanonicalPathname) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = receptionCanonicalPathname;
     return withSecurityHeaders(NextResponse.redirect(redirectUrl, 308));
@@ -170,15 +153,8 @@ export function proxy(request: NextRequest) {
     return res;
   }
 
-  if (isReceptionCanonicalPath && receptionRewritePathname) {
-    const rewriteUrl = request.nextUrl.clone();
-    rewriteUrl.pathname = receptionRewritePathname;
-    return withSecurityHeaders(NextResponse.rewrite(rewriteUrl));
-  }
-
   return withSecurityHeaders(NextResponse.next());
 }
-
 export const config = {
   matcher: [
     "/login",

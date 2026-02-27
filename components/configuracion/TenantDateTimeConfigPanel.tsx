@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 import {
   DATE_FORMAT_VALUES,
   TIME_FORMAT_VALUES,
@@ -16,7 +17,7 @@ import {
   type TenantDateTimeConfigSnapshot,
   type TimeFormat,
   type WeekStartsOn
-} from "@/lib/datetime/config";
+} from "@/lib/datetime/types";
 import { formatDate, formatTime } from "@/lib/datetime/format";
 
 type ApiEnvelope<T> = {
@@ -80,7 +81,7 @@ function describeError<T>(payload: ApiEnvelope<T> | null, fallback: string) {
 }
 
 export default function TenantDateTimeConfigPanel() {
-  const { toasts, dismiss, showToast } = useToast();
+  const { toasts, dismiss, showToast } = useConfigToast();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -99,7 +100,7 @@ export default function TenantDateTimeConfigPanel() {
     const load = async () => {
       setLoading(true);
       try {
-        const response = await fetch("/api/admin/config/datetime", { cache: "no-store" });
+        const response = await configApiFetch("/api/admin/config/datetime", { cache: "no-store" });
         const payload = await parseEnvelope<TenantDateTimeConfigSnapshot>(response);
         if (!response.ok || payload.ok === false || !payload.data) {
           throw new Error(describeError(payload, "No se pudo cargar configuración de fecha/hora."));
@@ -130,7 +131,7 @@ export default function TenantDateTimeConfigPanel() {
   async function save() {
     try {
       setSaving(true);
-      const response = await fetch("/api/admin/config/datetime", {
+      const response = await configApiFetch("/api/admin/config/datetime", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

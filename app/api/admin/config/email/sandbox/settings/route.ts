@@ -40,7 +40,7 @@ function isValidAliasDomain(value: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_EMAIL_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_EMAIL_READ");
   if (auth.response) return auth.response;
 
   try {
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_EMAIL_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_EMAIL_WRITE");
   if (auth.response) return auth.response;
 
   try {

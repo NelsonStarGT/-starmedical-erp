@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 
 type NavigationPolicySnapshot = {
   tenantId: string;
@@ -48,7 +49,7 @@ function normalizeModuleOrder(value: string) {
 }
 
 export default function NavigationPolicyPanel() {
-  const { toasts, dismiss, showToast } = useToast();
+  const { toasts, dismiss, showToast } = useConfigToast();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [policy, setPolicy] = useState<NavigationPolicySnapshot>(defaultPolicy);
@@ -65,7 +66,7 @@ export default function NavigationPolicyPanel() {
     async function load() {
       setLoading(true);
       try {
-        const response = await fetch("/api/admin/config/navigation", { cache: "no-store" });
+        const response = await configApiFetch("/api/admin/config/navigation", { cache: "no-store" });
         const payload = await parseEnvelope<NavigationPolicySnapshot>(response);
         if (!response.ok || payload.ok === false || !payload.data) {
           throw new Error(payload.error || "No se pudo cargar política de navegación.");
@@ -98,7 +99,7 @@ export default function NavigationPolicyPanel() {
         moduleOrder: normalizeModuleOrder(moduleOrderInput)
       };
 
-      const response = await fetch("/api/admin/config/navigation", {
+      const response = await configApiFetch("/api/admin/config/navigation", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)

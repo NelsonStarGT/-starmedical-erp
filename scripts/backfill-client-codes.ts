@@ -10,14 +10,18 @@
  *
  * Uso:
  *   pnpm tsx scripts/backfill-client-codes.ts
+ *   pnpm tsx scripts/backfill-client-codes.ts --dry-run
+ *   pnpm tsx scripts/backfill-client-codes.ts --tenant tenant-demo
+ *   pnpm tsx scripts/backfill-client-codes.ts --type PERSON
  */
 
 import { ClientProfileType, PrismaClient } from "@prisma/client";
 import {
-  assignSequentialClientCodes,
+  CLIENT_CODE_PADDING,
   normalizeClientCode,
   resolveClientCodePrefix
 } from "../lib/clients/clientCode";
+import { buildClientCodeBackfillPlan } from "../lib/clients/clientCodeBackfill";
 
 const prisma = new PrismaClient();
 
@@ -28,7 +32,69 @@ const CLIENT_TYPES: ClientProfileType[] = [
   ClientProfileType.INSURER
 ];
 
-async function backfillTenantType(tenantId: string, clientType: ClientProfileType) {
+type CliOptions = {
+  dryRun: boolean;
+  tenantId: string | null;
+  clientType: ClientProfileType | null;
+};
+
+function normalizeClientType(raw: string | null | undefined): ClientProfileType | null {
+  if (!raw) return null;
+  const candidate = raw.trim().toUpperCase();
+  if (candidate === ClientProfileType.PERSON) return ClientProfileType.PERSON;
+  if (candidate === ClientProfileType.COMPANY) return ClientProfileType.COMPANY;
+  if (candidate === ClientProfileType.INSTITUTION) return ClientProfileType.INSTITUTION;
+  if (candidate === ClientProfileType.INSURER) return ClientProfileType.INSURER;
+  return null;
+}
+
+function parseCliOptions(argv: string[]): CliOptions {
+  const options: CliOptions = {
+    dryRun: false,
+    tenantId: null,
+    clientType: null
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (!token) continue;
+
+    if (token === "--dry-run" || token === "-n") {
+      options.dryRun = true;
+      continue;
+    }
+
+    if (token === "--tenant" || token === "-t") {
+      options.tenantId = argv[index + 1]?.trim() || null;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--tenant=")) {
+      options.tenantId = token.slice("--tenant=".length).trim() || null;
+      continue;
+    }
+
+    if (token === "--type") {
+      options.clientType = normalizeClientType(argv[index + 1] ?? null);
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--type=")) {
+      options.clientType = normalizeClientType(token.slice("--type=".length));
+      continue;
+    }
+  }
+
+  return options;
+}
+
+async function backfillTenantType(
+  tenantId: string,
+  clientType: ClientProfileType,
+  options: { dryRun: boolean }
+) {
   return prisma.$transaction(async (tx) => {
     const existingRows = await tx.clientProfile.findMany({
       where: {
@@ -58,11 +124,51 @@ async function backfillTenantType(tenantId: string, clientType: ClientProfileTyp
     });
 
     if (!pendingRows.length) {
-      const allocation = assignSequentialClientCodes({
-        prefix: resolveClientCodePrefix(clientType),
+      const plan = buildClientCodeBackfillPlan({
+        clientType,
         existingCodes,
-        count: 0
+        pendingClientIds: [],
+        minDigits: CLIENT_CODE_PADDING
       });
+      if (!options.dryRun) {
+        await tx.clientSequenceCounter.upsert({
+          where: {
+            tenantId_clientType: {
+              tenantId,
+              clientType
+            }
+          },
+          update: {
+            prefix: resolveClientCodePrefix(clientType),
+            nextNumber: plan.nextNumber
+          },
+          create: {
+            tenantId,
+            clientType,
+            prefix: resolveClientCodePrefix(clientType),
+            nextNumber: plan.nextNumber
+          }
+        });
+      }
+
+      return { assigned: 0, nextNumber: plan.nextNumber, planned: 0 };
+    }
+
+    const plan = buildClientCodeBackfillPlan({
+      clientType,
+      existingCodes,
+      pendingClientIds: pendingRows.map((row) => row.id),
+      minDigits: CLIENT_CODE_PADDING
+    });
+
+    if (!options.dryRun) {
+      for (const update of plan.updates) {
+        await tx.clientProfile.update({
+          where: { id: update.clientId },
+          data: { clientCode: update.clientCode }
+        });
+      }
+
       await tx.clientSequenceCounter.upsert({
         where: {
           tenantId_clientType: {
@@ -72,62 +178,29 @@ async function backfillTenantType(tenantId: string, clientType: ClientProfileTyp
         },
         update: {
           prefix: resolveClientCodePrefix(clientType),
-          nextNumber: allocation.nextNumber
+          nextNumber: plan.nextNumber
         },
         create: {
           tenantId,
           clientType,
           prefix: resolveClientCodePrefix(clientType),
-          nextNumber: allocation.nextNumber
+          nextNumber: plan.nextNumber
         }
       });
-
-      return { assigned: 0, nextNumber: allocation.nextNumber };
     }
-
-    const allocation = assignSequentialClientCodes({
-      prefix: resolveClientCodePrefix(clientType),
-      existingCodes,
-      count: pendingRows.length
-    });
-
-    for (let index = 0; index < pendingRows.length; index += 1) {
-      const row = pendingRows[index];
-      const code = allocation.codes[index];
-      if (!row || !code) continue;
-      await tx.clientProfile.update({
-        where: { id: row.id },
-        data: { clientCode: code }
-      });
-    }
-
-    await tx.clientSequenceCounter.upsert({
-      where: {
-        tenantId_clientType: {
-          tenantId,
-          clientType
-        }
-      },
-      update: {
-        prefix: resolveClientCodePrefix(clientType),
-        nextNumber: allocation.nextNumber
-      },
-      create: {
-        tenantId,
-        clientType,
-        prefix: resolveClientCodePrefix(clientType),
-        nextNumber: allocation.nextNumber
-      }
-    });
 
     return {
-      assigned: allocation.codes.length,
-      nextNumber: allocation.nextNumber
+      assigned: options.dryRun ? 0 : plan.updates.length,
+      planned: plan.updates.length,
+      nextNumber: plan.nextNumber
     };
   });
 }
 
 async function run() {
+  const options = parseCliOptions(process.argv.slice(2));
+  const targetTypes = options.clientType ? [options.clientType] : CLIENT_TYPES;
+
   const tenants = await prisma.clientProfile.findMany({
     select: { tenantId: true },
     distinct: ["tenantId"]
@@ -141,24 +214,34 @@ async function run() {
     )
   );
 
-  if (!tenantIds.length) {
+  const targetTenantIds = options.tenantId ? tenantIds.filter((tenantId) => tenantId === options.tenantId) : tenantIds;
+
+  if (!targetTenantIds.length) {
     console.info("[backfill-client-codes] no hay clientes para procesar");
     return;
   }
 
   let totalAssigned = 0;
+  let totalPlanned = 0;
 
-  for (const tenantId of tenantIds) {
-    for (const clientType of CLIENT_TYPES) {
-      const result = await backfillTenantType(tenantId, clientType);
+  if (options.dryRun) {
+    console.info("[backfill-client-codes] modo dry-run activo: no se escribirán cambios.");
+  }
+
+  for (const tenantId of targetTenantIds) {
+    for (const clientType of targetTypes) {
+      const result = await backfillTenantType(tenantId, clientType, { dryRun: options.dryRun });
       totalAssigned += result.assigned;
+      totalPlanned += result.planned;
       console.info(
-        `[backfill-client-codes] tenant=${tenantId} type=${clientType} assigned=${result.assigned} next=${result.nextNumber}`
+        `[backfill-client-codes] tenant=${tenantId} type=${clientType} planned=${result.planned} assigned=${result.assigned} next=${result.nextNumber}`
       );
     }
   }
 
-  console.info(`[backfill-client-codes] totalAssigned=${totalAssigned}`);
+  console.info(
+    `[backfill-client-codes] completed dryRun=${options.dryRun ? "true" : "false"} totalPlanned=${totalPlanned} totalAssigned=${totalAssigned}`
+  );
 }
 
 run()

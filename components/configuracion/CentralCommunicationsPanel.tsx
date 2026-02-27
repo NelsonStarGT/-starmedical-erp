@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 
 type DeliverabilityStatus = {
   spf: boolean;
@@ -108,7 +109,7 @@ function normalizeDeliverability(value: unknown): DeliverabilityStatus {
 }
 
 export default function CentralCommunicationsPanel() {
-  const { toasts, dismiss, showToast } = useToast();
+  const { toasts, dismiss, showToast } = useConfigToast();
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -127,7 +128,7 @@ export default function CentralCommunicationsPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/config/email/global", { cache: "no-store" });
+      const response = await configApiFetch("/api/admin/config/email/global", { cache: "no-store" });
       const payload = await parseEnvelope<GlobalEmailConfig | null>(response);
       if (!response.ok || payload.ok === false) {
         throw new Error(describeError(payload, "No se pudo cargar configuracion SMTP."));
@@ -171,7 +172,7 @@ export default function CentralCommunicationsPanel() {
   async function saveConfig() {
     try {
       setSaving(true);
-      const response = await fetch("/api/admin/config/email/global", {
+      const response = await configApiFetch("/api/admin/config/email/global", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -214,7 +215,7 @@ export default function CentralCommunicationsPanel() {
   async function sendTestEmail() {
     try {
       setSendingTest(true);
-      const response = await fetch("/api/admin/config/email/test", {
+      const response = await configApiFetch("/api/admin/config/email/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ toEmail: testEmail.trim(), emailType: "config_test" })

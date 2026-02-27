@@ -20,7 +20,7 @@ import { enforceRateLimit } from "@/lib/api/rateLimit";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function canManageLegalEntities(user: ReturnType<typeof requireConfigCentralCapability>["user"]) {
+function canManageLegalEntities(user: Awaited<ReturnType<typeof requireConfigCentralCapability>>["user"]) {
   if (!user) return false;
   return isAdmin(user) || isOwner(user);
 }
@@ -58,7 +58,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
   if (!canManageLegalEntities(auth.user)) {
     return NextResponse.json(
@@ -199,7 +199,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
   if (!canManageLegalEntities(auth.user)) {
     return NextResponse.json(
@@ -292,7 +292,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string } } | { params: Promise<{ id: string }> }
 ) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_SAT_WRITE");
   if (auth.response) return auth.response;
   if (!canManageLegalEntities(auth.user)) {
     return NextResponse.json(

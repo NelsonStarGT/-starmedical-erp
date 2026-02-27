@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { auditLog } from "@/lib/audit";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthenticatedUser } from "@/lib/auth";
 import {
   conflict409,
   forbidden403,
@@ -23,8 +23,8 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function ensureSystemAdmin(req: NextRequest) {
-  const auth = requireAuth(req);
+async function ensureSystemAdmin(req: NextRequest) {
+  const auth = await requireAuthenticatedUser(req);
   if (auth.errorResponse) {
     return { user: null, response: auth.errorResponse };
   }
@@ -48,7 +48,7 @@ function dbNotReadyResponse() {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = ensureSystemAdmin(req);
+  const auth = await ensureSystemAdmin(req);
   if (auth.response) return auth.response;
 
   try {
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = ensureSystemAdmin(req);
+  const auth = await ensureSystemAdmin(req);
   if (auth.response) return auth.response;
 
   try {

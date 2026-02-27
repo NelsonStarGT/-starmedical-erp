@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 
 export type PortalAuditAction =
   | "OTP_REQUESTED"
@@ -43,7 +43,7 @@ export async function safeCreatePortalAuditLog(input: {
     });
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.audit.create", error);
+      logPrismaSchemaIssue("portal.audit.create", error);
       return;
     }
     console.error("[portal.audit] no se pudo guardar auditoría", error);

@@ -103,7 +103,7 @@ export default function AppointmentIntakeForm({
   const selectedPatientLabel = useMemo(() => {
     if (!selectedPatient) return "—";
     const name = [selectedPatient.firstName, selectedPatient.lastName].filter(Boolean).join(" ") || "Paciente";
-    const idLine = selectedPatient.dpi || selectedPatient.nit || selectedPatient.phone;
+    const idLine = selectedPatient.clientCode || selectedPatient.dpi || selectedPatient.nit || selectedPatient.phone;
     return idLine ? `${name} · ${idLine}` : name;
   }, [selectedPatient]);
 
@@ -316,7 +316,7 @@ export default function AppointmentIntakeForm({
                   ref={searchInputRef}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar por nombre, DPI o teléfono"
+                  placeholder="Buscar por código, nombre, DPI o teléfono"
                   className={cn(fieldClasses(isPending), "pl-9")}
                   aria-label="Buscar paciente por nombre, DPI o teléfono"
                 />

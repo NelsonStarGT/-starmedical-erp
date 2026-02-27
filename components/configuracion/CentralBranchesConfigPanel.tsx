@@ -1,9 +1,10 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useToast } from "@/hooks/useToast";
+import { useConfigToast } from "@/hooks/useConfigToast";
 import { cn } from "@/lib/utils";
 import BranchDayTimeRangesEditor, {
   normalizeDayRanges,
@@ -138,7 +139,7 @@ function buildApiErrorMessage(payload: unknown, fallback: string) {
 }
 
 export default function CentralBranchesConfigPanel() {
-  const { toasts, showToast, dismiss } = useToast();
+  const { toasts, showToast, dismiss } = useConfigToast();
 
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [branches, setBranches] = useState<BranchRow[]>([]);
@@ -214,7 +215,7 @@ export default function CentralBranchesConfigPanel() {
   const loadBranches = useCallback(async () => {
     setIsLoadingBranches(true);
     try {
-      const res = await fetch("/api/admin/config/branches?includeInactive=1", { cache: "no-store" });
+      const res = await configApiFetch("/api/admin/config/branches?includeInactive=1", { cache: "no-store" });
       const json = await readJson<{ ok?: boolean; error?: string; data?: BranchRow[] }>(res);
       if (!res.ok || !json.ok || !Array.isArray(json.data)) {
         throw new Error(buildApiErrorMessage(json, "No se pudo cargar sucursales."));
@@ -236,7 +237,7 @@ export default function CentralBranchesConfigPanel() {
     async (branchId: string) => {
       setIsLoadingHours(true);
       try {
-        const res = await fetch(`/api/admin/config/branches/${branchId}/hours`, { cache: "no-store" });
+        const res = await configApiFetch(`/api/admin/config/branches/${branchId}/hours`, { cache: "no-store" });
         const json = await readJson<{
           ok?: boolean;
           error?: string;
@@ -262,7 +263,7 @@ export default function CentralBranchesConfigPanel() {
     async (branchId: string) => {
       setIsLoadingSat(true);
       try {
-        const res = await fetch(`/api/admin/config/branches/${branchId}/establishments`, { cache: "no-store" });
+        const res = await configApiFetch(`/api/admin/config/branches/${branchId}/establishments`, { cache: "no-store" });
         const json = await readJson<{
           ok?: boolean;
           error?: string;
@@ -328,7 +329,7 @@ export default function CentralBranchesConfigPanel() {
 
     try {
       showToast({ tone: "info", title: isEdit ? "Actualizando sucursal..." : "Creando sucursal...", durationMs: 900 });
-      const res = await fetch(endpoint, {
+      const res = await configApiFetch(endpoint, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -355,7 +356,7 @@ export default function CentralBranchesConfigPanel() {
 
   async function handleToggleBranch(branch: BranchRow) {
     try {
-      const res = await fetch(`/api/admin/config/branches/${branch.id}/toggle-active`, {
+      const res = await configApiFetch(`/api/admin/config/branches/${branch.id}/toggle-active`, {
         method: "PATCH"
       });
       const json = await readJson<{ ok?: boolean; error?: string }>(res);
@@ -381,7 +382,7 @@ export default function CentralBranchesConfigPanel() {
     if (!selectedBranchId) return;
 
     try {
-      const res = await fetch(`/api/admin/config/branches/${selectedBranchId}/hours`, {
+      const res = await configApiFetch(`/api/admin/config/branches/${selectedBranchId}/hours`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -407,7 +408,7 @@ export default function CentralBranchesConfigPanel() {
     if (!selectedBranchId || !currentHours) return;
 
     try {
-      const res = await fetch(`/api/admin/config/branches/${selectedBranchId}/hours/${currentHours.id}`, {
+      const res = await configApiFetch(`/api/admin/config/branches/${selectedBranchId}/hours/${currentHours.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -457,7 +458,7 @@ export default function CentralBranchesConfigPanel() {
       : `/api/admin/config/branches/${selectedBranchId}/establishments`;
 
     try {
-      const res = await fetch(endpoint, {
+      const res = await configApiFetch(endpoint, {
         method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -484,7 +485,7 @@ export default function CentralBranchesConfigPanel() {
     if (!selectedBranchId) return;
 
     try {
-      const res = await fetch(`/api/admin/config/branches/${selectedBranchId}/establishments/${row.id}`, {
+      const res = await configApiFetch(`/api/admin/config/branches/${selectedBranchId}/establishments/${row.id}`, {
         method: "PATCH"
       });
       const json = await readJson<{ ok?: boolean; error?: string }>(res);

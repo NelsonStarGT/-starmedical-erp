@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma, TextDocVersion } from "@prisma/client";
 import type { ClinicalTemplateDefinition } from "@/components/medical/encounter/types";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { clinicalTemplateUpsertSchema } from "@/lib/medical/schemas";
 import { defaultClinicalTemplates, normalizeTemplatePayload } from "@/lib/medical/clinical";
 
@@ -111,7 +111,7 @@ async function withMemoryFallback<T>(dbOperation: () => Promise<T>, memoryOperat
     return await dbOperation();
   } catch (error) {
     if (!isPrismaMissingTableError(error)) throw error;
-    warnDevMissingTable("clinical-templates", error);
+    logPrismaSchemaIssue("clinical-templates", error);
     globalForMedical.clinicalTemplateStoreForceMemory = true;
     return memoryOperation();
   }

@@ -6,6 +6,7 @@ import { ClientAffiliationPayerType, ClientAffiliationStatus, ClientProfileType 
 import { PlusCircle, Save, Trash2 } from "lucide-react";
 import {
   actionAddClientAffiliation,
+  actionConfirmClientAffiliation,
   actionDeleteClientAffiliation,
   actionUpdateClientAffiliation
 } from "@/app/admin/clientes/actions";
@@ -19,7 +20,10 @@ export type ClientAffiliationRow = {
   entityType: ClientProfileType;
   entityLabel: string;
   role: string | null;
+  notes: string | null;
   status: ClientAffiliationStatus;
+  effectiveStatus: ClientAffiliationStatus;
+  lastVerifiedAt: string | null;
   payerType: ClientAffiliationPayerType;
   payerClientId: string | null;
   payerLabel: string | null;
@@ -31,6 +35,7 @@ type AddAffiliationState = {
   entityClientId: string;
   entityLabel: string;
   role: string;
+  notes: string;
   status: ClientAffiliationStatus;
   payerType: ClientAffiliationPayerType;
   payerClientId: string;
@@ -65,6 +70,7 @@ function buildEmptyAffiliationState(): AddAffiliationState {
     entityClientId: "",
     entityLabel: "",
     role: "",
+    notes: "",
     status: ClientAffiliationStatus.ACTIVE,
     payerType: ClientAffiliationPayerType.PERSON,
     payerClientId: "",
@@ -111,14 +117,21 @@ function AffiliationRow({ clientId, row, onChanged }: { clientId: string; row: C
 
   const [form, setForm] = useState(() => ({
     role: row.role ?? "",
-    status: row.status,
+    notes: row.notes ?? "",
+    status: row.effectiveStatus,
     payerType: row.payerType,
     payerClientId: row.payerClientId ?? "",
     payerLabel: row.payerLabel ?? "",
     isPrimaryPayer: row.isPrimaryPayer
   }));
 
-  const statusBadgeTone = row.status === ClientAffiliationStatus.ACTIVE ? "ok" : "muted";
+  const effectiveStatus = row.effectiveStatus;
+  const statusBadgeTone =
+    effectiveStatus === ClientAffiliationStatus.ACTIVE
+      ? "ok"
+      : effectiveStatus === ClientAffiliationStatus.PENDING_VERIFY
+        ? "warn"
+        : "muted";
 
   const canSave = useMemo(() => !isPending, [isPending]);
 
@@ -129,6 +142,7 @@ function AffiliationRow({ clientId, row, onChanged }: { clientId: string; row: C
           affiliationId: row.id,
           personClientId: clientId,
           role: form.role,
+          notes: form.notes,
           status: form.status,
           payerType: form.payerType,
           payerClientId: form.payerType === ClientAffiliationPayerType.PERSON ? undefined : form.payerClientId || undefined,
@@ -154,6 +168,18 @@ function AffiliationRow({ clientId, row, onChanged }: { clientId: string; row: C
     });
   };
 
+  const confirm = () => {
+    startTransition(async () => {
+      try {
+        await actionConfirmClientAffiliation({ affiliationId: row.id, personClientId: clientId });
+        setError(null);
+        onChanged();
+      } catch (err) {
+        setError((err as Error)?.message || "No se pudo confirmar la afiliación.");
+      }
+    });
+  };
+
   return (
     <details className="group rounded-xl border border-slate-200 bg-white p-4">
       <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
@@ -162,6 +188,9 @@ function AffiliationRow({ clientId, row, onChanged }: { clientId: string; row: C
           <p className="text-xs text-slate-500">
             {CLIENT_TYPE_LABELS[row.entityType]} {row.role ? `· ${row.role}` : ""}
           </p>
+          <p className="text-[11px] text-slate-500">
+            {row.lastVerifiedAt ? `Últ. verificación: ${new Date(row.lastVerifiedAt).toLocaleDateString()}` : "Sin verificación registrada"}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -169,10 +198,16 @@ function AffiliationRow({ clientId, row, onChanged }: { clientId: string; row: C
               "rounded-full border px-3 py-1 text-xs font-semibold",
               statusBadgeTone === "ok"
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : statusBadgeTone === "warn"
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
                 : "border-slate-200 bg-slate-50 text-slate-700"
             )}
           >
-            {row.status === ClientAffiliationStatus.ACTIVE ? "Activa" : "Inactiva"}
+            {effectiveStatus === ClientAffiliationStatus.ACTIVE
+              ? "Activa"
+              : effectiveStatus === ClientAffiliationStatus.PENDING_VERIFY
+                ? "Pendiente de verificar"
+                : "Inactiva"}
           </span>
           <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
             Responsable de pago:{" "}
@@ -182,7 +217,7 @@ function AffiliationRow({ clientId, row, onChanged }: { clientId: string; row: C
                 ? row.payerLabel
                 : row.entityLabel}
           </span>
-          {row.status === ClientAffiliationStatus.ACTIVE && row.isPrimaryPayer && (
+          {effectiveStatus === ClientAffiliationStatus.ACTIVE && row.isPrimaryPayer && (
             <span className="rounded-full border border-[#4aadf5]/50 bg-[#4aadf5]/10 px-3 py-1 text-xs font-semibold text-[#2e75ba]">
               Responsable principal
             </span>
@@ -197,6 +232,13 @@ function AffiliationRow({ clientId, row, onChanged }: { clientId: string; row: C
           onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}
           placeholder="Rol (opcional) · ej. Empleado, Paciente corporativo…"
           className="md:col-span-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
+        />
+
+        <textarea
+          value={form.notes}
+          onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+          placeholder="Notas de afiliación (opcional)"
+          className="md:col-span-2 min-h-[70px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
         />
 
         <div className="space-y-1">
@@ -216,6 +258,7 @@ function AffiliationRow({ clientId, row, onChanged }: { clientId: string; row: C
             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
           >
             <option value={ClientAffiliationStatus.ACTIVE}>Activa</option>
+            <option value={ClientAffiliationStatus.PENDING_VERIFY}>Pendiente de verificar</option>
             <option value={ClientAffiliationStatus.INACTIVE}>Inactiva</option>
           </select>
         </div>
@@ -281,6 +324,17 @@ function AffiliationRow({ clientId, row, onChanged }: { clientId: string; row: C
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
+          onClick={confirm}
+          disabled={isPending}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:border-emerald-300",
+            isPending && "cursor-not-allowed opacity-60"
+          )}
+        >
+          {row.status === ClientAffiliationStatus.INACTIVE ? "Reactivar" : "Confirmar"}
+        </button>
+        <button
+          type="button"
           onClick={submit}
           disabled={!canSave}
           className={cn(
@@ -328,6 +382,7 @@ function AddAffiliationForm({ clientId, onCreated }: { clientId: string; onCreat
           entityType: form.entityType,
           entityClientId: form.entityClientId,
           role: form.role,
+          notes: form.notes,
           status: form.status,
           payerType: form.payerType,
           payerClientId: form.payerType === ClientAffiliationPayerType.PERSON ? undefined : form.payerClientId || undefined,
@@ -402,6 +457,13 @@ function AddAffiliationForm({ clientId, onCreated }: { clientId: string; onCreat
           className="md:col-span-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
         />
 
+        <textarea
+          value={form.notes}
+          onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+          placeholder="Notas de afiliación (opcional)"
+          className="md:col-span-2 min-h-[70px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
+        />
+
         <div className="space-y-1">
           <p className="text-xs font-semibold text-slate-500">Estado</p>
           <select
@@ -419,6 +481,7 @@ function AddAffiliationForm({ clientId, onCreated }: { clientId: string; onCreat
             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-diagnostics-primary focus:outline-none focus:ring-2 focus:ring-diagnostics-primary/30"
           >
             <option value={ClientAffiliationStatus.ACTIVE}>Activa</option>
+            <option value={ClientAffiliationStatus.PENDING_VERIFY}>Pendiente de verificar</option>
             <option value={ClientAffiliationStatus.INACTIVE}>Inactiva</option>
           </select>
         </div>

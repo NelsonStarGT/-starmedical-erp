@@ -19,7 +19,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BILLING_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BILLING_READ");
   if (auth.response) return auth.response;
 
   try {
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_BILLING_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_BILLING_WRITE");
   if (auth.response) return auth.response;
 
   const tenantId = normalizeTenantId(auth.user?.tenantId);

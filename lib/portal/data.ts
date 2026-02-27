@@ -1,6 +1,6 @@
 import { DocStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { getPortalPersonDisplayName, type PortalPersonIdentity } from "@/lib/portal/identity";
 import type { PortalSessionClient } from "@/lib/portal/session";
 
@@ -199,7 +199,7 @@ function buildPortalMembershipPlaceholder(): PortalMembershipSummary {
 function fallbackOnMissingTable<T>(context: string, fallback: T) {
   return (error: unknown): T => {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable(context, error);
+      logPrismaSchemaIssue(context, error);
       return fallback;
     }
     throw error;
@@ -306,7 +306,7 @@ async function safeLoadInvoicesByPartyIds(partyIds: string[]): Promise<PortalInv
     }));
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.data.receivable.findMany", error);
+      logPrismaSchemaIssue("portal.data.receivable.findMany", error);
       return [];
     }
     throw error;
@@ -658,7 +658,7 @@ export async function getPortalMembershipSummary(clientId: string): Promise<Port
     };
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("portal.data.membership.contract.findFirst", error);
+      logPrismaSchemaIssue("portal.data.membership.contract.findFirst", error);
       return buildPortalMembershipPlaceholder();
     }
     if (isMembershipSchemaMismatchError(error)) {

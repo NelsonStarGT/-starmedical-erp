@@ -152,7 +152,7 @@ function isValidEmail(value: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_EMAIL_READ");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_EMAIL_READ");
   if (auth.response) return auth.response;
   const tenantId = normalizeTenantId(auth.user?.tenantId);
 
@@ -178,7 +178,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireConfigCentralCapability(req, "CONFIG_EMAIL_WRITE");
+  const auth = await requireConfigCentralCapability(req, "CONFIG_EMAIL_WRITE");
   if (auth.response) return auth.response;
   const tenantId = normalizeTenantId(auth.user?.tenantId);
 

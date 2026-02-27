@@ -1,5 +1,6 @@
 "use client";
 
+import { configApiFetch } from "@/lib/config-central/clientAuth";
 import { Lock } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -54,7 +55,7 @@ export default function ConfigSectionNav() {
 
     const loadViewer = async () => {
       try {
-        const response = await fetch("/api/me", { cache: "no-store" });
+        const response = await configApiFetch("/api/me", { cache: "no-store", credentials: "same-origin" });
         if (!response.ok) {
           if (!cancelled) setViewer(null);
           return;

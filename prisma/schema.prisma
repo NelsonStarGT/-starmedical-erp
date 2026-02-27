@@ -20,6 +20,7 @@ model User {
   createdAt                    DateTime                     @default(now())
   updatedAt                    DateTime                     @updatedAt
   auditLogs                    AuditLog[]                   @relation("AuditActor")
+  resolvedSystemEvents         SystemEventLog[]             @relation("SystemEventResolvedBy")
   b2bProposalsCreated          B2BProposalDoc[]             @relation("B2BProposalCreatedBy")
   b2bProposalsUpdated          B2BProposalDoc[]             @relation("B2BProposalUpdatedBy")
   dealsOwned                   CrmDeal[]                    @relation("DealOwnerUser")
@@ -179,6 +180,34 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([action])
   @@index([actorUserId])
+}
+
+model SystemEventLog {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  tenantId     String?
+  domain       String
+  eventType    String
+  severity     String
+  code         String?
+  resource     String?
+  messageShort String
+  digest       String
+  metaJson     Json?
+  resolvedAt   DateTime?
+  resolvedByUserId String?
+  resolutionNote String?
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  resolvedByUser User?  @relation("SystemEventResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([tenantId, createdAt])
+  @@index([domain, createdAt])
+  @@index([eventType, createdAt])
+  @@index([severity, createdAt])
+  @@index([digest])
+  @@index([resolvedAt])
+  @@index([resolvedByUserId, resolvedAt])
 }
 
 model AppointmentType {
@@ -798,6 +827,7 @@ model Tenant {
   userBranchAccesses    UserBranchAccess[]
   branchBillingProfiles BranchBillingProfile[]
   tradeUnits            TradeUnit[]
+  systemEventLogs       SystemEventLog[]
 }
 
 model Party {
@@ -1256,11 +1286,14 @@ model ClientSelfRegistration {
 
 model ClientAffiliation {
   id             String                     @id @default(cuid())
+  tenantId       String
   personClientId String
   entityType     ClientProfileType
   entityClientId String
   role           String?
+  notes          String?
   status         ClientAffiliationStatus    @default(ACTIVE)
+  lastVerifiedAt DateTime?
   payerType      ClientAffiliationPayerType @default(PERSON)
   payerClientId  String?
   isPrimaryPayer Boolean                    @default(false)
@@ -1271,8 +1304,8 @@ model ClientAffiliation {
   entity         ClientProfile              @relation("ClientAffiliationEntity", fields: [entityClientId], references: [id], onDelete: Cascade)
   payerClient    ClientProfile?             @relation("ClientAffiliationPayer", fields: [payerClientId], references: [id], onDelete: SetNull)
 
-  @@index([personClientId, status, deletedAt])
-  @@index([entityType, entityClientId, deletedAt])
+  @@index([tenantId, personClientId, status, deletedAt])
+  @@index([tenantId, entityType, entityClientId, deletedAt])
   @@index([payerClientId])
   @@index([isPrimaryPayer, deletedAt])
 }
@@ -5790,6 +5823,7 @@ enum TenantWeekStartsOn {
 
 enum ClientAffiliationStatus {
   ACTIVE
+  PENDING_VERIFY
   INACTIVE
 }
 

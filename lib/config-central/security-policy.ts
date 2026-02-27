@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { isPrismaSchemaMismatchError } from "@/lib/config-central/errors";
 import { normalizeTenantId } from "@/lib/tenant";
 
@@ -155,7 +155,7 @@ export async function getTenantSecurityPolicy(tenantIdInput: unknown): Promise<T
     return rowToSnapshot(row);
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("config.securityPolicy.get", error);
+      logPrismaSchemaIssue("config.securityPolicy.get", error);
       return buildTenantSecurityPolicyDefaults(tenantId);
     }
     if (isPrismaSchemaMismatchError(error)) {

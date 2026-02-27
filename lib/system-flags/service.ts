@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { isPrismaMissingTableError, warnDevMissingTable } from "@/lib/prisma/errors";
+import { isPrismaMissingTableError, logPrismaSchemaIssue } from "@/lib/prisma/errors.server";
 import { isPrismaSchemaMismatchError } from "@/lib/config-central/errors";
 
 const systemFeatureFlagsSchema = z
@@ -318,7 +318,7 @@ export async function getSystemFeatureConfig(): Promise<SystemFeatureConfigSnaps
     return rowToSnapshot(row);
   } catch (error) {
     if (isPrismaMissingTableError(error)) {
-      warnDevMissingTable("config.systemFlags.get", error);
+      logPrismaSchemaIssue("config.systemFlags.get", error);
       return buildSystemFeatureConfigDefaults();
     }
     if (isPrismaSchemaMismatchError(error)) {
