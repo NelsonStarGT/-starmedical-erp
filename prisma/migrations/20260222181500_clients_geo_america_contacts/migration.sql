@@ -15,7 +15,11 @@ ALTER TABLE "GeoDivision"
 -- Extend existing GeoDivision datasource enum with baseline seed marker
 DO $$
 BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1
+    FROM pg_type t
+    WHERE t.typname = 'GeoDivisionDataSource'
+  ) AND NOT EXISTS (
     SELECT 1
     FROM pg_type t
     JOIN pg_enum e ON e.enumtypid = t.oid
