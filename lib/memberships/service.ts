@@ -43,6 +43,34 @@ type MembershipPlanSegmentType = "B2C" | "B2B";
 const MEMBERSHIP_STATUS_SET = new Set<string>(Object.values(MembershipStatus));
 const pickKnownMembershipStatuses = (...values: Array<string | undefined | null>) =>
   values.filter((value): value is MembershipStatus => Boolean(value) && MEMBERSHIP_STATUS_SET.has(String(value)));
+let membershipStatusDbSetPromise: Promise<Set<string>> | null = null;
+
+async function getMembershipStatusDbSet() {
+  if (!membershipStatusDbSetPromise) {
+    membershipStatusDbSetPromise = (async () => {
+      try {
+        const rows = await prisma.$queryRawUnsafe<Array<{ enumlabel: string }>>(
+          `SELECT e.enumlabel
+           FROM pg_enum e
+           JOIN pg_type t ON t.oid = e.enumtypid
+           WHERE t.typname = 'MembershipStatus'`
+        );
+        if (Array.isArray(rows) && rows.length > 0) {
+          return new Set(rows.map((row) => String(row.enumlabel)));
+        }
+      } catch {
+        // fallback local when enum lookup is unavailable
+      }
+      return new Set(MEMBERSHIP_STATUS_SET);
+    })();
+  }
+  return membershipStatusDbSetPromise;
+}
+
+async function pickQueryableMembershipStatuses(...values: Array<string | undefined | null>) {
+  const dbStatusSet = await getMembershipStatusDbSet();
+  return values.filter((value): value is MembershipStatus => Boolean(value) && dbStatusSet.has(String(value)));
+}
 
 const RENEWAL_STATUS = pickKnownMembershipStatuses(
   MembershipStatus.ACTIVO,
@@ -680,12 +708,13 @@ export async function setPlanStatus(id: string, active: boolean) {
 
 export async function listContracts(input: ListContractsInput, user: SessionUser | null) {
   const nowDate = now();
+  const dbStatusSet = await getMembershipStatusDbSet();
   const where: Prisma.MembershipContractWhereInput = {
     ...planBranchWhere(user)
   };
 
   if (input.ownerType) where.ownerType = input.ownerType;
-  if (input.status) where.status = input.status;
+  if (input.status && dbStatusSet.has(input.status)) where.status = input.status;
   if (input.ownerId) where.ownerId = input.ownerId;
   if (input.planId) where.planId = input.planId;
   if (input.branchId) where.assignedBranchId = input.branchId;
@@ -1090,10 +1119,14 @@ export async function registerPayment(_prismaLike: any, contractId: string, rawI
 export async function listRenewalQueue(user: SessionUser | null) {
   const today = now();
   const in30Days = addMonths(today, 1);
+  const renewalStatuses = await pickQueryableMembershipStatuses(...RENEWAL_STATUS);
+  if (!renewalStatuses.length) {
+    return { dueIn7: [], dueIn15: [], dueIn30: [], all: [] };
+  }
 
   const rows = await prisma.membershipContract.findMany({
     where: {
-      status: { in: RENEWAL_STATUS },
+      status: { in: renewalStatuses },
       nextRenewAt: {
         gte: today,
         lte: in30Days
@@ -1200,12 +1233,12 @@ export async function getMembershipDashboard(user: SessionUser | null) {
   const contractScope: Prisma.MembershipContractWhereInput = {
     ...planBranchWhere(user)
   };
-  const activeOrPendingStatuses = pickKnownMembershipStatuses(
+  const activeOrPendingStatuses = await pickQueryableMembershipStatuses(
     MembershipStatus.ACTIVO,
     MembershipStatus.PENDIENTE,
     MembershipStatus.PENDIENTE_PAGO
   );
-  const riskStatuses = pickKnownMembershipStatuses(
+  const riskStatuses = await pickQueryableMembershipStatuses(
     MembershipStatus.PENDIENTE,
     MembershipStatus.PENDIENTE_PAGO,
     MembershipStatus.SUSPENDIDO,
