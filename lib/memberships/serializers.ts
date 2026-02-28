@@ -12,17 +12,13 @@ export function decimalToNumberOrZero(value: Prisma.Decimal | number | string | 
 }
 
 export function serializePlan(plan: any) {
-  const durationPreset = plan?.durationPreset ?? plan?.MembershipDurationPreset ?? null;
-  const category = plan?.category ?? plan?.MembershipPlanCategory ?? null;
-  const benefitsRaw = Array.isArray(plan?.benefits)
-    ? plan.benefits
-    : Array.isArray(plan?.MembershipPlanBenefit)
-      ? plan.MembershipPlanBenefit
-      : [];
+  const durationPreset = plan?.durationPreset ?? null;
+  const category = plan?.category ?? null;
+  const benefitsRaw = Array.isArray(plan?.benefits) ? plan.benefits : [];
   const benefits = benefitsRaw.map((item: any) => ({
     ...item,
-    benefitCatalog: item?.benefitCatalog ?? item?.MembershipBenefitCatalog ?? null,
-    MembershipBenefitCatalog: item?.benefitCatalog ?? item?.MembershipBenefitCatalog ?? null
+    benefitCatalog: item?.benefitCatalog ?? null,
+    MembershipBenefitCatalog: item?.benefitCatalog ?? null
   }));
 
   return {
@@ -39,19 +35,11 @@ export function serializePlan(plan: any) {
 }
 
 export function serializeContract(contract: any) {
-  const owner = contract?.owner ?? contract?.ClientProfile ?? null;
-  const plan = contract?.plan ?? contract?.MembershipPlan ?? null;
-  const billingProfile = contract?.billingProfile ?? contract?.MembershipContractBillingProfile ?? null;
-  const dependents = Array.isArray(contract?.dependents)
-    ? contract.dependents
-    : Array.isArray(contract?.MembershipDependent)
-      ? contract.MembershipDependent
-      : [];
-  const paymentsRaw = Array.isArray(contract?.payments)
-    ? contract.payments
-    : Array.isArray(contract?.MembershipPayment)
-      ? contract.MembershipPayment
-      : [];
+  const owner = contract?.owner ?? null;
+  const plan = contract?.plan ?? null;
+  const billingProfile = contract?.billingProfile ?? null;
+  const dependents = Array.isArray(contract?.dependents) ? contract.dependents : [];
+  const paymentsRaw = Array.isArray(contract?.payments) ? contract.payments : [];
   const payments = paymentsRaw.map((payment: any) => ({
     ...payment,
     amount: decimalToNumberOrZero(payment.amount)

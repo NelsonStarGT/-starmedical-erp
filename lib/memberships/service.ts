@@ -191,12 +191,8 @@ function computeContractMrr(contract: {
     priceMonthly: Prisma.Decimal;
     priceAnnual: Prisma.Decimal;
   } | null;
-  MembershipPlan?: {
-    priceMonthly: Prisma.Decimal;
-    priceAnnual: Prisma.Decimal;
-  } | null;
 }) {
-  const planRef = contract.plan ?? contract.MembershipPlan;
+  const planRef = contract.plan ?? null;
   const monthly = decimalToNumberOrZero(contract.priceLockedMonthly ?? planRef?.priceMonthly ?? 0);
   const annual = decimalToNumberOrZero(contract.priceLockedAnnual ?? planRef?.priceAnnual ?? 0);
 
@@ -214,12 +210,8 @@ function computeRenewalAmount(contract: {
     priceMonthly: Prisma.Decimal;
     priceAnnual: Prisma.Decimal;
   } | null;
-  MembershipPlan?: {
-    priceMonthly: Prisma.Decimal;
-    priceAnnual: Prisma.Decimal;
-  } | null;
 }) {
-  const planRef = contract.plan ?? contract.MembershipPlan;
+  const planRef = contract.plan ?? null;
   const monthly = decimalToNumberOrZero(contract.priceLockedMonthly ?? planRef?.priceMonthly ?? 0);
   const annual = decimalToNumberOrZero(contract.priceLockedAnnual ?? planRef?.priceAnnual ?? 0);
 
@@ -488,7 +480,7 @@ export async function listPlans(input: ListPlansInput = {}) {
       ...PLAN_INCLUDE,
       _count: {
         select: {
-          MembershipContract: {
+          contracts: {
             where: {
               status: MembershipStatus.ACTIVO
             }
@@ -501,7 +493,7 @@ export async function listPlans(input: ListPlansInput = {}) {
 
   return plans.map((plan) => ({
     ...serializePlan(plan),
-    activeContracts: plan._count.MembershipContract,
+    activeContracts: plan._count.contracts,
     benefitsCount: plan.benefits?.length || 0
   }));
 }
@@ -513,7 +505,7 @@ export async function getPlanById(id: string) {
       ...PLAN_INCLUDE,
       _count: {
         select: {
-          MembershipContract: {
+          contracts: {
             where: { status: MembershipStatus.ACTIVO }
           }
         }
@@ -524,7 +516,7 @@ export async function getPlanById(id: string) {
   if (!plan) throw new MembershipError("Plan no encontrado", 404);
   return {
     ...serializePlan(plan),
-    activeContracts: plan._count.MembershipContract,
+    activeContracts: plan._count.contracts,
     benefitsCount: plan.benefits?.length || 0
   };
 }
