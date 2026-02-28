@@ -5,8 +5,8 @@ export default function MembershipContractsCompaniesPage() {
     <div className="space-y-3">
       <ContractsTableView
         ownerType="COMPANY"
-        title="Contratos · Empresas (B2B)"
-        description="Gestión de contratos corporativos."
+        title="Afiliaciones · Empresas (B2B)"
+        description="Operación de afiliaciones corporativas."
       />
 
       <section className="rounded-xl border border-dashed border-slate-300 bg-[#F8FAFC] p-3">

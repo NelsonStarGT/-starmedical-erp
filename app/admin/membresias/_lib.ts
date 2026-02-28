@@ -36,6 +36,7 @@ export function dateLabel(value?: string | Date | null) {
 export function contractStatusBadgeClass(status: string) {
   if (status === "ACTIVO") return "bg-emerald-100 text-emerald-700";
   if (status === "PENDIENTE") return "bg-amber-100 text-amber-700";
+  if (status === "PENDIENTE_PAGO") return "bg-amber-100 text-amber-800";
   if (status === "SUSPENDIDO") return "bg-rose-100 text-rose-700";
   if (status === "VENCIDO") return "bg-slate-200 text-slate-700";
   if (status === "CANCELADO") return "bg-slate-300 text-slate-700";

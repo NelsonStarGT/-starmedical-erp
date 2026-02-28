@@ -185,7 +185,7 @@ export const moduleNavRegistry: ModuleNavConfig[] = [
     matchPrefixes: ["/admin/membresias"],
     items: [
       { key: "dashboard", label: "Dashboard", href: "/admin/membresias", icon: Gauge },
-      { key: "contratos", label: "Contratos", href: "/admin/membresias/contratos/pacientes", matchPrefix: "/admin/membresias/contratos", icon: FileText },
+      { key: "contratos", label: "Afiliaciones", href: "/admin/membresias/contratos/pacientes", matchPrefix: "/admin/membresias/contratos", icon: FileText },
       { key: "planes", label: "Planes", href: "/admin/membresias/planes", icon: Layers },
       { key: "renovaciones", label: "Renovaciones", href: "/admin/membresias/renovaciones", icon: RefreshCw },
       { key: "configuracion", label: "Configuracion", href: "/admin/membresias/configuracion", icon: Settings }

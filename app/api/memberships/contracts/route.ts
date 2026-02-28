@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
     status: req.nextUrl.searchParams.get("status") || undefined,
     ownerId: req.nextUrl.searchParams.get("ownerId") || undefined,
     planId: req.nextUrl.searchParams.get("planId") || undefined,
+    branchId: req.nextUrl.searchParams.get("branchId") || undefined,
+    paymentMethod: req.nextUrl.searchParams.get("paymentMethod") || undefined,
     segment: req.nextUrl.searchParams.get("segment") || undefined,
     q: req.nextUrl.searchParams.get("q") || undefined,
     renewWindowDays: req.nextUrl.searchParams.get("renewWindowDays") || undefined,

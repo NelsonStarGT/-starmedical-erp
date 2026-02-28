@@ -4,8 +4,8 @@ export default function MembershipContractsPatientsPage() {
   return (
     <ContractsTableView
       ownerType="PERSON"
-      title="Contratos · Pacientes (B2C)"
-      description="Gestión de contratos individuales/familiares. Cobro y aplicación de pagos ocurre en Facturación/Finanzas."
+      title="Afiliaciones · Pacientes (B2C)"
+      description="Operación de afiliaciones individuales/familiares. Cobro y aplicación de pagos ocurre en Facturación/Finanzas."
     />
   );
 }
