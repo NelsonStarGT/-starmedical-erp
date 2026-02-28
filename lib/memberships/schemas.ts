@@ -4,10 +4,18 @@ export const membershipOwnerTypeSchema = z.enum(["PERSON", "COMPANY"]);
 export const membershipStatusSchema = z.enum(["ACTIVO", "PENDIENTE", "SUSPENDIDO", "VENCIDO", "CANCELADO"]);
 export const membershipPlanTypeSchema = z.enum(["INDIVIDUAL", "FAMILIAR", "EMPRESARIAL"]);
 export const membershipPlanSegmentSchema = z.enum(["B2C", "B2B"]);
+export const membershipBenefitServiceTypeSchema = z.enum(["CONSULTA", "LAB", "RX", "IMAGEN", "FARMACIA", "AUDIOLOGIA", "OTRO"]);
 export const membershipBillingFrequencySchema = z.enum(["MONTHLY", "ANNUAL", "SEMIANNUAL", "QUARTERLY"]);
 export const membershipPaymentMethodSchema = z.enum(["CASH", "TRANSFER", "CARD"]);
 export const membershipPaymentKindSchema = z.enum(["INITIAL", "RENEWAL", "EXTRA"]);
 export const membershipPaymentStatusSchema = z.enum(["PAID", "PENDING", "FAILED"]);
+
+export const planBenefitInputSchema = z.object({
+  benefitId: z.string().trim().min(1),
+  quantity: z.coerce.number().int().min(1).max(9999).optional().nullable(),
+  isUnlimited: z.boolean().optional(),
+  notes: z.string().trim().max(240).optional().nullable()
+});
 
 export const listPlansQuerySchema = z.object({
   active: z
@@ -31,12 +39,15 @@ export const createPlanSchema = z.object({
   type: membershipPlanTypeSchema.optional(),
   segment: membershipPlanSegmentSchema,
   categoryId: z.string().trim().min(1).max(64).optional().nullable(),
+  durationPresetId: z.string().trim().min(1).max(64).optional().nullable(),
+  customDurationDays: z.coerce.number().int().min(1).max(3650).optional().nullable(),
   imageUrl: z.string().trim().url().max(2048).optional().nullable(),
   active: z.boolean().optional(),
   priceMonthly: z.coerce.number().positive(),
   priceAnnual: z.coerce.number().positive(),
   currency: z.string().trim().toUpperCase().min(3).max(8).default("GTQ"),
-  maxDependents: z.coerce.number().int().min(0).max(999).optional().nullable()
+  maxDependents: z.coerce.number().int().min(0).max(999).optional().nullable(),
+  benefits: z.array(planBenefitInputSchema).max(100).optional()
 });
 
 export const updatePlanSchema = z
@@ -53,12 +64,15 @@ export const updatePlanSchema = z
     type: membershipPlanTypeSchema.optional(),
     segment: membershipPlanSegmentSchema.optional(),
     categoryId: z.string().trim().min(1).max(64).optional().nullable(),
+    durationPresetId: z.string().trim().min(1).max(64).optional().nullable(),
+    customDurationDays: z.coerce.number().int().min(1).max(3650).optional().nullable(),
     imageUrl: z.string().trim().url().max(2048).optional().nullable(),
     active: z.boolean().optional(),
     priceMonthly: z.coerce.number().positive().optional(),
     priceAnnual: z.coerce.number().positive().optional(),
     currency: z.string().trim().toUpperCase().min(3).max(8).optional(),
-    maxDependents: z.coerce.number().int().min(0).max(999).optional().nullable()
+    maxDependents: z.coerce.number().int().min(0).max(999).optional().nullable(),
+    benefits: z.array(planBenefitInputSchema).max(100).optional()
   })
   .refine((payload) => Object.keys(payload).length > 0, {
     message: "Sin cambios"
@@ -167,9 +181,43 @@ export const membershipConfigSchema = z.object({
   autoRenewWithPayment: z.boolean(),
   prorateOnMidmonth: z.boolean(),
   blockIfBalanceDue: z.boolean(),
+  hidePricesForOperators: z.boolean(),
   requireInitialPayment: z.boolean(),
   cashTransferMinMonths: z.coerce.number().int().min(0).max(24),
   priceChangeNoticeDays: z.coerce.number().int().min(0).max(180)
+});
+
+export const listDurationPresetsQuerySchema = z.object({
+  includeInactive: z
+    .union([z.literal("true"), z.literal("false")])
+    .transform((value) => value === "true")
+    .optional()
+});
+
+export const createDurationPresetSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  days: z.coerce.number().int().min(1).max(3650),
+  isActive: z.boolean().optional(),
+  sortOrder: z.coerce.number().int().min(0).max(999).optional(),
+  branchId: z.string().trim().min(1).optional().nullable()
+});
+
+export const listBenefitsQuerySchema = z.object({
+  includeInactive: z
+    .union([z.literal("true"), z.literal("false")])
+    .transform((value) => value === "true")
+    .optional(),
+  serviceType: membershipBenefitServiceTypeSchema.optional()
+});
+
+export const createBenefitCatalogSchema = z.object({
+  title: z.string().trim().min(2).max(160),
+  serviceType: membershipBenefitServiceTypeSchema,
+  imageUrl: z.string().trim().url().max(2048).optional().nullable(),
+  iconKey: z.string().trim().min(1).max(80).optional().nullable(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.coerce.number().int().min(0).max(999).optional(),
+  branchId: z.string().trim().min(1).optional().nullable()
 });
 
 export const publicSubscribeSchema = z.object({

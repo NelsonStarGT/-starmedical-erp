@@ -11,10 +11,14 @@ import {
 import { prisma } from "@/lib/prisma";
 import type { SessionUser } from "@/lib/auth";
 import {
+  createBenefitCatalogSchema,
   createContractSchema,
+  createDurationPresetSchema,
   createPlanCategorySchema,
   createPlanSchema,
+  listBenefitsQuerySchema,
   listContractsQuerySchema,
+  listDurationPresetsQuerySchema,
   listPlanCategoriesQuerySchema,
   listPlansQuerySchema,
   membershipConfigSchema,
@@ -33,10 +37,23 @@ const CURRENCY_ALLOWLIST = new Set(["GTQ", "USD", "EUR"]);
 type MembershipPlanSegmentType = "B2C" | "B2B";
 
 const RENEWAL_STATUS = [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE, MembershipStatus.SUSPENDIDO, MembershipStatus.VENCIDO];
+const PLAN_INCLUDE = {
+  MembershipPlanCategory: true,
+  MembershipDurationPreset: true,
+  MembershipPlanBenefit: {
+    include: {
+      MembershipBenefitCatalog: true
+    }
+  }
+} as const;
 
 type ListPlansInput = z.infer<typeof listPlansQuerySchema>;
 type CreatePlanInput = z.infer<typeof createPlanSchema>;
 type UpdatePlanInput = z.infer<typeof updatePlanSchema>;
+type ListDurationPresetsInput = z.infer<typeof listDurationPresetsQuerySchema>;
+type CreateDurationPresetInput = z.infer<typeof createDurationPresetSchema>;
+type ListBenefitsInput = z.infer<typeof listBenefitsQuerySchema>;
+type CreateBenefitCatalogInput = z.infer<typeof createBenefitCatalogSchema>;
 type ListCategoriesInput = z.infer<typeof listPlanCategoriesQuerySchema>;
 type CreateCategoryInput = z.infer<typeof createPlanCategorySchema>;
 type UpdateCategoryInput = z.infer<typeof updatePlanCategorySchema>;
@@ -145,6 +162,54 @@ async function assertCategoryForSegment(categoryId: string | null | undefined, s
   return category;
 }
 
+function catalogBranchScope(user: SessionUser | null) {
+  if (!user?.branchId) return {};
+  return {
+    OR: [{ branchId: user.branchId }, { branchId: null }]
+  };
+}
+
+function resolveCatalogBranchId(inputBranchId: string | null | undefined, user: SessionUser | null) {
+  if (inputBranchId !== undefined && inputBranchId !== null) {
+    if (user?.branchId && inputBranchId !== user.branchId) {
+      throw new MembershipError("No autorizado para configurar catálogos en otra sucursal", 403);
+    }
+    return inputBranchId;
+  }
+  return user?.branchId ?? null;
+}
+
+async function assertDurationPreset(durationPresetId: string | null | undefined) {
+  if (!durationPresetId) return null;
+  const preset = await prisma.membershipDurationPreset.findUnique({ where: { id: durationPresetId } });
+  if (!preset) throw new MembershipError("Preset de duración no encontrado", 404);
+  if (!preset.isActive) throw new MembershipError("El preset de duración está inactivo", 400);
+  return preset;
+}
+
+async function resolvePlanBenefits(benefits: Array<{ benefitId: string; quantity?: number | null; isUnlimited?: boolean; notes?: string | null }> | undefined) {
+  if (!benefits?.length) return [];
+  const uniqueBenefitIds = Array.from(new Set(benefits.map((item) => item.benefitId)));
+
+  const catalogRows = await prisma.membershipBenefitCatalog.findMany({
+    where: { id: { in: uniqueBenefitIds } }
+  });
+  const catalogById = new Map(catalogRows.map((row) => [row.id, row]));
+
+  for (const benefitId of uniqueBenefitIds) {
+    const catalog = catalogById.get(benefitId);
+    if (!catalog) throw new MembershipError(`Beneficio no encontrado: ${benefitId}`, 404);
+    if (!catalog.isActive) throw new MembershipError(`El beneficio está inactivo: ${catalog.title}`, 400);
+  }
+
+  return benefits.map((benefit) => ({
+    benefitId: benefit.benefitId,
+    quantity: benefit.quantity ?? null,
+    isUnlimited: benefit.isUnlimited ?? false,
+    notes: benefit.notes ?? null
+  }));
+}
+
 function mapPublicCustomerToOwnerType(type: "PERSON" | "COMPANY") {
   return type === "COMPANY" ? MembershipOwnerType.COMPANY : MembershipOwnerType.PERSON;
 }
@@ -236,6 +301,103 @@ export async function setPlanCategoryStatus(id: string, isActive: boolean) {
   }
 }
 
+export async function listDurationPresets(input: ListDurationPresetsInput, user: SessionUser | null) {
+  const where: Prisma.MembershipDurationPresetWhereInput = {
+    ...catalogBranchScope(user)
+  };
+  if (!input.includeInactive) where.isActive = true;
+
+  return prisma.membershipDurationPreset.findMany({
+    where,
+    orderBy: [{ sortOrder: "asc" }, { days: "asc" }, { name: "asc" }]
+  });
+}
+
+export async function createDurationPreset(input: CreateDurationPresetInput, user: SessionUser | null) {
+  const branchId = resolveCatalogBranchId(input.branchId, user);
+  try {
+    return await prisma.membershipDurationPreset.create({
+      data: {
+        name: input.name,
+        days: input.days,
+        isActive: input.isActive ?? true,
+        sortOrder: input.sortOrder ?? 0,
+        branchId,
+        updatedAt: now()
+      }
+    });
+  } catch (error: any) {
+    if (error?.code === "P2002") throw new MembershipError("Ya existe un preset con ese nombre en esta sucursal", 409);
+    throw error;
+  }
+}
+
+export async function setDurationPresetStatus(id: string, isActive: boolean, user: SessionUser | null) {
+  const current = await prisma.membershipDurationPreset.findUnique({ where: { id } });
+  if (!current) throw new MembershipError("Preset no encontrado", 404);
+  if (user?.branchId && current.branchId && current.branchId !== user.branchId) {
+    throw new MembershipError("Preset fuera del alcance de sucursal", 404);
+  }
+
+  return prisma.membershipDurationPreset.update({
+    where: { id },
+    data: {
+      isActive,
+      updatedAt: now()
+    }
+  });
+}
+
+export async function listBenefitCatalog(input: ListBenefitsInput, user: SessionUser | null) {
+  const where: Prisma.MembershipBenefitCatalogWhereInput = {
+    ...catalogBranchScope(user)
+  };
+  if (!input.includeInactive) where.isActive = true;
+  if (input.serviceType) where.serviceType = input.serviceType;
+
+  return prisma.membershipBenefitCatalog.findMany({
+    where,
+    orderBy: [{ sortOrder: "asc" }, { title: "asc" }]
+  });
+}
+
+export async function createBenefitCatalog(input: CreateBenefitCatalogInput, user: SessionUser | null) {
+  const branchId = resolveCatalogBranchId(input.branchId, user);
+  try {
+    return await prisma.membershipBenefitCatalog.create({
+      data: {
+        title: input.title,
+        serviceType: input.serviceType,
+        imageUrl: input.imageUrl ?? null,
+        iconKey: input.iconKey ?? null,
+        isActive: input.isActive ?? true,
+        sortOrder: input.sortOrder ?? 0,
+        branchId,
+        updatedAt: now()
+      }
+    });
+  } catch (error: any) {
+    if (error?.code === "P2002") throw new MembershipError("Ya existe un beneficio con ese nombre/tipo en esta sucursal", 409);
+    throw error;
+  }
+}
+
+export async function setBenefitCatalogStatus(id: string, isActive: boolean, user: SessionUser | null) {
+  const current = await prisma.membershipBenefitCatalog.findUnique({ where: { id } });
+  if (!current) throw new MembershipError("Beneficio no encontrado", 404);
+  if (user?.branchId && current.branchId && current.branchId !== user.branchId) {
+    throw new MembershipError("Beneficio fuera del alcance de sucursal", 404);
+  }
+
+  return prisma.membershipBenefitCatalog.update({
+    where: { id },
+    data: {
+      isActive,
+      updatedAt: now()
+    }
+  });
+}
+
 export async function listPlans(input: ListPlansInput = {}) {
   const where: Prisma.MembershipPlanWhereInput = {};
   if (input.active !== undefined) where.active = input.active;
@@ -245,7 +407,7 @@ export async function listPlans(input: ListPlansInput = {}) {
   const plans = await prisma.membershipPlan.findMany({
     where,
     include: {
-      MembershipPlanCategory: true,
+      ...PLAN_INCLUDE,
       _count: {
         select: {
           MembershipContract: {
@@ -259,14 +421,18 @@ export async function listPlans(input: ListPlansInput = {}) {
     orderBy: [{ active: "desc" }, { segment: "asc" }, { name: "asc" }]
   });
 
-  return plans.map((plan) => ({ ...serializePlan(plan), activeContracts: plan._count.MembershipContract }));
+  return plans.map((plan) => ({
+    ...serializePlan(plan),
+    activeContracts: plan._count.MembershipContract,
+    benefitsCount: plan.MembershipPlanBenefit?.length || 0
+  }));
 }
 
 export async function getPlanById(id: string) {
   const plan = await prisma.membershipPlan.findUnique({
     where: { id },
     include: {
-      MembershipPlanCategory: true,
+      ...PLAN_INCLUDE,
       _count: {
         select: {
           MembershipContract: {
@@ -278,7 +444,11 @@ export async function getPlanById(id: string) {
   });
 
   if (!plan) throw new MembershipError("Plan no encontrado", 404);
-  return { ...serializePlan(plan), activeContracts: plan._count.MembershipContract };
+  return {
+    ...serializePlan(plan),
+    activeContracts: plan._count.MembershipContract,
+    benefitsCount: plan.MembershipPlanBenefit?.length || 0
+  };
 }
 
 export async function createPlan(input: CreatePlanInput) {
@@ -289,29 +459,57 @@ export async function createPlan(input: CreatePlanInput) {
 
   const currency = ensureCurrencyAllowed(input.currency);
   await assertCategoryForSegment(input.categoryId, segment);
+  await assertDurationPreset(input.durationPresetId);
+  const normalizedBenefits = await resolvePlanBenefits(input.benefits);
+
+  let durationPresetId = input.durationPresetId ?? null;
+  let customDurationDays = input.customDurationDays ?? null;
+  if (durationPresetId) customDurationDays = null;
+  if (customDurationDays) durationPresetId = null;
 
   try {
-    const plan = await prisma.membershipPlan.create({
-      data: {
-        slug,
-        name: input.name,
-        description: input.description ?? null,
-        type,
-        segment,
-        categoryId: input.categoryId ?? null,
-        imageUrl: input.imageUrl ?? null,
-        active: input.active ?? true,
-        priceMonthly: new Prisma.Decimal(input.priceMonthly),
-        priceAnnual: new Prisma.Decimal(input.priceAnnual),
-        currency,
-        maxDependents: input.maxDependents ?? null,
-        updatedAt: now()
-      },
-      include: {
-        MembershipPlanCategory: true
+    const plan = await prisma.$transaction(async (tx) => {
+      const created = await tx.membershipPlan.create({
+        data: {
+          slug,
+          name: input.name,
+          description: input.description ?? null,
+          type,
+          segment,
+          categoryId: input.categoryId ?? null,
+          durationPresetId,
+          customDurationDays,
+          imageUrl: input.imageUrl ?? null,
+          active: input.active ?? true,
+          priceMonthly: new Prisma.Decimal(input.priceMonthly),
+          priceAnnual: new Prisma.Decimal(input.priceAnnual),
+          currency,
+          maxDependents: input.maxDependents ?? null,
+          updatedAt: now()
+        }
+      });
+
+      if (normalizedBenefits.length) {
+        await tx.membershipPlanBenefit.createMany({
+          data: normalizedBenefits.map((benefit) => ({
+            planId: created.id,
+            benefitId: benefit.benefitId,
+            quantity: benefit.quantity,
+            isUnlimited: benefit.isUnlimited,
+            notes: benefit.notes,
+            createdAt: now(),
+            updatedAt: now()
+          }))
+        });
       }
+
+      return tx.membershipPlan.findUnique({
+        where: { id: created.id },
+        include: PLAN_INCLUDE
+      });
     });
 
+    if (!plan) throw new MembershipError("No se pudo crear el plan", 500);
     return serializePlan(plan);
   } catch (error: any) {
     if (error?.code === "P2002") throw new MembershipError("Slug o nombre ya existente", 409);
@@ -328,6 +526,11 @@ export async function updatePlan(id: string, input: UpdatePlanInput) {
   if (input.categoryId !== undefined) {
     await assertCategoryForSegment(input.categoryId, nextSegment);
   }
+  if (input.durationPresetId !== undefined) {
+    await assertDurationPreset(input.durationPresetId);
+  }
+
+  const normalizedBenefits = input.benefits ? await resolvePlanBenefits(input.benefits) : null;
 
   const activeContracts = await prisma.membershipContract.count({
     where: {
@@ -344,6 +547,11 @@ export async function updatePlan(id: string, input: UpdatePlanInput) {
     );
   }
 
+  let nextDurationPresetId = input.durationPresetId !== undefined ? input.durationPresetId : current.durationPresetId;
+  let nextCustomDurationDays = input.customDurationDays !== undefined ? input.customDurationDays : current.customDurationDays;
+  if (nextDurationPresetId) nextCustomDurationDays = null;
+  if (nextCustomDurationDays) nextDurationPresetId = null;
+
   const payload: Prisma.MembershipPlanUpdateInput = {
     ...(input.slug !== undefined ? { slug: input.slug } : {}),
     ...(input.name !== undefined ? { name: input.name } : {}),
@@ -351,6 +559,12 @@ export async function updatePlan(id: string, input: UpdatePlanInput) {
     ...(input.type !== undefined ? { type: input.type } : {}),
     ...(input.segment !== undefined ? { segment: input.segment } : {}),
     ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
+    ...(input.durationPresetId !== undefined || input.customDurationDays !== undefined
+      ? {
+          durationPresetId: nextDurationPresetId,
+          customDurationDays: nextCustomDurationDays
+        }
+      : {}),
     ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
     ...(input.active !== undefined ? { active: input.active } : {}),
     ...(input.priceMonthly !== undefined ? { priceMonthly: new Prisma.Decimal(input.priceMonthly) } : {}),
@@ -361,13 +575,35 @@ export async function updatePlan(id: string, input: UpdatePlanInput) {
   };
 
   try {
-    const updated = await prisma.membershipPlan.update({
-      where: { id },
-      data: payload,
-      include: {
-        MembershipPlanCategory: true
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.membershipPlan.update({
+        where: { id },
+        data: payload
+      });
+
+      if (normalizedBenefits) {
+        await tx.membershipPlanBenefit.deleteMany({ where: { planId: id } });
+        if (normalizedBenefits.length) {
+          await tx.membershipPlanBenefit.createMany({
+            data: normalizedBenefits.map((benefit) => ({
+              planId: id,
+              benefitId: benefit.benefitId,
+              quantity: benefit.quantity,
+              isUnlimited: benefit.isUnlimited,
+              notes: benefit.notes,
+              createdAt: now(),
+              updatedAt: now()
+            }))
+          });
+        }
       }
+
+      return tx.membershipPlan.findUnique({
+        where: { id },
+        include: PLAN_INCLUDE
+      });
     });
+    if (!updated) throw new MembershipError("No se pudo actualizar el plan", 500);
     return serializePlan(updated);
   } catch (error: any) {
     if (error?.code === "P2002") throw new MembershipError("Slug o nombre ya existente", 409);
@@ -383,9 +619,7 @@ export async function setPlanStatus(id: string, active: boolean) {
         active,
         updatedAt: now()
       },
-      include: {
-        MembershipPlanCategory: true
-      }
+      include: PLAN_INCLUDE
     });
     return serializePlan(plan);
   } catch (error: any) {
@@ -720,6 +954,7 @@ export async function getMembershipConfig() {
       autoRenewWithPayment: true,
       prorateOnMidmonth: true,
       blockIfBalanceDue: true,
+      hidePricesForOperators: true,
       requireInitialPayment: true,
       cashTransferMinMonths: 2,
       priceChangeNoticeDays: 30,

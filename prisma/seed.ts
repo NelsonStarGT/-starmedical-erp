@@ -1259,6 +1259,85 @@ async function main() {
     }
   }
 
+  const membershipDurationPresetDelegate = (prisma as any).membershipDurationPreset;
+  const durationPresets = [
+    { name: "15 días", days: 15, sortOrder: 10 },
+    { name: "30 días", days: 30, sortOrder: 20 },
+    { name: "3 meses", days: 90, sortOrder: 30 },
+    { name: "6 meses", days: 180, sortOrder: 40 },
+    { name: "12 meses", days: 365, sortOrder: 50 }
+  ];
+
+  if (!membershipDurationPresetDelegate?.upsert) {
+    console.info("[seed] membershipDurationPreset no disponible en Prisma client; se omite seed de presets.");
+  } else {
+    for (const preset of durationPresets) {
+      await membershipDurationPresetDelegate
+        .upsert({
+          where: {
+            branchId_name: {
+              branchId: null,
+              name: preset.name
+            }
+          },
+          update: {
+            days: preset.days,
+            isActive: true,
+            sortOrder: preset.sortOrder
+          },
+          create: {
+            name: preset.name,
+            days: preset.days,
+            isActive: true,
+            sortOrder: preset.sortOrder
+          }
+        })
+        .catch((err: unknown) => {
+          console.error("Seed duration preset failed", preset, err);
+        });
+    }
+  }
+
+  const membershipBenefitCatalogDelegate = (prisma as any).membershipBenefitCatalog;
+  const benefitCatalog = [
+    { title: "Consulta general", serviceType: "CONSULTA", sortOrder: 10, iconKey: "stethoscope" },
+    { title: "Hemograma", serviceType: "LAB", sortOrder: 20, iconKey: "flask-conical" },
+    { title: "Rx tórax", serviceType: "RX", sortOrder: 30, iconKey: "scan-line" },
+    { title: "Audiometría", serviceType: "AUDIOLOGIA", sortOrder: 40, iconKey: "ear" }
+  ];
+
+  if (!membershipBenefitCatalogDelegate?.upsert) {
+    console.info("[seed] membershipBenefitCatalog no disponible en Prisma client; se omite seed de beneficios.");
+  } else {
+    for (const benefit of benefitCatalog) {
+      await membershipBenefitCatalogDelegate
+        .upsert({
+          where: {
+            branchId_title_serviceType: {
+              branchId: null,
+              title: benefit.title,
+              serviceType: benefit.serviceType
+            }
+          },
+          update: {
+            iconKey: benefit.iconKey,
+            isActive: true,
+            sortOrder: benefit.sortOrder
+          },
+          create: {
+            title: benefit.title,
+            serviceType: benefit.serviceType,
+            iconKey: benefit.iconKey,
+            isActive: true,
+            sortOrder: benefit.sortOrder
+          }
+        })
+        .catch((err: unknown) => {
+          console.error("Seed membership benefit failed", benefit, err);
+        });
+    }
+  }
+
   const currentYear = new Date().getFullYear();
   await prisma.sequenceCounter
     .upsert({

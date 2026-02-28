@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ensureMembershipAccess } from "@/lib/api/memberships";
 import { getMembershipConfig, updateMembershipConfig } from "@/lib/memberships/service";
 import { membershipConfigSchema } from "@/lib/memberships/schemas";
-import { PERMISSIONS } from "@/lib/rbac";
+import { PERMISSIONS, hasPermission } from "@/lib/rbac";
 import { handleMembershipApiError } from "@/app/api/memberships/_utils";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,13 @@ export async function GET(req: NextRequest) {
 
   try {
     const data = await getMembershipConfig();
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      data,
+      meta: {
+        canAdmin: hasPermission(auth.user, PERMISSIONS.MEMBERSHIPS_ADMIN),
+        canViewPricing: hasPermission(auth.user, PERMISSIONS.MEMBERSHIPS_PRICING_VIEW)
+      }
+    });
   } catch (error) {
     return handleMembershipApiError(error);
   }

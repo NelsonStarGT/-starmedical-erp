@@ -14,10 +14,18 @@ type PlanRow = {
   type: string;
   segment: "B2C" | "B2B";
   active: boolean;
+  durationPresetId?: string | null;
+  customDurationDays?: number | null;
   imageUrl?: string | null;
   priceMonthly: number;
   priceAnnual: number;
   currency: string;
+  benefitsCount?: number;
+  MembershipDurationPreset?: {
+    id: string;
+    name: string;
+    days: number;
+  } | null;
   MembershipPlanCategory?: {
     id: string;
     name: string;
@@ -31,15 +39,26 @@ export default function MembershipPlansPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [canViewPricing, setCanViewPricing] = useState(false);
+  const [hidePricesForOperators, setHidePricesForOperators] = useState(true);
+
+  const shouldHidePricing = hidePricesForOperators && !canViewPricing;
 
   async function loadPlans() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/memberships/plans", { cache: "no-store" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo cargar planes");
+      const [plansRes, configRes] = await Promise.all([
+        fetch("/api/memberships/plans", { cache: "no-store" }),
+        fetch("/api/memberships/config", { cache: "no-store" })
+      ]);
+      const json = await plansRes.json();
+      const configJson = await configRes.json();
+      if (!plansRes.ok) throw new Error(json?.error || "No se pudo cargar planes");
+      if (!configRes.ok) throw new Error(configJson?.error || "No se pudo cargar permisos de pricing");
       setPlans(Array.isArray(json.data) ? json.data : []);
+      setCanViewPricing(Boolean(configJson?.meta?.canViewPricing));
+      setHidePricesForOperators(Boolean(configJson?.data?.hidePricesForOperators));
     } catch (err: any) {
       setError(err?.message || "No se pudo cargar planes");
     } finally {
@@ -82,6 +101,8 @@ export default function MembershipPlansPage() {
           type: plan.type,
           segment: plan.segment,
           categoryId: plan.MembershipPlanCategory?.id ?? null,
+          durationPresetId: plan.durationPresetId ?? null,
+          customDurationDays: plan.customDurationDays ?? null,
           imageUrl: plan.imageUrl ?? null,
           active: false,
           priceMonthly: plan.priceMonthly,
@@ -126,7 +147,7 @@ export default function MembershipPlansPage() {
       ) : null}
 
       {plans.length > 0 ? (
-        <CompactTable columns={["Plan", "Segmento", "Categoría", "Precio", "Estado", "Acciones"]}>
+        <CompactTable columns={["Plan", "Segmento", "Categoría", "Duración", "Beneficios", "Precio", "Estado", "Acciones"]}>
           {plans.map((plan) => (
             <tr key={plan.id} className="border-b border-slate-100">
               <td className="px-3 py-2">
@@ -147,9 +168,23 @@ export default function MembershipPlansPage() {
               </td>
               <td className="px-3 py-2 text-slate-700">{plan.segment}</td>
               <td className="px-3 py-2 text-slate-700">{plan.MembershipPlanCategory?.name || "Sin categoría"}</td>
+              <td className="px-3 py-2 text-slate-700">
+                {plan.MembershipDurationPreset?.name
+                  ? `${plan.MembershipDurationPreset.name} (${plan.MembershipDurationPreset.days}d)`
+                  : plan.customDurationDays
+                    ? `${plan.customDurationDays} días`
+                    : "No definido"}
+              </td>
+              <td className="px-3 py-2 text-slate-700">{plan.benefitsCount || 0}</td>
               <td className="px-3 py-2 text-slate-900">
-                <p>{money(plan.priceMonthly, plan.currency)}</p>
-                <p className="text-[11px] text-slate-500">Anual: {money(plan.priceAnnual, plan.currency)}</p>
+                {shouldHidePricing ? (
+                  <span className="text-xs text-slate-500">— oculto por permisos —</span>
+                ) : (
+                  <>
+                    <p>{money(plan.priceMonthly, plan.currency)}</p>
+                    <p className="text-[11px] text-slate-500">Anual: {money(plan.priceAnnual, plan.currency)}</p>
+                  </>
+                )}
               </td>
               <td className="px-3 py-2">
                 <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${plan.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>

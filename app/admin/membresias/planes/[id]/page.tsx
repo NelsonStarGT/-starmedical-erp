@@ -13,12 +13,20 @@ type PlanDetail = {
   type: "INDIVIDUAL" | "FAMILIAR" | "EMPRESARIAL";
   segment: "B2C" | "B2B";
   categoryId?: string | null;
+  durationPresetId?: string | null;
+  customDurationDays?: number | null;
   imageUrl?: string | null;
   active: boolean;
   priceMonthly: number;
   priceAnnual: number;
   currency: string;
   maxDependents?: number | null;
+  MembershipPlanBenefit?: Array<{
+    benefitId: string;
+    quantity?: number | null;
+    isUnlimited?: boolean;
+    notes?: string | null;
+  }>;
 };
 
 export default function MembershipPlanEditPage() {
@@ -58,7 +66,23 @@ export default function MembershipPlanEditPage() {
     <MembershipsShell title="Planes · Editar" description="Actualiza plan sin romper contratos activos.">
       {loading ? <p className="text-xs text-slate-500">Cargando plan...</p> : null}
       {error ? <p className="text-xs font-medium text-rose-600">{error}</p> : null}
-      {plan ? <PlanEditorForm mode="edit" planId={planId} initialData={plan} /> : null}
+      {plan ? (
+        <PlanEditorForm
+          mode="edit"
+          planId={planId}
+          initialData={{
+            ...plan,
+            benefits: Array.isArray(plan.MembershipPlanBenefit)
+              ? plan.MembershipPlanBenefit.map((benefit) => ({
+                  benefitId: benefit.benefitId,
+                  quantity: benefit.quantity ?? null,
+                  isUnlimited: benefit.isUnlimited ?? false,
+                  notes: benefit.notes ?? null
+                }))
+              : []
+          }}
+        />
+      ) : null}
     </MembershipsShell>
   );
 }
