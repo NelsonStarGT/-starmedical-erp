@@ -4,7 +4,6 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useT
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ClientCatalogType, ClientPhoneCategory, ClientPhoneRelationType, ClientProfileType, PatientSex } from "@prisma/client";
 import {
   ArrowLeft,
   CalendarDays,
@@ -61,6 +60,42 @@ import {
 } from "@/lib/clients/operatingCountryDefaults";
 import { useClientsDateFormat } from "@/components/clients/useClientsDateFormat";
 import { cn } from "@/lib/utils";
+
+type ClientCatalogType = "PERSON_PROFESSION" | "MARITAL_STATUS" | "ACADEMIC_LEVEL" | "RELATIONSHIP_TYPE";
+type ClientPhoneCategory = "PRIMARY" | "MOBILE" | "WORK" | "OTHER";
+type ClientPhoneRelationType = "TITULAR";
+type ClientProfileType = "PERSON" | "COMPANY" | "INSTITUTION" | "INSURER";
+type PatientSex = "F" | "M";
+
+const ClientCatalogType = {
+  PERSON_PROFESSION: "PERSON_PROFESSION",
+  MARITAL_STATUS: "MARITAL_STATUS",
+  ACADEMIC_LEVEL: "ACADEMIC_LEVEL",
+  RELATIONSHIP_TYPE: "RELATIONSHIP_TYPE"
+} as const;
+
+const ClientPhoneCategory = {
+  PRIMARY: "PRIMARY",
+  MOBILE: "MOBILE",
+  WORK: "WORK",
+  OTHER: "OTHER"
+} as const;
+
+const ClientPhoneRelationType = {
+  TITULAR: "TITULAR"
+} as const;
+
+const ClientProfileType = {
+  PERSON: "PERSON",
+  COMPANY: "COMPANY",
+  INSTITUTION: "INSTITUTION",
+  INSURER: "INSURER"
+} as const;
+
+const PatientSex = {
+  F: "F",
+  M: "M"
+} as const;
 
 type FormState = {
   firstName: string;
