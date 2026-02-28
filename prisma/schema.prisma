@@ -3830,6 +3830,18 @@ model MembershipConfig {
   updatedAt              DateTime
 }
 
+model MembershipGatewayConfig {
+  id            Int                       @id @default(1)
+  provider      MembershipBillingProvider @default(RECURRENT)
+  apiKey        String?
+  webhookSecret String?
+  mode          String                    @default("test")
+  isEnabled     Boolean                   @default(false)
+  lastWebhookAt DateTime?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @default(now())
+}
+
 model MembershipContract {
   id                                  String                                @id @default(cuid())
   code                                String                                @unique @default(dbgenerated("concat('MBR-', lpad((nextval('membership_contract_code_seq'::regclass))::text, 6, '0'::text))"))
@@ -3853,10 +3865,12 @@ model MembershipContract {
   Branch                              Branch?                               @relation(fields: [assignedBranchId], references: [id])
   ClientProfile                       ClientProfile?                        @relation(fields: [ownerId], references: [id])
   MembershipPlan                      MembershipPlan                        @relation(fields: [planId], references: [id])
+  MembershipContractBillingProfile    MembershipContractBillingProfile?
   MembershipDependent                 MembershipDependent[]
   MembershipException                 MembershipException[]
   MembershipPayment                   MembershipPayment[]
   MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
+  MembershipWebhookEvent              MembershipWebhookEvent[]
   MembershipUsage                     MembershipUsage[]
 
   @@index([lastInvoiceId])
@@ -3913,6 +3927,39 @@ model MembershipPayment {
   @@index([contractId])
   @@index([kind])
   @@index([status])
+}
+
+model MembershipContractBillingProfile {
+  id                       String                    @id @default(cuid())
+  contractId               String                    @unique
+  provider                 MembershipBillingProvider @default(MANUAL)
+  recurrenteCustomerId     String?
+  recurrenteSubscriptionId String?
+  lastPaymentIntentId      String?
+  status                   String                    @default("ACTIVE")
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @default(now())
+  MembershipContract       MembershipContract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([provider, status])
+}
+
+model MembershipWebhookEvent {
+  id                 String                  @id @default(cuid())
+  provider           MembershipBillingProvider
+  eventId            String                  @unique
+  eventType          String
+  signature          String?
+  contractId         String?
+  payload            Json
+  status             String                  @default("RECEIVED")
+  processedAt        DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @default(now())
+  MembershipContract MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  @@index([provider, createdAt])
+  @@index([contractId])
 }
 
 model MembershipPlan {
@@ -6549,6 +6596,11 @@ enum MembershipBillingFrequency {
   QUARTERLY
 }
 
+enum MembershipBillingProvider {
+  MANUAL
+  RECURRENT
+}
+
 enum MembershipBranchScope {
   ALL
   SOME
@@ -6592,6 +6644,7 @@ enum MembershipPlanSegment {
 enum MembershipStatus {
   ACTIVO
   PENDIENTE
+  PENDIENTE_PAGO
   SUSPENDIDO
   VENCIDO
   CANCELADO

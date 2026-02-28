@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const membershipOwnerTypeSchema = z.enum(["PERSON", "COMPANY"]);
-export const membershipStatusSchema = z.enum(["ACTIVO", "PENDIENTE", "SUSPENDIDO", "VENCIDO", "CANCELADO"]);
+export const membershipStatusSchema = z.enum(["ACTIVO", "PENDIENTE", "PENDIENTE_PAGO", "SUSPENDIDO", "VENCIDO", "CANCELADO"]);
 export const membershipPlanTypeSchema = z.enum(["INDIVIDUAL", "FAMILIAR", "EMPRESARIAL"]);
 export const membershipPlanSegmentSchema = z.enum(["B2C", "B2B"]);
 export const membershipBenefitServiceTypeSchema = z.enum(["CONSULTA", "LAB", "RX", "IMAGEN", "FARMACIA", "AUDIOLOGIA", "OTRO"]);
@@ -9,6 +9,8 @@ export const membershipBillingFrequencySchema = z.enum(["MONTHLY", "ANNUAL", "SE
 export const membershipPaymentMethodSchema = z.enum(["CASH", "TRANSFER", "CARD"]);
 export const membershipPaymentKindSchema = z.enum(["INITIAL", "RENEWAL", "EXTRA"]);
 export const membershipPaymentStatusSchema = z.enum(["PAID", "PENDING", "FAILED"]);
+export const membershipContractPaymentMethodSchema = z.enum(["MANUAL", "RECURRENT"]);
+export const membershipBillingProviderSchema = z.enum(["MANUAL", "RECURRENT"]);
 
 export const planBenefitInputSchema = z.object({
   benefitId: z.string().trim().min(1),
@@ -106,6 +108,8 @@ export const listContractsQuerySchema = z.object({
   status: membershipStatusSchema.optional(),
   ownerId: z.string().trim().min(1).optional(),
   planId: z.string().trim().min(1).optional(),
+  branchId: z.string().trim().min(1).optional(),
+  paymentMethod: membershipContractPaymentMethodSchema.optional(),
   segment: membershipPlanSegmentSchema.optional(),
   q: z.string().trim().min(1).max(120).optional(),
   renewWindowDays: z.coerce.number().int().min(1).max(90).optional(),
@@ -152,6 +156,11 @@ export const updateContractSchema = z
 
 export const updateContractStatusSchema = z.object({
   status: membershipStatusSchema,
+  notes: z.string().trim().max(500).optional().nullable()
+});
+
+export const renewContractSchema = z.object({
+  markAsPaid: z.boolean().default(false),
   notes: z.string().trim().max(500).optional().nullable()
 });
 
@@ -238,3 +247,28 @@ export const publicSubscribeSchema = z.object({
     address: z.string().trim().max(240).optional()
   })
 });
+
+export const membershipGatewayConfigSchema = z.object({
+  provider: membershipBillingProviderSchema.default("RECURRENT"),
+  apiKey: z.string().trim().min(8).max(512).optional().nullable(),
+  webhookSecret: z.string().trim().min(8).max(512).optional().nullable(),
+  mode: z.enum(["test", "live"]).default("test"),
+  isEnabled: z.boolean().default(false)
+});
+
+export const contractCheckoutInitSchema = z.object({
+  returnUrl: z.string().trim().url().optional().nullable(),
+  cancelUrl: z.string().trim().url().optional().nullable()
+});
+
+export const recurrenteWebhookSchema = z.object({
+  id: z.string().trim().min(4),
+  type: z.string().trim().min(3),
+  created: z.coerce.number().optional(),
+  data: z
+    .object({
+      object: z.record(z.any()).optional()
+    })
+    .passthrough()
+    .optional()
+}).passthrough();

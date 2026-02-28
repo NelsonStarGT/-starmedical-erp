@@ -8,6 +8,7 @@ import {
   createPlan,
   createPlanCategory,
   getMembershipDashboard,
+  processRecurrenteWebhook,
   registerContractPayment,
   subscribePublicMembership
 } from "@/lib/memberships/service";
@@ -177,11 +178,33 @@ test("memberships v2: categorías + plan + dashboard + subscribe + payment guard
     });
 
     assert.equal(secondSubscribe.contractId, firstSubscribe.contractId);
+
+    const webhookEventId = rand("evt-rec");
+    const webhookPayload = {
+      id: webhookEventId,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          contractId: activeContract.id,
+          amount: 99,
+          payment_intent_id: rand("pi")
+        }
+      }
+    };
+
+    const firstWebhook = await processRecurrenteWebhook(webhookPayload as any);
+    const secondWebhook = await processRecurrenteWebhook(webhookPayload as any);
+
+    assert.equal(firstWebhook.idempotent, false);
+    assert.equal(firstWebhook.status, "PROCESSED");
+    assert.equal(secondWebhook.idempotent, true);
+    assert.equal(secondWebhook.status, "PROCESSED");
   } finally {
     const contractIds = [created.activeContractId, created.suspendedContractId, created.subscribeContractId].filter(Boolean) as string[];
 
     if (contractIds.length) {
       await prisma.membershipPayment.deleteMany({ where: { contractId: { in: contractIds } } }).catch(() => {});
+      await prisma.membershipWebhookEvent.deleteMany({ where: { contractId: { in: contractIds } } }).catch(() => {});
       await prisma.membershipPublicSubscriptionRequest.deleteMany({ where: { contractId: { in: contractIds } } }).catch(() => {});
       await prisma.membershipContract.deleteMany({ where: { id: { in: contractIds } } }).catch(() => {});
     }

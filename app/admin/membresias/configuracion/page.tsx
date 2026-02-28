@@ -53,6 +53,17 @@ type ConfigResponse = {
   };
 };
 
+type GatewayConfig = {
+  provider: "RECURRENT" | "MANUAL";
+  mode: "test" | "live";
+  isEnabled: boolean;
+  hasApiKey: boolean;
+  hasWebhookSecret: boolean;
+  apiKeyMasked?: string | null;
+  webhookSecretMasked?: string | null;
+  lastWebhookAt?: string | null;
+};
+
 const DEFAULT_CONFIG: MembershipConfig = {
   reminderDays: 30,
   graceDays: 7,
@@ -64,6 +75,17 @@ const DEFAULT_CONFIG: MembershipConfig = {
   requireInitialPayment: true,
   cashTransferMinMonths: 2,
   priceChangeNoticeDays: 30
+};
+
+const DEFAULT_GATEWAY: GatewayConfig = {
+  provider: "RECURRENT",
+  mode: "test",
+  isEnabled: false,
+  hasApiKey: false,
+  hasWebhookSecret: false,
+  apiKeyMasked: null,
+  webhookSecretMasked: null,
+  lastWebhookAt: null
 };
 
 const TABS = [
@@ -89,6 +111,11 @@ export default function MembershipConfigPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [canAdmin, setCanAdmin] = useState(false);
+  const [gateway, setGateway] = useState<GatewayConfig>(DEFAULT_GATEWAY);
+  const [gatewayApiKey, setGatewayApiKey] = useState("");
+  const [gatewayWebhookSecret, setGatewayWebhookSecret] = useState("");
+  const [testingGateway, setTestingGateway] = useState(false);
+  const [gatewayTestMessage, setGatewayTestMessage] = useState<string | null>(null);
 
   const [newCategory, setNewCategory] = useState({
     name: "",
@@ -139,7 +166,17 @@ export default function MembershipConfigPage() {
       if (!benefitsRes.ok) throw new Error(benefitsJson?.error || "No se pudo cargar servicios incluidos");
 
       setConfig(configJson.data || DEFAULT_CONFIG);
-      setCanAdmin(Boolean(configJson.meta?.canAdmin));
+      const adminAccess = Boolean(configJson.meta?.canAdmin);
+      setCanAdmin(adminAccess);
+
+      if (adminAccess) {
+        const gatewayRes = await fetch("/api/memberships/config/gateway", { cache: "no-store" });
+        const gatewayJson = await gatewayRes.json();
+        if (!gatewayRes.ok) throw new Error(gatewayJson?.error || "No se pudo cargar pasarela");
+        setGateway(gatewayJson?.data || DEFAULT_GATEWAY);
+      } else {
+        setGateway(DEFAULT_GATEWAY);
+      }
 
       const categoryRows = Array.isArray(categoriesJson.data) ? categoriesJson.data : [];
       const presetRows = Array.isArray(presetsJson.data) ? presetsJson.data : [];
@@ -351,6 +388,60 @@ export default function MembershipConfigPage() {
       setError(err?.message || "No se pudo actualizar estado");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function saveGatewayConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+    setGatewayTestMessage(null);
+
+    try {
+      setSavingId("gateway");
+      const payload: Record<string, unknown> = {
+        provider: gateway.provider,
+        mode: gateway.mode,
+        isEnabled: gateway.isEnabled
+      };
+      if (gatewayApiKey.trim()) payload.apiKey = gatewayApiKey.trim();
+      if (gatewayWebhookSecret.trim()) payload.webhookSecret = gatewayWebhookSecret.trim();
+
+      const res = await fetch("/api/memberships/config/gateway", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No se pudo guardar configuración de pasarela");
+
+      setGateway(json?.data || DEFAULT_GATEWAY);
+      setGatewayApiKey("");
+      setGatewayWebhookSecret("");
+      setMessage("Pasarela actualizada");
+    } catch (err: any) {
+      setError(err?.message || "No se pudo guardar configuración de pasarela");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function testGatewayConnection() {
+    setError(null);
+    setGatewayTestMessage(null);
+    try {
+      setTestingGateway(true);
+      const res = await fetch("/api/memberships/config/gateway/test", {
+        method: "POST"
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No se pudo probar conexión");
+      setGatewayTestMessage(json?.data?.message || "Prueba completada");
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.message || "No se pudo probar conexión");
+    } finally {
+      setTestingGateway(false);
     }
   }
 
@@ -640,29 +731,114 @@ export default function MembershipConfigPage() {
 
       {activeTab === "pasarela" ? (
         <section className="space-y-3 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
-          <h2 className="text-sm font-semibold text-[#2e75ba]">Pasarela de pagos (P2)</h2>
+          <h2 className="text-sm font-semibold text-[#2e75ba]">Pasarela de pagos recurrentes</h2>
           {!canAdmin ? <p className="text-xs text-slate-600">Solo perfiles admin pueden gestionar llaves de pasarela.</p> : null}
+
           {canAdmin ? (
-            <div className="grid gap-2 md:grid-cols-2">
-              <label className="space-y-1 text-xs text-slate-700">
-                <span className="font-semibold">Provider</span>
-                <input value="RECURRENTE" readOnly className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2" />
+            <form onSubmit={saveGatewayConfig} className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-1 text-xs text-slate-700">
+                  <span className="font-semibold">Provider</span>
+                  <select
+                    value={gateway.provider}
+                    onChange={(event) =>
+                      setGateway((prev) => ({
+                        ...prev,
+                        provider: event.target.value as GatewayConfig["provider"]
+                      }))
+                    }
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
+                  >
+                    <option value="RECURRENT">RECURRENT</option>
+                    <option value="MANUAL">MANUAL</option>
+                  </select>
+                </label>
+
+                <label className="space-y-1 text-xs text-slate-700">
+                  <span className="font-semibold">Mode</span>
+                  <select
+                    value={gateway.mode}
+                    onChange={(event) =>
+                      setGateway((prev) => ({
+                        ...prev,
+                        mode: event.target.value as GatewayConfig["mode"]
+                      }))
+                    }
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
+                  >
+                    <option value="test">test</option>
+                    <option value="live">live</option>
+                  </select>
+                </label>
+
+                <label className="space-y-1 text-xs text-slate-700 md:col-span-2">
+                  <span className="font-semibold">API key</span>
+                  <input
+                    type="password"
+                    value={gatewayApiKey}
+                    onChange={(event) => setGatewayApiKey(event.target.value)}
+                    placeholder={gateway.apiKeyMasked || "Ingresar nueva API key"}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
+                    autoComplete="off"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    {gateway.hasApiKey ? `Actual: ${gateway.apiKeyMasked}` : "Sin API key configurada"}
+                  </p>
+                </label>
+
+                <label className="space-y-1 text-xs text-slate-700 md:col-span-2">
+                  <span className="font-semibold">Webhook secret</span>
+                  <input
+                    type="password"
+                    value={gatewayWebhookSecret}
+                    onChange={(event) => setGatewayWebhookSecret(event.target.value)}
+                    placeholder={gateway.webhookSecretMasked || "Ingresar nuevo webhook secret"}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
+                    autoComplete="off"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    {gateway.hasWebhookSecret ? `Actual: ${gateway.webhookSecretMasked}` : "Sin webhook secret configurado"}
+                  </p>
+                </label>
+              </div>
+
+              <label className="inline-flex items-center gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={gateway.isEnabled}
+                  onChange={(event) => setGateway((prev) => ({ ...prev, isEnabled: event.target.checked }))}
+                />
+                Habilitar pasarela recurrente
               </label>
-              <label className="space-y-1 text-xs text-slate-700">
-                <span className="font-semibold">Mode</span>
-                <input value="test" readOnly className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2" />
-              </label>
-              <label className="space-y-1 text-xs text-slate-700">
-                <span className="font-semibold">API Key</span>
-                <input value="••••••••" readOnly className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2" />
-              </label>
-              <label className="space-y-1 text-xs text-slate-700">
-                <span className="font-semibold">Webhook Secret</span>
-                <input value="••••••••" readOnly className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2" />
-              </label>
-            </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-2 text-[11px] text-slate-600">
+                Webhook status:{" "}
+                <span className="font-semibold text-slate-800">
+                  {gateway.lastWebhookAt ? new Date(gateway.lastWebhookAt).toLocaleString() : "sin eventos recibidos"}
+                </span>
+              </div>
+
+              {gatewayTestMessage ? <p className="text-xs font-medium text-emerald-700">{gatewayTestMessage}</p> : null}
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => testGatewayConnection()}
+                  disabled={testingGateway}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                >
+                  {testingGateway ? "Probando..." : "Probar conexión"}
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingId === "gateway"}
+                  className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
+                >
+                  {savingId === "gateway" ? "Guardando..." : "Guardar pasarela"}
+                </button>
+              </div>
+            </form>
           ) : null}
-          <p className="text-[11px] text-slate-500">Pendiente P2: conexión real + prueba de conexión + estado de último webhook.</p>
         </section>
       ) : null}
 

@@ -11,6 +11,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import type { SessionUser } from "@/lib/auth";
 import {
+  contractCheckoutInitSchema,
   createBenefitCatalogSchema,
   createContractSchema,
   createDurationPresetSchema,
@@ -21,9 +22,12 @@ import {
   listDurationPresetsQuerySchema,
   listPlanCategoriesQuerySchema,
   listPlansQuerySchema,
+  membershipGatewayConfigSchema,
   membershipConfigSchema,
   publicSubscribeSchema,
   registerPaymentSchema,
+  recurrenteWebhookSchema,
+  renewContractSchema,
   updateContractSchema,
   updateContractStatusSchema,
   updatePlanCategorySchema,
@@ -36,7 +40,13 @@ import { z } from "zod";
 const CURRENCY_ALLOWLIST = new Set(["GTQ", "USD", "EUR"]);
 type MembershipPlanSegmentType = "B2C" | "B2B";
 
-const RENEWAL_STATUS = [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE, MembershipStatus.SUSPENDIDO, MembershipStatus.VENCIDO];
+const RENEWAL_STATUS = [
+  MembershipStatus.ACTIVO,
+  MembershipStatus.PENDIENTE,
+  MembershipStatus.PENDIENTE_PAGO,
+  MembershipStatus.SUSPENDIDO,
+  MembershipStatus.VENCIDO
+];
 const PLAN_INCLUDE = {
   MembershipPlanCategory: true,
   MembershipDurationPreset: true,
@@ -62,8 +72,12 @@ type CreateContractInput = z.infer<typeof createContractSchema>;
 type UpdateContractInput = z.infer<typeof updateContractSchema>;
 type UpdateContractStatusInput = z.infer<typeof updateContractStatusSchema>;
 type RegisterPaymentInput = z.infer<typeof registerPaymentSchema>;
+type RenewContractInput = z.infer<typeof renewContractSchema>;
 type MembershipConfigInput = z.infer<typeof membershipConfigSchema>;
+type MembershipGatewayConfigInput = z.infer<typeof membershipGatewayConfigSchema>;
+type ContractCheckoutInitInput = z.infer<typeof contractCheckoutInitSchema>;
 type PublicSubscribeInput = z.infer<typeof publicSubscribeSchema>;
+type RecurrenteWebhookInput = z.infer<typeof recurrenteWebhookSchema>;
 
 export class MembershipError extends Error {
   status: number;
@@ -103,6 +117,10 @@ function computeRenewDate(startAt: Date, billingFrequency: MembershipBillingFreq
 
 function defaultPlanTypeBySegment(segment: "B2C" | "B2B") {
   return segment === "B2B" ? "EMPRESARIAL" : "INDIVIDUAL";
+}
+
+function inferPaymentMethod(channel?: string | null) {
+  return String(channel || "").toUpperCase().includes("RECURRENT") ? "RECURRENT" : "MANUAL";
 }
 
 function ensureCurrencyAllowed(currency: string) {
@@ -148,6 +166,24 @@ function computeContractMrr(contract: {
   if (contract.billingFrequency === MembershipBillingFrequency.ANNUAL) return annual > 0 ? annual / 12 : monthly;
   if (contract.billingFrequency === MembershipBillingFrequency.SEMIANNUAL) return monthly > 0 ? monthly : annual / 6;
   if (contract.billingFrequency === MembershipBillingFrequency.QUARTERLY) return monthly > 0 ? monthly : annual / 3;
+  return monthly > 0 ? monthly : annual / 12;
+}
+
+function computeRenewalAmount(contract: {
+  billingFrequency: MembershipBillingFrequency;
+  priceLockedMonthly: Prisma.Decimal | null;
+  priceLockedAnnual: Prisma.Decimal | null;
+  MembershipPlan?: {
+    priceMonthly: Prisma.Decimal;
+    priceAnnual: Prisma.Decimal;
+  } | null;
+}) {
+  const monthly = decimalToNumberOrZero(contract.priceLockedMonthly ?? contract.MembershipPlan?.priceMonthly ?? 0);
+  const annual = decimalToNumberOrZero(contract.priceLockedAnnual ?? contract.MembershipPlan?.priceAnnual ?? 0);
+
+  if (contract.billingFrequency === MembershipBillingFrequency.ANNUAL) return annual > 0 ? annual : monthly * 12;
+  if (contract.billingFrequency === MembershipBillingFrequency.SEMIANNUAL) return annual > 0 ? annual / 2 : monthly * 6;
+  if (contract.billingFrequency === MembershipBillingFrequency.QUARTERLY) return annual > 0 ? annual / 4 : monthly * 3;
   return monthly > 0 ? monthly : annual / 12;
 }
 
@@ -638,6 +674,25 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
   if (input.status) where.status = input.status;
   if (input.ownerId) where.ownerId = input.ownerId;
   if (input.planId) where.planId = input.planId;
+  if (input.branchId) where.assignedBranchId = input.branchId;
+  if (input.paymentMethod === "RECURRENT") {
+    where.MembershipContractBillingProfile = {
+      is: {
+        provider: "RECURRENT"
+      }
+    };
+  }
+  if (input.paymentMethod === "MANUAL") {
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : []),
+      {
+        OR: [
+          { MembershipContractBillingProfile: { is: null } },
+          { MembershipContractBillingProfile: { is: { provider: "MANUAL" } } }
+        ]
+      }
+    ];
+  }
   if (input.segment) {
     where.MembershipPlan = {
       is: {
@@ -697,13 +752,24 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
       MembershipPayment: {
         take: 5,
         orderBy: { createdAt: "desc" }
+      },
+      MembershipContractBillingProfile: {
+        select: {
+          provider: true,
+          status: true
+        }
       }
     },
     orderBy: [{ nextRenewAt: "asc" }, { createdAt: "desc" }],
     take: input.take
   });
 
-  return contracts.map((contract) => serializeContract(contract));
+  return contracts.map((contract) => ({
+    ...serializeContract(contract),
+    paymentMethod: contract.MembershipContractBillingProfile?.provider || inferPaymentMethod(contract.channel),
+    billingStatus: contract.MembershipContractBillingProfile?.status || null,
+    branchId: contract.assignedBranchId ?? null
+  }));
 }
 
 export async function getContractById(id: string, user: SessionUser | null) {
@@ -716,6 +782,7 @@ export async function getContractById(id: string, user: SessionUser | null) {
           MembershipPlanCategory: true
         }
       },
+      MembershipContractBillingProfile: true,
       MembershipDependent: true,
       MembershipPayment: {
         orderBy: { createdAt: "desc" }
@@ -726,7 +793,12 @@ export async function getContractById(id: string, user: SessionUser | null) {
   if (!contract) throw new MembershipError("Contrato no encontrado", 404);
   ensureSameBranchOrAdmin(user, contract);
 
-  return serializeContract(contract);
+  return {
+    ...serializeContract(contract),
+    paymentMethod: contract.MembershipContractBillingProfile?.provider || inferPaymentMethod(contract.channel),
+    billingStatus: contract.MembershipContractBillingProfile?.status || null,
+    branchId: contract.assignedBranchId ?? null
+  };
 }
 
 export async function createContract(input: CreateContractInput, user: SessionUser | null) {
@@ -776,6 +848,24 @@ export async function createContract(input: CreateContractInput, user: SessionUs
     }
   });
 
+  await prisma.membershipContractBillingProfile
+    .upsert({
+      where: { contractId: created.id },
+      update: {
+        provider: inferPaymentMethod(input.channel) === "RECURRENT" ? "RECURRENT" : "MANUAL",
+        status: "ACTIVE",
+        updatedAt: now()
+      },
+      create: {
+        contractId: created.id,
+        provider: inferPaymentMethod(input.channel) === "RECURRENT" ? "RECURRENT" : "MANUAL",
+        status: "ACTIVE",
+        createdAt: now(),
+        updatedAt: now()
+      }
+    })
+    .catch(() => null);
+
   return serializeContract(created);
 }
 
@@ -824,6 +914,86 @@ export async function updateContract(id: string, input: UpdateContractInput, use
   }
 }
 
+export async function renewContract(id: string, input: RenewContractInput, user: SessionUser | null) {
+  const contract = await prisma.membershipContract.findUnique({
+    where: { id },
+    include: {
+      MembershipPlan: true,
+      MembershipContractBillingProfile: true
+    }
+  });
+  if (!contract) throw new MembershipError("Contrato no encontrado", 404);
+  ensureSameBranchOrAdmin(user, contract);
+
+  const provider = contract.MembershipContractBillingProfile?.provider || inferPaymentMethod(contract.channel);
+  const renewalAmount = computeRenewalAmount(contract);
+  const currentBalance = decimalToNumberOrZero(contract.balance);
+  const baseDate = contract.nextRenewAt && contract.nextRenewAt > now() ? contract.nextRenewAt : now();
+  const nextRenewAt = computeRenewDate(baseDate, contract.billingFrequency);
+
+  return prisma.$transaction(async (tx) => {
+    await tx.membershipPayment.create({
+      data: {
+        contractId: id,
+        amount: new Prisma.Decimal(renewalAmount),
+        method: provider === "RECURRENT" ? "CARD" : "TRANSFER",
+        kind: "RENEWAL",
+        status: input.markAsPaid ? "PAID" : "PENDING",
+        paidAt: input.markAsPaid ? now() : null,
+        notes:
+          input.notes ??
+          (input.markAsPaid
+            ? "Renovación registrada con pago manual confirmado"
+            : "Renovación registrada con pago pendiente"),
+        createdAt: now()
+      }
+    });
+
+    const nextBalance = input.markAsPaid ? Math.max(0, currentBalance - renewalAmount) : currentBalance + renewalAmount;
+    const nextStatus = input.markAsPaid ? MembershipStatus.ACTIVO : MembershipStatus.PENDIENTE_PAGO;
+
+    await tx.membershipContractBillingProfile.upsert({
+      where: { contractId: id },
+      update: {
+        provider: provider === "RECURRENT" ? "RECURRENT" : "MANUAL",
+        status: input.markAsPaid ? "ACTIVE" : "PAST_DUE",
+        updatedAt: now()
+      },
+      create: {
+        contractId: id,
+        provider: provider === "RECURRENT" ? "RECURRENT" : "MANUAL",
+        status: input.markAsPaid ? "ACTIVE" : "PAST_DUE",
+        createdAt: now(),
+        updatedAt: now()
+      }
+    });
+
+    const updated = await tx.membershipContract.update({
+      where: { id },
+      data: {
+        nextRenewAt,
+        balance: new Prisma.Decimal(nextBalance),
+        status: nextStatus,
+        updatedAt: now()
+      },
+      include: {
+        ClientProfile: true,
+        MembershipPlan: {
+          include: {
+            MembershipPlanCategory: true
+          }
+        },
+        MembershipPayment: {
+          orderBy: { createdAt: "desc" },
+          take: 5
+        }
+      }
+    });
+
+    return serializeContract(updated);
+  });
+}
+
 export async function updateContractStatus(id: string, input: UpdateContractStatusInput, user: SessionUser | null) {
   const contract = await prisma.membershipContract.findUnique({ where: { id } });
   if (!contract) throw new MembershipError("Contrato no encontrado", 404);
@@ -864,13 +1034,34 @@ export async function registerContractPayment(contractId: string, input: Registe
   if (input.status === "PAID") {
     const currentBalance = decimalToNumberOrZero(contract.balance);
     const nextBalance = Math.max(0, currentBalance - input.amount);
+    const nextStatus =
+      contract.status === MembershipStatus.PENDIENTE_PAGO && nextBalance <= 0
+        ? MembershipStatus.ACTIVO
+        : contract.status;
     await prisma.membershipContract.update({
       where: { id: contractId },
       data: {
         balance: new Prisma.Decimal(nextBalance),
+        status: nextStatus,
         updatedAt: now()
       }
     });
+    await prisma.membershipContractBillingProfile
+      .upsert({
+        where: { contractId },
+        update: {
+          status: "ACTIVE",
+          updatedAt: now()
+        },
+        create: {
+          contractId,
+          provider: inferPaymentMethod(contract.channel) === "RECURRENT" ? "RECURRENT" : "MANUAL",
+          status: "ACTIVE",
+          createdAt: now(),
+          updatedAt: now()
+        }
+      })
+      .catch(() => null);
   }
 
   return serializePayment(payment);
@@ -1002,21 +1193,21 @@ export async function getMembershipDashboard(user: SessionUser | null) {
     prisma.membershipContract.count({
       where: {
         ...contractScope,
-        status: { in: [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE] },
+        status: { in: [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE, MembershipStatus.PENDIENTE_PAGO] },
         nextRenewAt: { gte: today, lte: in7 }
       }
     }),
     prisma.membershipContract.count({
       where: {
         ...contractScope,
-        status: { in: [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE] },
+        status: { in: [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE, MembershipStatus.PENDIENTE_PAGO] },
         nextRenewAt: { gte: today, lte: in15 }
       }
     }),
     prisma.membershipContract.count({
       where: {
         ...contractScope,
-        status: { in: [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE] },
+        status: { in: [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE, MembershipStatus.PENDIENTE_PAGO] },
         nextRenewAt: { gte: today, lte: in30 }
       }
     }),
@@ -1024,7 +1215,7 @@ export async function getMembershipDashboard(user: SessionUser | null) {
       where: {
         ...contractScope,
         status: {
-          in: [MembershipStatus.PENDIENTE, MembershipStatus.SUSPENDIDO, MembershipStatus.VENCIDO]
+          in: [MembershipStatus.PENDIENTE, MembershipStatus.PENDIENTE_PAGO, MembershipStatus.SUSPENDIDO, MembershipStatus.VENCIDO]
         }
       }
     }),
@@ -1116,6 +1307,458 @@ export async function getMembershipDashboard(user: SessionUser | null) {
     },
     categories
   };
+}
+
+function maskSecret(value: string | null | undefined) {
+  if (!value) return null;
+  if (value.length <= 6) return "***";
+  return `${value.slice(0, 4)}***${value.slice(-2)}`;
+}
+
+async function ensureMembershipGatewayConfigRecord() {
+  return prisma.membershipGatewayConfig.upsert({
+    where: { id: 1 },
+    create: {
+      id: 1,
+      provider: "RECURRENT",
+      mode: "test",
+      isEnabled: false,
+      createdAt: now(),
+      updatedAt: now()
+    },
+    update: {}
+  });
+}
+
+export async function getMembershipGatewayConfig() {
+  const config = await ensureMembershipGatewayConfigRecord();
+  return {
+    id: config.id,
+    provider: config.provider,
+    mode: config.mode,
+    isEnabled: config.isEnabled,
+    lastWebhookAt: config.lastWebhookAt,
+    hasApiKey: Boolean(config.apiKey),
+    hasWebhookSecret: Boolean(config.webhookSecret),
+    apiKeyMasked: maskSecret(config.apiKey),
+    webhookSecretMasked: maskSecret(config.webhookSecret)
+  };
+}
+
+export async function updateMembershipGatewayConfig(input: MembershipGatewayConfigInput) {
+  const current = await ensureMembershipGatewayConfigRecord();
+  const updated = await prisma.membershipGatewayConfig.update({
+    where: { id: current.id },
+    data: {
+      provider: input.provider,
+      mode: input.mode,
+      isEnabled: input.isEnabled,
+      ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
+      ...(input.webhookSecret !== undefined ? { webhookSecret: input.webhookSecret } : {}),
+      updatedAt: now()
+    }
+  });
+
+  return {
+    id: updated.id,
+    provider: updated.provider,
+    mode: updated.mode,
+    isEnabled: updated.isEnabled,
+    lastWebhookAt: updated.lastWebhookAt,
+    hasApiKey: Boolean(updated.apiKey),
+    hasWebhookSecret: Boolean(updated.webhookSecret),
+    apiKeyMasked: maskSecret(updated.apiKey),
+    webhookSecretMasked: maskSecret(updated.webhookSecret)
+  };
+}
+
+export async function initContractRecurrentCheckout(contractId: string, input: ContractCheckoutInitInput, user: SessionUser | null) {
+  const [contract, gatewayConfig] = await Promise.all([
+    prisma.membershipContract.findUnique({
+      where: { id: contractId },
+      include: {
+        MembershipPlan: true
+      }
+    }),
+    ensureMembershipGatewayConfigRecord()
+  ]);
+
+  if (!contract) throw new MembershipError("Contrato no encontrado", 404);
+  ensureSameBranchOrAdmin(user, contract);
+
+  if (!gatewayConfig.isEnabled) throw new MembershipError("Pasarela recurrente deshabilitada", 409);
+  if (!gatewayConfig.apiKey) throw new MembershipError("Configura API key de pasarela antes de iniciar checkout", 400);
+
+  const customerRef = `mbr-cus-${contract.ownerId || contract.id}`;
+  const subscriptionRef = `mbr-sub-${contract.id}`;
+  const checkoutToken = `chk_${contract.id}_${Date.now()}`;
+  const checkoutBase = process.env.RECURRENTE_CHECKOUT_BASE_URL || "https://checkout.recurrente.example/subscribe";
+  const checkoutUrl = new URL(checkoutBase);
+  checkoutUrl.searchParams.set("contractId", contract.id);
+  checkoutUrl.searchParams.set("customerRef", customerRef);
+  checkoutUrl.searchParams.set("subscriptionRef", subscriptionRef);
+  checkoutUrl.searchParams.set("sessionToken", checkoutToken);
+  if (input.returnUrl) checkoutUrl.searchParams.set("returnUrl", input.returnUrl);
+  if (input.cancelUrl) checkoutUrl.searchParams.set("cancelUrl", input.cancelUrl);
+
+  const profile = await prisma.membershipContractBillingProfile.upsert({
+    where: { contractId },
+    update: {
+      provider: "RECURRENT",
+      recurrenteCustomerId: customerRef,
+      recurrenteSubscriptionId: subscriptionRef,
+      lastPaymentIntentId: checkoutToken,
+      status: "PENDING_CHECKOUT",
+      updatedAt: now()
+    },
+    create: {
+      contractId,
+      provider: "RECURRENT",
+      recurrenteCustomerId: customerRef,
+      recurrenteSubscriptionId: subscriptionRef,
+      lastPaymentIntentId: checkoutToken,
+      status: "PENDING_CHECKOUT",
+      createdAt: now(),
+      updatedAt: now()
+    }
+  });
+
+  await prisma.membershipContract.update({
+    where: { id: contractId },
+    data: {
+      channel: "RECURRENT_CHECKOUT",
+      updatedAt: now()
+    }
+  });
+
+  return {
+    contractId,
+    provider: gatewayConfig.provider,
+    checkoutUrl: checkoutUrl.toString(),
+    billingProfileId: profile.id
+  };
+}
+
+export function verifyRecurrenteWebhookTokenOrHmac(req: Request, bodyText: string, secret?: string | null) {
+  const tokenHeader = req.headers.get("x-webhook-token");
+  const staticToken = process.env.RECURRENTE_WEBHOOK_TOKEN;
+  if (staticToken && tokenHeader && tokenHeader === staticToken) return true;
+
+  const signatureHeader = req.headers.get("x-recurrente-signature");
+  const hmacSecret = secret || process.env.RECURRENTE_WEBHOOK_SECRET;
+  if (!hmacSecret || !signatureHeader) return false;
+
+  const expected = createHmac("sha256", hmacSecret).update(bodyText).digest("hex");
+  const left = Buffer.from(expected, "utf8");
+  const right = Buffer.from(signatureHeader, "utf8");
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+
+function extractRecurrenteContractId(payload: RecurrenteWebhookInput) {
+  const object = (payload as any)?.data?.object || {};
+  return object.contractId || object?.metadata?.contractId || object?.referenceContractId || null;
+}
+
+function extractRecurrenteAmount(
+  payload: RecurrenteWebhookInput,
+  contract: {
+    billingFrequency: MembershipBillingFrequency;
+    priceLockedMonthly: Prisma.Decimal | null;
+    priceLockedAnnual: Prisma.Decimal | null;
+    MembershipPlan?: { priceMonthly: Prisma.Decimal; priceAnnual: Prisma.Decimal } | null;
+  }
+) {
+  const object = (payload as any)?.data?.object || {};
+  const direct = Number(object.amount ?? object.amount_total ?? object.total ?? object.amountPaid ?? 0);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  return computeRenewalAmount(contract);
+}
+
+export async function processRecurrenteWebhook(payload: RecurrenteWebhookInput, signature?: string | null) {
+  const existing = await prisma.membershipWebhookEvent.findUnique({ where: { eventId: payload.id } });
+  if (existing) {
+    return { idempotent: true, eventId: payload.id, status: existing.status };
+  }
+
+  const contractId = extractRecurrenteContractId(payload);
+  const eventType = String(payload.type || "unknown");
+
+  await prisma.membershipWebhookEvent.create({
+    data: {
+      provider: "RECURRENT",
+      eventId: payload.id,
+      eventType,
+      signature: signature || null,
+      contractId: contractId || null,
+      payload: payload as Prisma.InputJsonValue,
+      status: "RECEIVED",
+      createdAt: now(),
+      updatedAt: now()
+    }
+  });
+
+  const normalizedType = eventType.toLowerCase();
+  const contract = contractId
+    ? await prisma.membershipContract.findUnique({
+        where: { id: contractId },
+        include: {
+          MembershipPlan: true,
+          MembershipContractBillingProfile: true,
+          ClientProfile: true
+        }
+      })
+    : null;
+
+  if (!contract) {
+    await prisma.membershipWebhookEvent.update({
+      where: { eventId: payload.id },
+      data: {
+        status: "IGNORED",
+        processedAt: now(),
+        updatedAt: now()
+      }
+    });
+    await prisma.membershipGatewayConfig
+      .update({
+        where: { id: 1 },
+        data: {
+          lastWebhookAt: now(),
+          updatedAt: now()
+        }
+      })
+      .catch(() => null);
+    return { idempotent: false, eventId: payload.id, status: "IGNORED" };
+  }
+
+  if (normalizedType === "payment_intent.succeeded") {
+    const amount = extractRecurrenteAmount(payload, contract);
+    const currentBalance = decimalToNumberOrZero(contract.balance);
+    const nextBalance = Math.max(0, currentBalance - amount);
+    const baseRenewDate = contract.nextRenewAt && contract.nextRenewAt > now() ? contract.nextRenewAt : now();
+    const nextRenewAt = computeRenewDate(baseRenewDate, contract.billingFrequency);
+
+    const object = (payload as any)?.data?.object || {};
+    const paymentIntentId = String(object.payment_intent_id || object.paymentIntentId || payload.id);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.membershipPayment.create({
+        data: {
+          contractId: contract.id,
+          amount: new Prisma.Decimal(amount),
+          method: "CARD",
+          kind: "RENEWAL",
+          status: "PAID",
+          paidAt: now(),
+          refNo: paymentIntentId,
+          invoiceId: object.invoiceId || null,
+          notes: `Webhook RECURRENT ${eventType}`,
+          createdAt: now()
+        }
+      });
+
+      await tx.membershipContractBillingProfile.upsert({
+        where: { contractId: contract.id },
+        update: {
+          provider: "RECURRENT",
+          recurrenteCustomerId: object.customerId || contract.MembershipContractBillingProfile?.recurrenteCustomerId || null,
+          recurrenteSubscriptionId:
+            object.subscriptionId || contract.MembershipContractBillingProfile?.recurrenteSubscriptionId || null,
+          lastPaymentIntentId: paymentIntentId,
+          status: "ACTIVE",
+          updatedAt: now()
+        },
+        create: {
+          contractId: contract.id,
+          provider: "RECURRENT",
+          recurrenteCustomerId: object.customerId || null,
+          recurrenteSubscriptionId: object.subscriptionId || null,
+          lastPaymentIntentId: paymentIntentId,
+          status: "ACTIVE",
+          createdAt: now(),
+          updatedAt: now()
+        }
+      });
+
+      await tx.membershipContract.update({
+        where: { id: contract.id },
+        data: {
+          status: MembershipStatus.ACTIVO,
+          balance: new Prisma.Decimal(nextBalance),
+          nextRenewAt,
+          channel: "RECURRENT_WEBHOOK",
+          updatedAt: now()
+        }
+      });
+    });
+
+    const partyId = contract.ClientProfile?.partyId || null;
+    let receivable = null;
+    if (partyId) {
+      receivable = await createReceivableDraftForMembership({
+        contractId: contract.id,
+        contractCode: contract.code,
+        partyId,
+        amount: new Prisma.Decimal(amount)
+      });
+
+      if (receivable?.id) {
+        await prisma.membershipContract.update({
+          where: { id: contract.id },
+          data: {
+            lastInvoiceId: receivable.id,
+            updatedAt: now()
+          }
+        });
+      }
+    }
+
+    await prisma.membershipWebhookEvent.update({
+      where: { eventId: payload.id },
+      data: {
+        status: "PROCESSED",
+        processedAt: now(),
+        updatedAt: now(),
+        contractId: contract.id
+      }
+    });
+    await prisma.membershipGatewayConfig
+      .update({
+        where: { id: 1 },
+        data: {
+          lastWebhookAt: now(),
+          updatedAt: now()
+        }
+      })
+      .catch(() => null);
+
+    return {
+      idempotent: false,
+      eventId: payload.id,
+      status: "PROCESSED",
+      contractId: contract.id,
+      invoiceId: receivable?.id || null
+    };
+  }
+
+  if (normalizedType === "payment_intent.failed" || normalizedType === "subscription.past_due") {
+    await prisma.$transaction(async (tx) => {
+      await tx.membershipContractBillingProfile.upsert({
+        where: { contractId: contract.id },
+        update: {
+          provider: "RECURRENT",
+          status: "PAST_DUE",
+          updatedAt: now()
+        },
+        create: {
+          contractId: contract.id,
+          provider: "RECURRENT",
+          status: "PAST_DUE",
+          createdAt: now(),
+          updatedAt: now()
+        }
+      });
+
+      await tx.membershipContract.update({
+        where: { id: contract.id },
+        data: {
+          status: MembershipStatus.PENDIENTE_PAGO,
+          updatedAt: now()
+        }
+      });
+    });
+
+    await prisma.membershipWebhookEvent.update({
+      where: { eventId: payload.id },
+      data: {
+        status: "PROCESSED",
+        processedAt: now(),
+        updatedAt: now(),
+        contractId: contract.id
+      }
+    });
+    await prisma.membershipGatewayConfig
+      .update({
+        where: { id: 1 },
+        data: {
+          lastWebhookAt: now(),
+          updatedAt: now()
+        }
+      })
+      .catch(() => null);
+
+    return { idempotent: false, eventId: payload.id, status: "PROCESSED", contractId: contract.id };
+  }
+
+  if (normalizedType === "subscription.cancel") {
+    await prisma.$transaction(async (tx) => {
+      await tx.membershipContractBillingProfile.upsert({
+        where: { contractId: contract.id },
+        update: {
+          provider: "RECURRENT",
+          status: "CANCELLED",
+          updatedAt: now()
+        },
+        create: {
+          contractId: contract.id,
+          provider: "RECURRENT",
+          status: "CANCELLED",
+          createdAt: now(),
+          updatedAt: now()
+        }
+      });
+
+      await tx.membershipContract.update({
+        where: { id: contract.id },
+        data: {
+          status: MembershipStatus.CANCELADO,
+          updatedAt: now()
+        }
+      });
+    });
+
+    await prisma.membershipWebhookEvent.update({
+      where: { eventId: payload.id },
+      data: {
+        status: "PROCESSED",
+        processedAt: now(),
+        updatedAt: now(),
+        contractId: contract.id
+      }
+    });
+    await prisma.membershipGatewayConfig
+      .update({
+        where: { id: 1 },
+        data: {
+          lastWebhookAt: now(),
+          updatedAt: now()
+        }
+      })
+      .catch(() => null);
+
+    return { idempotent: false, eventId: payload.id, status: "PROCESSED", contractId: contract.id };
+  }
+
+  await prisma.membershipWebhookEvent.update({
+    where: { eventId: payload.id },
+    data: {
+      status: "IGNORED",
+      processedAt: now(),
+      updatedAt: now(),
+      contractId: contract.id
+    }
+  });
+  await prisma.membershipGatewayConfig
+    .update({
+      where: { id: 1 },
+      data: {
+        lastWebhookAt: now(),
+        updatedAt: now()
+      }
+    })
+    .catch(() => null);
+
+  return { idempotent: false, eventId: payload.id, status: "IGNORED", contractId: contract.id };
 }
 
 async function resolveClientForPublicSubscription(customer: PublicSubscribeInput["customer"]) {
@@ -1304,6 +1947,22 @@ export async function subscribePublicMembership(input: PublicSubscribeInput) {
       balance: plan.priceMonthly,
       channel: "WEB",
       allowDependents: ownerType === MembershipOwnerType.PERSON,
+      updatedAt: now()
+    }
+  });
+
+  await prisma.membershipContractBillingProfile.upsert({
+    where: { contractId: contract.id },
+    update: {
+      provider: "MANUAL",
+      status: "PENDING_SETUP",
+      updatedAt: now()
+    },
+    create: {
+      contractId: contract.id,
+      provider: "MANUAL",
+      status: "PENDING_SETUP",
+      createdAt: now(),
       updatedAt: now()
     }
   });

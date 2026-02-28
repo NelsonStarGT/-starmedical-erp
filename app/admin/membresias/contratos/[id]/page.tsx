@@ -55,6 +55,7 @@ export default function MembershipContractDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyPayment, setBusyPayment] = useState(false);
+  const [busyRecurrent, setBusyRecurrent] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
     amount: "",
     method: "CASH",
@@ -126,6 +127,30 @@ export default function MembershipContractDetailPage() {
     }
   }
 
+  async function activateRecurrentCheckout() {
+    if (!contractId) return;
+    setError(null);
+    try {
+      setBusyRecurrent(true);
+      const res = await fetch(`/api/memberships/contracts/${contractId}/recurrente/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          returnUrl: window.location.href
+        })
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No se pudo iniciar checkout recurrente");
+      if (json?.data?.checkoutUrl) {
+        window.location.assign(json.data.checkoutUrl);
+      }
+    } catch (err: any) {
+      setError(err?.message || "No se pudo iniciar checkout recurrente");
+    } finally {
+      setBusyRecurrent(false);
+    }
+  }
+
   const ownerLabel = contract?.ClientProfile
     ? contract.ownerType === "COMPANY"
       ? contract.ClientProfile.companyName || "Empresa"
@@ -137,12 +162,22 @@ export default function MembershipContractDetailPage() {
       title={`Contrato ${contract?.code || ""}`}
       description="Detalle operativo del contrato, historial y registro de pagos (sin reactivación automática de estados suspendidos/cancelados)."
       actions={
-        <Link
-          href={buildMembershipInvoiceLink({ contractId })}
-          className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
-        >
-          Generar factura
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => activateRecurrentCheckout()}
+            disabled={busyRecurrent}
+            className="rounded-lg border border-[#4aa59c] bg-white px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:border-[#4aadf5] hover:text-[#4aadf5] disabled:opacity-60"
+          >
+            {busyRecurrent ? "Iniciando..." : "Activar pago recurrente"}
+          </button>
+          <Link
+            href={buildMembershipInvoiceLink({ contractId })}
+            className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
+          >
+            Generar factura
+          </Link>
+        </div>
       }
     >
       {loading ? <p className="text-xs text-slate-500">Cargando contrato...</p> : null}
