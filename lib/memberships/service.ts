@@ -40,19 +40,23 @@ import { z } from "zod";
 const CURRENCY_ALLOWLIST = new Set(["GTQ", "USD", "EUR"]);
 type MembershipPlanSegmentType = "B2C" | "B2B";
 
-const RENEWAL_STATUS = [
+const MEMBERSHIP_STATUS_SET = new Set<string>(Object.values(MembershipStatus));
+const pickKnownMembershipStatuses = (...values: Array<string | undefined | null>) =>
+  values.filter((value): value is MembershipStatus => Boolean(value) && MEMBERSHIP_STATUS_SET.has(String(value)));
+
+const RENEWAL_STATUS = pickKnownMembershipStatuses(
   MembershipStatus.ACTIVO,
   MembershipStatus.PENDIENTE,
   MembershipStatus.PENDIENTE_PAGO,
   MembershipStatus.SUSPENDIDO,
   MembershipStatus.VENCIDO
-];
+);
 const PLAN_INCLUDE = {
-  MembershipPlanCategory: true,
-  MembershipDurationPreset: true,
-  MembershipPlanBenefit: {
+  category: true,
+  durationPreset: true,
+  benefits: {
     include: {
-      MembershipBenefitCatalog: true
+      benefitCatalog: true
     }
   }
 } as const;
@@ -155,13 +159,18 @@ function computeContractMrr(contract: {
   billingFrequency: MembershipBillingFrequency;
   priceLockedMonthly: Prisma.Decimal | null;
   priceLockedAnnual: Prisma.Decimal | null;
+  plan?: {
+    priceMonthly: Prisma.Decimal;
+    priceAnnual: Prisma.Decimal;
+  } | null;
   MembershipPlan?: {
     priceMonthly: Prisma.Decimal;
     priceAnnual: Prisma.Decimal;
   } | null;
 }) {
-  const monthly = decimalToNumberOrZero(contract.priceLockedMonthly ?? contract.MembershipPlan?.priceMonthly ?? 0);
-  const annual = decimalToNumberOrZero(contract.priceLockedAnnual ?? contract.MembershipPlan?.priceAnnual ?? 0);
+  const planRef = contract.plan ?? contract.MembershipPlan;
+  const monthly = decimalToNumberOrZero(contract.priceLockedMonthly ?? planRef?.priceMonthly ?? 0);
+  const annual = decimalToNumberOrZero(contract.priceLockedAnnual ?? planRef?.priceAnnual ?? 0);
 
   if (contract.billingFrequency === MembershipBillingFrequency.ANNUAL) return annual > 0 ? annual / 12 : monthly;
   if (contract.billingFrequency === MembershipBillingFrequency.SEMIANNUAL) return monthly > 0 ? monthly : annual / 6;
@@ -173,13 +182,18 @@ function computeRenewalAmount(contract: {
   billingFrequency: MembershipBillingFrequency;
   priceLockedMonthly: Prisma.Decimal | null;
   priceLockedAnnual: Prisma.Decimal | null;
+  plan?: {
+    priceMonthly: Prisma.Decimal;
+    priceAnnual: Prisma.Decimal;
+  } | null;
   MembershipPlan?: {
     priceMonthly: Prisma.Decimal;
     priceAnnual: Prisma.Decimal;
   } | null;
 }) {
-  const monthly = decimalToNumberOrZero(contract.priceLockedMonthly ?? contract.MembershipPlan?.priceMonthly ?? 0);
-  const annual = decimalToNumberOrZero(contract.priceLockedAnnual ?? contract.MembershipPlan?.priceAnnual ?? 0);
+  const planRef = contract.plan ?? contract.MembershipPlan;
+  const monthly = decimalToNumberOrZero(contract.priceLockedMonthly ?? planRef?.priceMonthly ?? 0);
+  const annual = decimalToNumberOrZero(contract.priceLockedAnnual ?? planRef?.priceAnnual ?? 0);
 
   if (contract.billingFrequency === MembershipBillingFrequency.ANNUAL) return annual > 0 ? annual : monthly * 12;
   if (contract.billingFrequency === MembershipBillingFrequency.SEMIANNUAL) return annual > 0 ? annual / 2 : monthly * 6;
@@ -460,7 +474,7 @@ export async function listPlans(input: ListPlansInput = {}) {
   return plans.map((plan) => ({
     ...serializePlan(plan),
     activeContracts: plan._count.MembershipContract,
-    benefitsCount: plan.MembershipPlanBenefit?.length || 0
+    benefitsCount: plan.benefits?.length || 0
   }));
 }
 
@@ -483,7 +497,7 @@ export async function getPlanById(id: string) {
   return {
     ...serializePlan(plan),
     activeContracts: plan._count.MembershipContract,
-    benefitsCount: plan.MembershipPlanBenefit?.length || 0
+    benefitsCount: plan.benefits?.length || 0
   };
 }
 
@@ -676,7 +690,7 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
   if (input.planId) where.planId = input.planId;
   if (input.branchId) where.assignedBranchId = input.branchId;
   if (input.paymentMethod === "RECURRENT") {
-    where.MembershipContractBillingProfile = {
+    where.billingProfile = {
       is: {
         provider: "RECURRENT"
       }
@@ -687,14 +701,14 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
       ...(Array.isArray(where.AND) ? where.AND : []),
       {
         OR: [
-          { MembershipContractBillingProfile: { is: null } },
-          { MembershipContractBillingProfile: { is: { provider: "MANUAL" } } }
+          { billingProfile: { is: null } },
+          { billingProfile: { is: { provider: "MANUAL" } } }
         ]
       }
     ];
   }
   if (input.segment) {
-    where.MembershipPlan = {
+    where.plan = {
       is: {
         segment: input.segment
       }
@@ -719,20 +733,20 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
     const term = input.q;
     where.OR = [
       { code: { contains: term, mode: "insensitive" } },
-      { MembershipPlan: { is: { name: { contains: term, mode: "insensitive" } } } },
-      { ClientProfile: { is: { firstName: { contains: term, mode: "insensitive" } } } },
-      { ClientProfile: { is: { lastName: { contains: term, mode: "insensitive" } } } },
-      { ClientProfile: { is: { companyName: { contains: term, mode: "insensitive" } } } },
-      { ClientProfile: { is: { email: { contains: term, mode: "insensitive" } } } },
-      { ClientProfile: { is: { phone: { contains: term, mode: "insensitive" } } } },
-      { ClientProfile: { is: { nit: { contains: term, mode: "insensitive" } } } }
+      { plan: { is: { name: { contains: term, mode: "insensitive" } } } },
+      { owner: { is: { firstName: { contains: term, mode: "insensitive" } } } },
+      { owner: { is: { lastName: { contains: term, mode: "insensitive" } } } },
+      { owner: { is: { companyName: { contains: term, mode: "insensitive" } } } },
+      { owner: { is: { email: { contains: term, mode: "insensitive" } } } },
+      { owner: { is: { phone: { contains: term, mode: "insensitive" } } } },
+      { owner: { is: { nit: { contains: term, mode: "insensitive" } } } }
     ];
   }
 
   const contracts = await prisma.membershipContract.findMany({
     where,
     include: {
-      ClientProfile: {
+      owner: {
         select: {
           id: true,
           type: true,
@@ -744,16 +758,16 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
           nit: true
         }
       },
-      MembershipPlan: {
+      plan: {
         include: {
-          MembershipPlanCategory: true
+          category: true
         }
       },
-      MembershipPayment: {
+      payments: {
         take: 5,
         orderBy: { createdAt: "desc" }
       },
-      MembershipContractBillingProfile: {
+      billingProfile: {
         select: {
           provider: true,
           status: true
@@ -766,8 +780,8 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
 
   return contracts.map((contract) => ({
     ...serializeContract(contract),
-    paymentMethod: contract.MembershipContractBillingProfile?.provider || inferPaymentMethod(contract.channel),
-    billingStatus: contract.MembershipContractBillingProfile?.status || null,
+    paymentMethod: contract.billingProfile?.provider || inferPaymentMethod(contract.channel),
+    billingStatus: contract.billingProfile?.status || null,
     branchId: contract.assignedBranchId ?? null
   }));
 }
@@ -776,15 +790,15 @@ export async function getContractById(id: string, user: SessionUser | null) {
   const contract = await prisma.membershipContract.findUnique({
     where: { id },
     include: {
-      ClientProfile: true,
-      MembershipPlan: {
+      owner: true,
+      plan: {
         include: {
-          MembershipPlanCategory: true
+          category: true
         }
       },
-      MembershipContractBillingProfile: true,
-      MembershipDependent: true,
-      MembershipPayment: {
+      billingProfile: true,
+      dependents: true,
+      payments: {
         orderBy: { createdAt: "desc" }
       }
     }
@@ -795,8 +809,8 @@ export async function getContractById(id: string, user: SessionUser | null) {
 
   return {
     ...serializeContract(contract),
-    paymentMethod: contract.MembershipContractBillingProfile?.provider || inferPaymentMethod(contract.channel),
-    billingStatus: contract.MembershipContractBillingProfile?.status || null,
+    paymentMethod: contract.billingProfile?.provider || inferPaymentMethod(contract.channel),
+    billingStatus: contract.billingProfile?.status || null,
     branchId: contract.assignedBranchId ?? null
   };
 }
@@ -839,10 +853,10 @@ export async function createContract(input: CreateContractInput, user: SessionUs
       updatedAt: now()
     },
     include: {
-      ClientProfile: true,
-      MembershipPlan: {
+      owner: true,
+      plan: {
         include: {
-          MembershipPlanCategory: true
+          category: true
         }
       }
     }
@@ -898,10 +912,10 @@ export async function updateContract(id: string, input: UpdateContractInput, use
         updatedAt: now()
       },
       include: {
-        ClientProfile: true,
-        MembershipPlan: {
+        owner: true,
+        plan: {
           include: {
-            MembershipPlanCategory: true
+            category: true
           }
         }
       }
@@ -918,14 +932,14 @@ export async function renewContract(id: string, input: RenewContractInput, user:
   const contract = await prisma.membershipContract.findUnique({
     where: { id },
     include: {
-      MembershipPlan: true,
-      MembershipContractBillingProfile: true
+      plan: true,
+      billingProfile: true
     }
   });
   if (!contract) throw new MembershipError("Contrato no encontrado", 404);
   ensureSameBranchOrAdmin(user, contract);
 
-  const provider = contract.MembershipContractBillingProfile?.provider || inferPaymentMethod(contract.channel);
+  const provider = contract.billingProfile?.provider || inferPaymentMethod(contract.channel);
   const renewalAmount = computeRenewalAmount(contract);
   const currentBalance = decimalToNumberOrZero(contract.balance);
   const baseDate = contract.nextRenewAt && contract.nextRenewAt > now() ? contract.nextRenewAt : now();
@@ -977,13 +991,13 @@ export async function renewContract(id: string, input: RenewContractInput, user:
         updatedAt: now()
       },
       include: {
-        ClientProfile: true,
-        MembershipPlan: {
+        owner: true,
+        plan: {
           include: {
-            MembershipPlanCategory: true
+            category: true
           }
         },
-        MembershipPayment: {
+        payments: {
           orderBy: { createdAt: "desc" },
           take: 5
         }
@@ -1087,12 +1101,12 @@ export async function listRenewalQueue(user: SessionUser | null) {
       ...planBranchWhere(user)
     },
     include: {
-      MembershipPlan: {
+      plan: {
         include: {
-          MembershipPlanCategory: true
+          category: true
         }
       },
-      ClientProfile: {
+      owner: {
         select: {
           id: true,
           firstName: true,
@@ -1117,8 +1131,8 @@ export async function listRenewalQueue(user: SessionUser | null) {
       nextRenewAt: row.nextRenewAt,
       balance: decimalToNumberOrZero(row.balance),
       daysToRenew: days,
-      owner: row.ClientProfile,
-      plan: serializePlan(row.MembershipPlan),
+      owner: row.owner,
+      plan: serializePlan(row.plan),
       actions: {
         invoiceUrl: buildMembershipInvoiceLink({ contractId: row.id }),
         contractUrl: `/admin/membresias/contratos/${row.id}`
@@ -1186,6 +1200,17 @@ export async function getMembershipDashboard(user: SessionUser | null) {
   const contractScope: Prisma.MembershipContractWhereInput = {
     ...planBranchWhere(user)
   };
+  const activeOrPendingStatuses = pickKnownMembershipStatuses(
+    MembershipStatus.ACTIVO,
+    MembershipStatus.PENDIENTE,
+    MembershipStatus.PENDIENTE_PAGO
+  );
+  const riskStatuses = pickKnownMembershipStatuses(
+    MembershipStatus.PENDIENTE,
+    MembershipStatus.PENDIENTE_PAGO,
+    MembershipStatus.SUSPENDIDO,
+    MembershipStatus.VENCIDO
+  );
 
   const [plansActive, contractsActive, renewals7, renewals15, renewals30, contractsAtRisk, activeContracts] = await Promise.all([
     prisma.membershipPlan.count({ where: { active: true } }),
@@ -1193,30 +1218,28 @@ export async function getMembershipDashboard(user: SessionUser | null) {
     prisma.membershipContract.count({
       where: {
         ...contractScope,
-        status: { in: [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE, MembershipStatus.PENDIENTE_PAGO] },
+        status: { in: activeOrPendingStatuses },
         nextRenewAt: { gte: today, lte: in7 }
       }
     }),
     prisma.membershipContract.count({
       where: {
         ...contractScope,
-        status: { in: [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE, MembershipStatus.PENDIENTE_PAGO] },
+        status: { in: activeOrPendingStatuses },
         nextRenewAt: { gte: today, lte: in15 }
       }
     }),
     prisma.membershipContract.count({
       where: {
         ...contractScope,
-        status: { in: [MembershipStatus.ACTIVO, MembershipStatus.PENDIENTE, MembershipStatus.PENDIENTE_PAGO] },
+        status: { in: activeOrPendingStatuses },
         nextRenewAt: { gte: today, lte: in30 }
       }
     }),
     prisma.membershipContract.count({
       where: {
         ...contractScope,
-        status: {
-          in: [MembershipStatus.PENDIENTE, MembershipStatus.PENDIENTE_PAGO, MembershipStatus.SUSPENDIDO, MembershipStatus.VENCIDO]
-        }
+        status: { in: riskStatuses }
       }
     }),
     prisma.membershipContract.findMany({
@@ -1225,9 +1248,9 @@ export async function getMembershipDashboard(user: SessionUser | null) {
         status: MembershipStatus.ACTIVO
       },
       include: {
-        MembershipPlan: {
+        plan: {
           include: {
-            MembershipPlanCategory: true
+            category: true
           }
         }
       }
@@ -1256,7 +1279,7 @@ export async function getMembershipDashboard(user: SessionUser | null) {
     const mrr = computeContractMrr(contract);
     totalMrr += mrr;
 
-    const segment = contract.MembershipPlan.segment;
+    const segment = contract.plan.segment;
     if (segment === "B2C") {
       b2cActive += 1;
       b2cMrr += mrr;
@@ -1265,8 +1288,8 @@ export async function getMembershipDashboard(user: SessionUser | null) {
       b2bMrr += mrr;
     }
 
-    const categoryId = contract.MembershipPlan.categoryId ?? null;
-    const categoryName = contract.MembershipPlan.MembershipPlanCategory?.name ?? "Sin categoría";
+    const categoryId = contract.plan.categoryId ?? null;
+    const categoryName = contract.plan.category?.name ?? "Sin categoría";
     const key = `${segment}:${categoryId ?? "none"}`;
     const existing = categoryMap.get(key) ?? {
       categoryId,
@@ -1377,7 +1400,7 @@ export async function initContractRecurrentCheckout(contractId: string, input: C
     prisma.membershipContract.findUnique({
       where: { id: contractId },
       include: {
-        MembershipPlan: true
+        plan: true
       }
     }),
     ensureMembershipGatewayConfigRecord()
@@ -1466,7 +1489,7 @@ function extractRecurrenteAmount(
     billingFrequency: MembershipBillingFrequency;
     priceLockedMonthly: Prisma.Decimal | null;
     priceLockedAnnual: Prisma.Decimal | null;
-    MembershipPlan?: { priceMonthly: Prisma.Decimal; priceAnnual: Prisma.Decimal } | null;
+    plan?: { priceMonthly: Prisma.Decimal; priceAnnual: Prisma.Decimal } | null;
   }
 ) {
   const object = (payload as any)?.data?.object || {};
@@ -1502,10 +1525,10 @@ export async function processRecurrenteWebhook(payload: RecurrenteWebhookInput, 
   const contract = contractId
     ? await prisma.membershipContract.findUnique({
         where: { id: contractId },
-        include: {
-          MembershipPlan: true,
-          MembershipContractBillingProfile: true,
-          ClientProfile: true
+      include: {
+          plan: true,
+          billingProfile: true,
+          owner: true
         }
       })
     : null;
@@ -1561,9 +1584,9 @@ export async function processRecurrenteWebhook(payload: RecurrenteWebhookInput, 
         where: { contractId: contract.id },
         update: {
           provider: "RECURRENT",
-          recurrenteCustomerId: object.customerId || contract.MembershipContractBillingProfile?.recurrenteCustomerId || null,
+          recurrenteCustomerId: object.customerId || contract.billingProfile?.recurrenteCustomerId || null,
           recurrenteSubscriptionId:
-            object.subscriptionId || contract.MembershipContractBillingProfile?.recurrenteSubscriptionId || null,
+            object.subscriptionId || contract.billingProfile?.recurrenteSubscriptionId || null,
           lastPaymentIntentId: paymentIntentId,
           status: "ACTIVE",
           updatedAt: now()
@@ -1592,7 +1615,7 @@ export async function processRecurrenteWebhook(payload: RecurrenteWebhookInput, 
       });
     });
 
-    const partyId = contract.ClientProfile?.partyId || null;
+    const partyId = contract.owner?.partyId || null;
     let receivable = null;
     if (partyId) {
       receivable = await createReceivableDraftForMembership({
@@ -1914,7 +1937,7 @@ export async function subscribePublicMembership(input: PublicSubscribeInput) {
   const plan = await prisma.membershipPlan.findUnique({
     where: { id: input.planId },
     include: {
-      MembershipPlanCategory: true
+      category: true
     }
   });
 
