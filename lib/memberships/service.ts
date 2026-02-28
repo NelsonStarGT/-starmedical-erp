@@ -39,6 +39,9 @@ import { z } from "zod";
 
 const CURRENCY_ALLOWLIST = new Set(["GTQ", "USD", "EUR"]);
 type MembershipPlanSegmentType = "B2C" | "B2B";
+const MEMBERSHIP_CONFIG_FIELDS = new Set(
+  Prisma.dmmf.datamodel.models.find((model) => model.name === "MembershipConfig")?.fields.map((field) => field.name) ?? []
+);
 
 const MEMBERSHIP_STATUS_SET = new Set<string>(Object.values(MembershipStatus));
 const pickKnownMembershipStatuses = (...values: Array<string | undefined | null>) =>
@@ -247,6 +250,24 @@ function resolveCatalogBranchId(inputBranchId: string | null | undefined, user: 
     return inputBranchId;
   }
   return user?.branchId ?? null;
+}
+
+function pickMembershipConfigFields<T extends Record<string, unknown>>(source: T) {
+  const target: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (MEMBERSHIP_CONFIG_FIELDS.has(key)) {
+      target[key] = value;
+    }
+  }
+  return target;
+}
+
+function normalizeMembershipConfigResponse<T extends Record<string, unknown>>(config: T) {
+  if (MEMBERSHIP_CONFIG_FIELDS.has("hidePricesForOperators")) return config;
+  return {
+    ...config,
+    hidePricesForOperators: true
+  };
 }
 
 async function assertDurationPreset(durationPresetId: string | null | undefined) {
@@ -1174,43 +1195,61 @@ export async function listRenewalQueue(user: SessionUser | null) {
 }
 
 export async function getMembershipConfig() {
+  const defaults = {
+    reminderDays: 30,
+    graceDays: 7,
+    inactiveAfterDays: 90,
+    autoRenewWithPayment: true,
+    prorateOnMidmonth: true,
+    blockIfBalanceDue: true,
+    hidePricesForOperators: true,
+    requireInitialPayment: true,
+    cashTransferMinMonths: 2,
+    priceChangeNoticeDays: 30
+  };
   const config = await prisma.membershipConfig.upsert({
     where: { id: 1 },
     create: {
       id: 1,
-      reminderDays: 30,
-      graceDays: 7,
-      inactiveAfterDays: 90,
-      autoRenewWithPayment: true,
-      prorateOnMidmonth: true,
-      blockIfBalanceDue: true,
-      hidePricesForOperators: true,
-      requireInitialPayment: true,
-      cashTransferMinMonths: 2,
-      priceChangeNoticeDays: 30,
+      ...(pickMembershipConfigFields(defaults) as any),
       createdAt: now(),
       updatedAt: now()
     },
     update: {}
   });
 
-  return config;
+  return normalizeMembershipConfigResponse(config);
 }
 
 export async function updateMembershipConfig(input: MembershipConfigInput) {
-  return prisma.membershipConfig.upsert({
+  const payload = pickMembershipConfigFields({
+    reminderDays: input.reminderDays,
+    graceDays: input.graceDays,
+    inactiveAfterDays: input.inactiveAfterDays,
+    autoRenewWithPayment: input.autoRenewWithPayment,
+    prorateOnMidmonth: input.prorateOnMidmonth,
+    blockIfBalanceDue: input.blockIfBalanceDue,
+    hidePricesForOperators: input.hidePricesForOperators,
+    requireInitialPayment: input.requireInitialPayment,
+    cashTransferMinMonths: input.cashTransferMinMonths,
+    priceChangeNoticeDays: input.priceChangeNoticeDays
+  });
+
+  const config = await prisma.membershipConfig.upsert({
     where: { id: 1 },
     create: {
       id: 1,
-      ...input,
+      ...(payload as any),
       createdAt: now(),
       updatedAt: now()
     },
     update: {
-      ...input,
+      ...(payload as any),
       updatedAt: now()
     }
   });
+
+  return normalizeMembershipConfigResponse(config);
 }
 
 export async function getMembershipDashboard(user: SessionUser | null) {
