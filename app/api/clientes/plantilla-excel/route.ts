@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionUser } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
+import { canExportClientTemplate } from "@/lib/clients/bulk/permissions";
+import { recordClientsAccessBlocked } from "@/lib/clients/securityEvents";
 import { exportExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 const empresasHeaders = [
@@ -44,11 +46,22 @@ const personasHeaders = [
 ];
 
 export async function GET(req: NextRequest) {
-  const user = getSessionUser(req);
+  const auth = requireAuth(req);
+  if (auth.errorResponse) return auth.errorResponse;
+  if (!canExportClientTemplate(auth.user)) {
+    await recordClientsAccessBlocked({
+      user: auth.user,
+      route: "/api/clientes/plantilla-excel",
+      capability: "CLIENTS_EXPORT_TEMPLATE",
+      resourceType: "bulk_template"
+    });
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
+
   const { buffer } = await exportExcelViaProcessingService({
     context: {
-      tenantId: user?.tenantId,
-      actorId: user?.id
+      tenantId: auth.user.tenantId,
+      actorId: auth.user.id
     },
     fileName: "plantilla_clientes.xlsx",
     sheets: [

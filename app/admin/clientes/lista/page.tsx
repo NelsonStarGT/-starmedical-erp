@@ -176,6 +176,18 @@ export default async function ClientesListaPage({
             {row.displayName}
           </Link>
           {row.identifier ? <p className="text-xs text-slate-500">{row.identifier}</p> : null}
+          <div className="flex flex-wrap gap-1">
+            {!row.hasPrimaryLocation ? (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                Falta ubicación
+              </span>
+            ) : null}
+            {!row.hasPrimaryContact ? (
+              <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                Falta contacto
+              </span>
+            ) : null}
+          </div>
         </div>
       )
     },
@@ -233,7 +245,7 @@ export default async function ClientesListaPage({
     <div className="space-y-4">
       <section className="rounded-2xl border border-[#dce7f5] bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div className="max-w-3xl">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#2e75ba]">Clientes · Lista</p>
             <h1 className="mt-1 text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
               Lista de Clientes
@@ -271,7 +283,7 @@ export default async function ClientesListaPage({
             placeholder="Nombre, NIT/DPI, correlativo, teléfono o email..."
           />
 
-          <select name="type" defaultValue={type} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+          <select name="type" defaultValue={type} className="h-10 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
             <option value="">Tipo (todos)</option>
             <option value={ClientProfileType.PERSON}>Persona</option>
             <option value={ClientProfileType.COMPANY}>Empresa</option>
@@ -279,7 +291,7 @@ export default async function ClientesListaPage({
             <option value={ClientProfileType.INSURER}>Aseguradora</option>
           </select>
 
-          <select name="status" defaultValue={statusId} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+          <select name="status" defaultValue={statusId} className="h-10 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
             <option value="">Estado (todos)</option>
             {statusOptions.map((item) => (
               <option key={item.id} value={item.id}>
@@ -288,21 +300,21 @@ export default async function ClientesListaPage({
             ))}
           </select>
 
-          <select name="sort" defaultValue={sort} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+          <select name="sort" defaultValue={sort} className="h-10 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
             <option value="createdAt_desc">Orden: creados reciente</option>
             <option value="name_asc">Orden: A-Z</option>
           </select>
 
-          <select name="pageSize" defaultValue={String(pageSize)} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+          <select name="pageSize" defaultValue={String(pageSize)} className="h-10 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
             <option value="10">10 por página</option>
           </select>
 
-          <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+          <label className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
             <input type="checkbox" name="includeArchived" value="1" defaultChecked={includeArchived} className="h-4 w-4" />
             Incluir archivados
           </label>
 
-          <button type="submit" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]">
+          <button type="submit" className="h-10 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]">
             Aplicar
           </button>
         </form>

@@ -20,7 +20,7 @@ export default function CvcListHeader({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <h1 className="truncate text-base font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
+            <h1 className="text-base font-semibold text-slate-900" style={{ fontFamily: "var(--font-clients-heading)" }}>
               {title}
             </h1>
             {helpText ? (
@@ -33,9 +33,9 @@ export default function CvcListHeader({
               </span>
             ) : null}
           </div>
-          <p className="truncate text-xs text-slate-500">{subtitle}</p>
+          <p className="max-w-3xl text-xs text-slate-500">{subtitle}</p>
         </div>
-        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        {actions ? <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">{actions}</div> : null}
       </div>
     </section>
   );

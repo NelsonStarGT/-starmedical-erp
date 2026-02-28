@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionUser } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
+import { canAnalyzeClientImport } from "@/lib/clients/bulk/permissions";
+import { recordClientsAccessBlocked } from "@/lib/clients/securityEvents";
 import { importExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 type RowEmpresa = {
@@ -57,6 +59,18 @@ const getAge = (dateString?: string) => {
 };
 
 export async function POST(req: NextRequest) {
+  const auth = requireAuth(req);
+  if (auth.errorResponse) return auth.errorResponse;
+  if (!canAnalyzeClientImport(auth.user)) {
+    await recordClientsAccessBlocked({
+      user: auth.user,
+      route: "/api/clientes/importar",
+      capability: "CLIENTS_IMPORT_ANALYZE",
+      resourceType: "bulk_import"
+    });
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
+
   const contentType = req.headers.get("content-type") || "";
   if (!contentType.includes("multipart/form-data")) {
     return NextResponse.json({ error: "Content-Type inválido" }, { status: 400 });
@@ -78,11 +92,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const user = getSessionUser(req);
     const imported = await importExcelViaProcessingService({
       context: {
-        tenantId: user?.tenantId,
-        actorId: user?.id
+        tenantId: auth.user.tenantId,
+        actorId: auth.user.id
       },
       fileBuffer: Buffer.from(arrayBuffer),
       template: "clientes_v1",

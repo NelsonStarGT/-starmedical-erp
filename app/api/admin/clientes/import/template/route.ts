@@ -8,6 +8,7 @@ import {
   getClientBulkTemplateExampleRow,
   getClientBulkTemplateHeaders
 } from "@/lib/clients/bulk/clientBulkSchema";
+import { recordClientsAccessBlocked } from "@/lib/clients/securityEvents";
 
 export const runtime = "nodejs";
 
@@ -36,6 +37,14 @@ export async function GET(req: NextRequest) {
   const auth = requireAuth(req);
   if (auth.errorResponse) return auth.errorResponse;
   if (!auth.user || !canExportClientTemplate(auth.user)) {
+    if (auth.user) {
+      await recordClientsAccessBlocked({
+        user: auth.user,
+        route: "/api/admin/clientes/import/template",
+        capability: "CLIENTS_EXPORT_TEMPLATE",
+        resourceType: "bulk_template"
+      });
+    }
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
 

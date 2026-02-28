@@ -1,4 +1,4 @@
-import { ClientProfileType, Prisma } from "@prisma/client";
+import { ClientPhoneCategory, ClientProfileType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildClientCountryFilterWhere } from "@/lib/clients/countryFilter.server";
 import { isPrismaMissingTableError } from "@/lib/prisma/errors.server";
@@ -34,7 +34,13 @@ export type ClientsReportSummary = {
   byType: Array<{ type: ClientProfileType; total: number }>;
   bySource: Array<{ sourceName: string; total: number }>;
   byGeo: {
-    countries: Array<{ label: string; source: "catalog" | "manual"; total: number }>;
+    countries: Array<{
+      label: string;
+      source: "catalog" | "manual";
+      total: number;
+      countryId: string | null;
+      countryIso2: string | null;
+    }>;
     admin1: Array<{ label: string; source: "catalog" | "manual"; total: number }>;
     admin2: Array<{ label: string; source: "catalog" | "manual"; total: number }>;
   };
@@ -53,6 +59,8 @@ export type ClientsReportRow = {
   type: ClientProfileType;
   displayName: string;
   identifier: string | null;
+  hasPrimaryLocation: boolean;
+  hasPrimaryContact: boolean;
   country: string | null;
   department: string | null;
   city: string | null;
@@ -71,11 +79,70 @@ export type ClientsReportList = {
   totalPages: number;
 };
 
-function normalizeRange(filters: ClientsReportFilters) {
+export type ClientsBirthdaysFilters = {
+  tenantId: string;
+  countryId?: string;
+  q?: string;
+  type?: ClientProfileType | "ALL";
+  month?: number | null;
+  nextDays?: number | null;
+  limit?: number;
+  referenceDate?: Date;
+};
+
+export type ClientsBirthdayRow = {
+  id: string;
+  displayName: string;
+  type: ClientProfileType;
+  birthDate: Date;
+  nextBirthday: Date;
+  daysUntil: number;
+  age: number | null;
+  phone: string | null;
+  phoneHref: string | null;
+  whatsappHref: string | null;
+  email: string | null;
+  emailHref: string | null;
+};
+
+export type ClientsBirthdayResult = {
+  items: ClientsBirthdayRow[];
+  total: number;
+  month: number | null;
+  nextDays: number | null;
+  referenceDate: Date;
+};
+
+function atStartOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function atEndOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+export function normalizeReportRange(filters: ClientsReportFilters) {
   const now = new Date();
-  const from = filters.from ?? new Date(now.getFullYear(), now.getMonth(), 1);
-  const to = filters.to ?? now;
+  const to = filters.to ? atEndOfDay(filters.to) : atEndOfDay(now);
+  const from = filters.from
+    ? atStartOfDay(filters.from)
+    : (() => {
+        const base = atStartOfDay(to);
+        base.setDate(base.getDate() - 29);
+        return base;
+      })();
   return { from, to };
+}
+
+type ClientsReportListOptions = {
+  pageSizeMax?: number;
+};
+
+export function normalizeReportListPagination(filters: ClientsReportFilters, options?: ClientsReportListOptions) {
+  const pageSizeMax = Math.max(options?.pageSizeMax ?? 100, 10);
+  const pageSize = Math.min(Math.max(filters.pageSize ?? 25, 10), pageSizeMax);
+  const page = Math.max(filters.page ?? 1, 1);
+  return { pageSize, page, skip: (page - 1) * pageSize };
 }
 
 function normalizeType(type?: ClientProfileType | "ALL") {
@@ -83,8 +150,21 @@ function normalizeType(type?: ClientProfileType | "ALL") {
   return type;
 }
 
-function buildWhere(filters: ClientsReportFilters): Prisma.ClientProfileWhereInput {
-  const { from, to } = normalizeRange(filters);
+function buildReferredOnlyWhere(filters: ClientsReportFilters): Prisma.ClientProfileWhereInput {
+  if (!filters.referredOnly) return {};
+  return {
+    referralsReceived: {
+      some: {
+        referrerClient: {
+          tenantId: filters.tenantId
+        }
+      }
+    }
+  };
+}
+
+export function buildWhere(filters: ClientsReportFilters): Prisma.ClientProfileWhereInput {
+  const { from, to } = normalizeReportRange(filters);
   const q = filters.q?.trim();
   const type = normalizeType(filters.type);
 
@@ -94,12 +174,14 @@ function buildWhere(filters: ClientsReportFilters): Prisma.ClientProfileWhereInp
     createdAt: { gte: from, lte: to },
     ...(type ? { type } : {}),
     ...buildClientCountryFilterWhere(filters.countryId ?? null),
+    ...buildReferredOnlyWhere(filters),
     ...(filters.acquisitionSourceId ? { acquisitionSourceId: filters.acquisitionSourceId } : {}),
     ...(filters.acquisitionDetailOptionId ? { acquisitionDetailOptionId: filters.acquisitionDetailOptionId } : {})
   };
 
   if (q) {
     where.OR = [
+      { clientCode: { contains: q, mode: "insensitive" } },
       { firstName: { contains: q, mode: "insensitive" } },
       { middleName: { contains: q, mode: "insensitive" } },
       { thirdName: { contains: q, mode: "insensitive" } },
@@ -110,6 +192,7 @@ function buildWhere(filters: ClientsReportFilters): Prisma.ClientProfileWhereInp
       { tradeName: { contains: q, mode: "insensitive" } },
       { clientIdentifiers: { some: { isActive: true, value: { contains: q, mode: "insensitive" } } } },
       { nit: { contains: q, mode: "insensitive" } },
+      { dpi: { contains: q, mode: "insensitive" } },
       {
         clientPhones: {
           some: {
@@ -128,8 +211,8 @@ function buildWhere(filters: ClientsReportFilters): Prisma.ClientProfileWhereInp
   return where;
 }
 
-function buildSqlWhereClauses(filters: ClientsReportFilters) {
-  const { from, to } = normalizeRange(filters);
+export function buildSqlWhereClauses(filters: ClientsReportFilters) {
+  const { from, to } = normalizeReportRange(filters);
   const clauses: Prisma.Sql[] = [
     Prisma.sql`cp."tenantId" = ${filters.tenantId}`,
     Prisma.sql`cp."deletedAt" IS NULL`,
@@ -163,19 +246,56 @@ function buildSqlWhereClauses(filters: ClientsReportFilters) {
     `);
   }
 
+  if (filters.referredOnly) {
+    clauses.push(Prisma.sql`
+      EXISTS (
+        SELECT 1
+        FROM "ClientReferral" AS cr
+        INNER JOIN "ClientProfile" AS rp ON rp."id" = cr."referrerClientId"
+        WHERE cr."referredClientId" = cp."id"
+          AND rp."tenantId" = ${filters.tenantId}
+      )
+    `);
+  }
+
   const q = filters.q?.trim();
   if (q) {
     const like = `%${q}%`;
+    const emailLike = `%${q.toLowerCase()}%`;
     clauses.push(Prisma.sql`
       (
         cp."clientCode" ILIKE ${like}
         OR cp."firstName" ILIKE ${like}
         OR cp."middleName" ILIKE ${like}
+        OR cp."thirdName" ILIKE ${like}
         OR cp."lastName" ILIKE ${like}
         OR cp."secondLastName" ILIKE ${like}
+        OR cp."thirdLastName" ILIKE ${like}
         OR cp."companyName" ILIKE ${like}
         OR cp."tradeName" ILIKE ${like}
         OR cp."nit" ILIKE ${like}
+        OR cp."dpi" ILIKE ${like}
+        OR EXISTS (
+          SELECT 1
+          FROM "ClientIdentifier" AS ci
+          WHERE ci."clientId" = cp."id"
+            AND ci."isActive" = TRUE
+            AND ci."value" ILIKE ${like}
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM "ClientPhone" AS cph
+          WHERE cph."clientId" = cp."id"
+            AND cph."isActive" = TRUE
+            AND (cph."number" ILIKE ${like} OR cph."e164" ILIKE ${like})
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM "ClientEmail" AS ce
+          WHERE ce."clientId" = cp."id"
+            AND ce."isActive" = TRUE
+            AND ce."valueNormalized" LIKE ${emailLike}
+        )
       )
     `);
   }
@@ -210,6 +330,112 @@ function toDisplayName(row: {
       .join(" ") || "Persona";
   }
   return row.tradeName || row.companyName || "Cliente";
+}
+
+function stripToDigits(value: string) {
+  return value.replace(/\D+/g, "");
+}
+
+function buildTelHref(value: string | null) {
+  if (!value) return null;
+  const compact = value.replace(/\s+/g, "").trim();
+  return compact ? `tel:${compact}` : null;
+}
+
+function toWhatsAppDigits(phone: { e164: string | null; countryCode: string | null; number: string }) {
+  const e164Digits = stripToDigits(phone.e164 || "");
+  if (e164Digits) return e164Digits;
+
+  const countryCodeDigits = stripToDigits(phone.countryCode || "");
+  const numberDigits = stripToDigits(phone.number);
+  if (!numberDigits) return null;
+
+  if (countryCodeDigits && !numberDigits.startsWith(countryCodeDigits)) {
+    return `${countryCodeDigits}${numberDigits}`;
+  }
+
+  return numberDigits;
+}
+
+function resolveBirthdayPhone(rows: Array<{
+  number: string;
+  e164: string | null;
+  countryCode: string | null;
+  category: ClientPhoneCategory;
+  canWhatsapp: boolean;
+  isPrimary: boolean;
+}>) {
+  const primary = rows.find((item) => item.isPrimary) ?? rows[0] ?? null;
+  const whatsappCandidate =
+    rows.find(
+      (item) =>
+        item.category === ClientPhoneCategory.WHATSAPP ||
+        item.category === ClientPhoneCategory.MOBILE ||
+        item.canWhatsapp
+    ) ?? null;
+
+  const value = primary?.e164?.trim() || primary?.number?.trim() || null;
+  const whatsappDigits = whatsappCandidate ? toWhatsAppDigits(whatsappCandidate) : null;
+
+  return {
+    value,
+    phoneHref: buildTelHref(value),
+    whatsappHref: whatsappDigits ? `https://wa.me/${whatsappDigits}` : null
+  };
+}
+
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function resolveBirthdayDayForYear(monthIndex: number, day: number, year: number) {
+  const lastDayInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  return Math.min(day, lastDayInMonth);
+}
+
+function calculateNextBirthday(birthDate: Date, referenceDate: Date) {
+  const monthIndex = birthDate.getMonth();
+  const birthDay = birthDate.getDate();
+  const referenceDay = startOfLocalDay(referenceDate);
+
+  let candidateYear = referenceDay.getFullYear();
+  let candidate = new Date(
+    candidateYear,
+    monthIndex,
+    resolveBirthdayDayForYear(monthIndex, birthDay, candidateYear)
+  );
+
+  if (candidate.getTime() < referenceDay.getTime()) {
+    candidateYear += 1;
+    candidate = new Date(
+      candidateYear,
+      monthIndex,
+      resolveBirthdayDayForYear(monthIndex, birthDay, candidateYear)
+    );
+  }
+
+  return candidate;
+}
+
+function calculateAgeYears(birthDate: Date, referenceDate: Date) {
+  const today = startOfLocalDay(referenceDate);
+  let years = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  const dayDiff = today.getDate() - birthDate.getDate();
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) years -= 1;
+  return years >= 0 ? years : null;
+}
+
+function normalizeBirthdaysMonth(value: number | null | undefined) {
+  if (!Number.isFinite(value)) return null;
+  const next = Number(value);
+  return next >= 1 && next <= 12 ? next : null;
+}
+
+function normalizeBirthdaysNextDays(value: number | null | undefined) {
+  if (!Number.isFinite(value)) return null;
+  const next = Number(value);
+  return next >= 1 && next <= 90 ? next : null;
 }
 
 type ClientReferralDelegate = {
@@ -377,13 +603,25 @@ type GeoBucketRow = {
   label: string;
   source: "catalog" | "manual";
   total: number;
+  countryId: string | null;
+  countryIso2: string | null;
 };
 
-export function mapGeoBucketRows(rows: Array<{ label: string | null; source: string; total: number | bigint }>): GeoBucketRow[] {
+export function mapGeoBucketRows(
+  rows: Array<{
+    label: string | null;
+    source: string;
+    total: number | bigint;
+    countryId?: string | null;
+    countryIso2?: string | null;
+  }>
+): GeoBucketRow[] {
   return rows.map((row) => ({
     label: row.label?.trim() || "Manual entry",
     source: normalizeGeoBucketSource(row.source),
-    total: toSafeNumber(row.total)
+    total: toSafeNumber(row.total),
+    countryId: typeof row.countryId === "string" ? row.countryId : null,
+    countryIso2: typeof row.countryIso2 === "string" ? row.countryIso2 : null
   }));
 }
 
@@ -408,10 +646,20 @@ async function queryGeoBuckets(
         ? Prisma.sql`CASE WHEN loc."geoAdmin1Id" IS NULL THEN 'manual' ELSE 'catalog' END`
         : Prisma.sql`CASE WHEN loc."geoAdmin2Id" IS NULL THEN 'manual' ELSE 'catalog' END`;
 
-  const rows = await prisma.$queryRaw<Array<{ label: string | null; source: string; total: number | bigint }>>(Prisma.sql`
+  const { countryIdSql, countryIso2Sql } = buildGeoBucketCountryProjectionSql(level);
+
+  const rows = await prisma.$queryRaw<Array<{
+    label: string | null;
+    source: string;
+    total: number | bigint;
+    countryId: string | null;
+    countryIso2: string | null;
+  }>>(Prisma.sql`
     SELECT
       ${labelSql} AS "label",
       ${sourceSql} AS "source",
+      ${countryIdSql} AS "countryId",
+      ${countryIso2Sql} AS "countryIso2",
       COUNT(*) AS "total"
     FROM "ClientProfile" AS cp
     LEFT JOIN LATERAL (
@@ -441,6 +689,20 @@ async function queryGeoBuckets(
   `);
 
   return mapGeoBucketRows(rows);
+}
+
+export function buildGeoBucketCountryProjectionSql(level: "country" | "admin1" | "admin2") {
+  if (level === "country") {
+    return {
+      countryIdSql: Prisma.sql`MIN(loc."geoCountryId")`,
+      countryIso2Sql: Prisma.sql`MIN(gco."iso2")`
+    };
+  }
+
+  return {
+    countryIdSql: Prisma.sql`NULL`,
+    countryIso2Sql: Prisma.sql`NULL`
+  };
 }
 
 export async function getClientCountsByGeo(filters: ClientsReportFilters) {
@@ -557,11 +819,12 @@ export async function getClientsReportSummary(filters: ClientsReportFilters): Pr
   };
 }
 
-export async function getClientsReportList(filters: ClientsReportFilters): Promise<ClientsReportList> {
+export async function getClientsReportList(
+  filters: ClientsReportFilters,
+  options?: ClientsReportListOptions
+): Promise<ClientsReportList> {
   const where = buildWhere(filters);
-  const pageSize = Math.min(Math.max(filters.pageSize ?? 25, 10), 100);
-  const page = Math.max(filters.page ?? 1, 1);
-  const skip = (page - 1) * pageSize;
+  const { pageSize, page, skip } = normalizeReportListPagination(filters, options);
 
   const referralDelegate = getClientReferralDelegate();
 
@@ -669,12 +932,8 @@ export async function getClientsReportList(filters: ClientsReportFilters): Promi
     })()
   ]);
 
-  const filteredRows = filters.referredOnly
-    ? rows.filter((row) => Boolean(referredMap.get(row.id)))
-    : rows;
-
   return {
-    items: filteredRows.map((row) => {
+    items: rows.map((row) => {
       const primaryIdentifier = getPrimaryIdentifierValue(row.clientIdentifiers);
       const primaryPhone = getPrimaryPhoneValue(row.clientPhones);
       const primaryEmail = getPrimaryEmailValue(row.clientEmails);
@@ -685,6 +944,8 @@ export async function getClientsReportList(filters: ClientsReportFilters): Promi
         type: row.type,
         displayName: toDisplayName(row),
         identifier: row.type === ClientProfileType.PERSON ? primaryIdentifier : row.nit,
+        hasPrimaryLocation: row.clientLocations.some((location) => location.isPrimary),
+        hasPrimaryContact: Boolean(primaryPhone || primaryEmail),
         country: residence.country,
         department: residence.department,
         city: residence.city,
@@ -699,5 +960,211 @@ export async function getClientsReportList(filters: ClientsReportFilters): Promi
     page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize))
+  };
+}
+
+export function projectClientsBirthdaysRows(
+  rows: Array<{
+    id: string;
+    type: ClientProfileType;
+    firstName: string | null;
+    middleName: string | null;
+    thirdName: string | null;
+    lastName: string | null;
+    secondLastName: string | null;
+    thirdLastName: string | null;
+    companyName: string | null;
+    tradeName: string | null;
+    birthDate: Date;
+    clientPhones: Array<{
+      number: string;
+      e164: string | null;
+      countryCode: string | null;
+      category: ClientPhoneCategory;
+      canWhatsapp: boolean;
+      isPrimary: boolean;
+      isActive: boolean;
+    }>;
+    clientEmails: Array<{
+      valueRaw: string;
+      valueNormalized: string;
+      isPrimary: boolean;
+      isActive: boolean;
+    }>;
+  }>,
+  options?: {
+    month?: number | null;
+    nextDays?: number | null;
+    referenceDate?: Date;
+    limit?: number;
+  }
+): ClientsBirthdayResult {
+  const month = normalizeBirthdaysMonth(options?.month);
+  const nextDays = normalizeBirthdaysNextDays(options?.nextDays);
+  const referenceDate = startOfLocalDay(options?.referenceDate ?? new Date());
+  const limit = Math.min(Math.max(options?.limit ?? 300, 1), 1_000);
+
+  const processed = rows
+    .map((row) => {
+      const nextBirthday = calculateNextBirthday(row.birthDate, referenceDate);
+      const daysUntil = Math.round(
+        (startOfLocalDay(nextBirthday).getTime() - referenceDate.getTime()) / (24 * 60 * 60 * 1000)
+      );
+      const contactPhone = resolveBirthdayPhone(row.clientPhones.filter((phone) => phone.isActive));
+      const email = getPrimaryEmailValue(row.clientEmails);
+      const displayName = toDisplayName(row);
+
+      return {
+        id: row.id,
+        displayName,
+        type: row.type,
+        birthDate: row.birthDate,
+        nextBirthday,
+        daysUntil,
+        age: calculateAgeYears(row.birthDate, referenceDate),
+        phone: contactPhone.value,
+        phoneHref: contactPhone.phoneHref,
+        whatsappHref: contactPhone.whatsappHref,
+        email,
+        emailHref: email ? `mailto:${email.toLowerCase()}` : null
+      } satisfies ClientsBirthdayRow;
+    })
+    .filter((row) => {
+      if (month && row.birthDate.getMonth() + 1 !== month) return false;
+      if (nextDays && (row.daysUntil < 0 || row.daysUntil > nextDays)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (a.daysUntil !== b.daysUntil) return a.daysUntil - b.daysUntil;
+      return a.displayName.localeCompare(b.displayName, "es", { sensitivity: "base" });
+    });
+
+  return {
+    items: processed.slice(0, limit),
+    total: processed.length,
+    month,
+    nextDays,
+    referenceDate
+  };
+}
+
+export async function getClientsReportBirthdays(filters: ClientsBirthdaysFilters): Promise<ClientsBirthdayResult> {
+  const type = normalizeType(filters.type);
+  const rows = await prisma.clientProfile.findMany({
+    where: {
+      tenantId: filters.tenantId,
+      deletedAt: null,
+      birthDate: { not: null },
+      ...(type ? { type } : {}),
+      ...buildClientCountryFilterWhere(filters.countryId ?? null),
+      ...(filters.q
+        ? {
+            OR: [
+              { clientCode: { contains: filters.q, mode: "insensitive" } },
+              { firstName: { contains: filters.q, mode: "insensitive" } },
+              { middleName: { contains: filters.q, mode: "insensitive" } },
+              { thirdName: { contains: filters.q, mode: "insensitive" } },
+              { lastName: { contains: filters.q, mode: "insensitive" } },
+              { secondLastName: { contains: filters.q, mode: "insensitive" } },
+              { thirdLastName: { contains: filters.q, mode: "insensitive" } },
+              { companyName: { contains: filters.q, mode: "insensitive" } },
+              { tradeName: { contains: filters.q, mode: "insensitive" } },
+              { nit: { contains: filters.q, mode: "insensitive" } },
+              { dpi: { contains: filters.q, mode: "insensitive" } }
+            ]
+          }
+        : {})
+    },
+    select: {
+      id: true,
+      type: true,
+      firstName: true,
+      middleName: true,
+      thirdName: true,
+      lastName: true,
+      secondLastName: true,
+      thirdLastName: true,
+      companyName: true,
+      tradeName: true,
+      birthDate: true,
+      clientPhones: {
+        where: { isActive: true },
+        select: {
+          number: true,
+          e164: true,
+          countryCode: true,
+          category: true,
+          canWhatsapp: true,
+          isPrimary: true,
+          isActive: true
+        }
+      },
+      clientEmails: {
+        where: { isActive: true },
+        select: {
+          valueRaw: true,
+          valueNormalized: true,
+          isPrimary: true,
+          isActive: true
+        }
+      }
+    }
+  });
+
+  const withBirthDate = rows.filter(
+    (row): row is typeof row & { birthDate: Date } => row.birthDate instanceof Date
+  );
+
+  return projectClientsBirthdaysRows(withBirthDate, {
+    month: filters.month,
+    nextDays: filters.nextDays,
+    referenceDate: filters.referenceDate,
+    limit: filters.limit
+  });
+}
+
+type ClientsReportExportOptions = {
+  batchSize?: number;
+  maxRows?: number;
+};
+
+export async function getClientsReportRowsForExport(
+  filters: ClientsReportFilters,
+  options?: ClientsReportExportOptions
+): Promise<{ items: ClientsReportRow[]; total: number; truncated: boolean; maxRows: number }> {
+  const maxRows = Math.max(1_000, options?.maxRows ?? 50_000);
+  const batchSize = Math.min(Math.max(options?.batchSize ?? 1_000, 100), 5_000);
+
+  const first = await getClientsReportList(
+    {
+      ...filters,
+      page: 1,
+      pageSize: batchSize
+    },
+    { pageSizeMax: batchSize }
+  );
+
+  const items = [...first.items];
+  let page = 2;
+
+  while (page <= first.totalPages && items.length < maxRows) {
+    const chunk = await getClientsReportList(
+      {
+        ...filters,
+        page,
+        pageSize: batchSize
+      },
+      { pageSizeMax: batchSize }
+    );
+    items.push(...chunk.items);
+    page += 1;
+  }
+
+  const cappedItems = items.slice(0, maxRows);
+  return {
+    items: cappedItems,
+    total: first.total,
+    truncated: first.total > maxRows || items.length > maxRows,
+    maxRows
   };
 }

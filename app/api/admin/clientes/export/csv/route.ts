@@ -5,6 +5,7 @@ import { buildClientBulkDataRow, type ClientBulkExportProfile } from "@/lib/clie
 import { canExportClientData } from "@/lib/clients/bulk/permissions";
 import { getClientBulkTemplateHeaders } from "@/lib/clients/bulk/clientBulkSchema";
 import { normalizeClientsCountryFilterInput, readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
+import { recordClientsAccessBlocked } from "@/lib/clients/securityEvents";
 import { prisma } from "@/lib/prisma";
 import { listClients, type ClientListAlertFilter, type ClientListItem } from "@/lib/clients/list.service";
 import { tenantIdFromUser } from "@/lib/tenant";
@@ -157,6 +158,14 @@ export async function GET(req: NextRequest) {
   const auth = requireAuth(req);
   if (auth.errorResponse) return auth.errorResponse;
   if (!auth.user || !canExportClientData(auth.user)) {
+    if (auth.user) {
+      await recordClientsAccessBlocked({
+        user: auth.user,
+        route: "/api/admin/clientes/export/csv",
+        capability: "CLIENTS_EXPORT_DATA",
+        resourceType: "bulk_export"
+      });
+    }
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
 

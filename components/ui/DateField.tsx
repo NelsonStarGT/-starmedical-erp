@@ -70,6 +70,7 @@ export type DateFieldProps = {
   value: string;
   onChange: (value: string) => void;
   label?: string;
+  autoFocus?: boolean;
   disabled?: boolean;
   error?: string;
   onErrorChange?: (error?: string) => void;
@@ -86,6 +87,7 @@ export function DateField({
   value,
   onChange,
   label,
+  autoFocus,
   disabled,
   error,
   onErrorChange,
@@ -224,6 +226,7 @@ export function DateField({
 
       <div className="relative">
         <input
+          autoFocus={autoFocus}
           value={inputValue}
           onChange={(event) => {
             const masked = maskDateInput(event.target.value, effectiveDateFormat);

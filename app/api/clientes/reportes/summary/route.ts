@@ -1,51 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ClientProfileType } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
-import { normalizeClientsCountryFilterInput, readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
-import { isAdmin } from "@/lib/rbac";
-import { getClientsReportSummary, type ClientsReportFilters } from "@/lib/clients/reports.service";
+import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
+import { canViewClientsReports } from "@/lib/clients/reports/permissions";
+import { buildClientsReportFiltersFromRequest } from "@/lib/clients/reports/requestFilters";
+import { getClientsReportSummary } from "@/lib/clients/reports.service";
+import { recordClientsAccessBlocked } from "@/lib/clients/securityEvents";
 import { tenantIdFromUser } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function parseDate(value: string | null) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function buildFilters(req: NextRequest, tenantId: string): ClientsReportFilters {
-  const { searchParams } = new URL(req.url);
-  const rawType = searchParams.get("type");
-  const queryCountryId = normalizeClientsCountryFilterInput(searchParams.get("countryId"));
-  const cookieCountryId = readClientsCountryFilterCookie(req.cookies);
-
-  return {
-    tenantId,
-    q: searchParams.get("q") || undefined,
-    type:
-      rawType && rawType !== "ALL" && Object.values(ClientProfileType).includes(rawType as ClientProfileType)
-        ? (rawType as ClientProfileType)
-        : "ALL",
-    from: parseDate(searchParams.get("from")),
-    to: parseDate(searchParams.get("to")),
-    countryId: queryCountryId ?? cookieCountryId ?? undefined,
-    acquisitionSourceId: searchParams.get("sourceId") || undefined,
-    acquisitionDetailOptionId: searchParams.get("detailId") || undefined,
-    referredOnly: searchParams.get("referred") === "1"
-  };
-}
-
 export async function GET(req: NextRequest) {
   const auth = requireAuth(req);
   if (auth.errorResponse) return auth.errorResponse;
-  if (!isAdmin(auth.user)) {
+  if (!canViewClientsReports(auth.user)) {
+    await recordClientsAccessBlocked({
+      user: auth.user,
+      route: "/api/clientes/reportes/summary",
+      capability: "CLIENTS_REPORTS_VIEW",
+      resourceType: "reports"
+    });
     return NextResponse.json({ ok: false, error: "No autorizado." }, { status: 403 });
   }
 
   try {
-    const filters = buildFilters(req, tenantIdFromUser(auth.user));
+    const tenantId = tenantIdFromUser(auth.user);
+    const dateFormat = await getClientsDateFormat(tenantId);
+    const filters = buildClientsReportFiltersFromRequest(req, dateFormat, tenantId, {
+      withPagination: false,
+      forcePage: 1,
+      forcePageSize: 25
+    });
     const summary = await getClientsReportSummary(filters);
     return NextResponse.json({ ok: true, data: summary });
   } catch (error) {

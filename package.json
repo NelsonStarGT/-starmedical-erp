@@ -64,6 +64,7 @@
     "backfill:client-codes": "tsx scripts/ops/backfill-client-codes.ts",
     "backfill:client-codes:dry-run": "tsx scripts/ops/backfill-client-codes.ts --dry-run",
     "clients:bulk:templates": "tsx scripts/clients/generate-bulk-templates.ts",
+    "clients:audit:data": "tsx scripts/clients/audit-data.ts",
     "check:tenant:isolation": "bash scripts/check-tenant-scope.sh"
   },
   "dependencies": {
@@ -105,6 +106,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.53.0",
+    "react-simple-maps": "^3.0.0",
+    "recharts": "^3.7.0",
     "redis": "^4.7.1",
     "uuid": "^9.0.1",
     "zod": "^3.23.8"

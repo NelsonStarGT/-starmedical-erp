@@ -10,9 +10,9 @@ test("mapGeoBucketRows separa source catalog/manual y aplica fallback label", ()
   ]);
 
   assert.deepEqual(rows, [
-    { label: "Guatemala", source: "catalog", total: 10 },
-    { label: "Manual entry", source: "manual", total: 3 },
-    { label: "Manual entry", source: "manual", total: 1 }
+    { label: "Guatemala", source: "catalog", total: 10, countryId: null, countryIso2: null },
+    { label: "Manual entry", source: "manual", total: 3, countryId: null, countryIso2: null },
+    { label: "Manual entry", source: "manual", total: 1, countryId: null, countryIso2: null }
   ]);
 });
 

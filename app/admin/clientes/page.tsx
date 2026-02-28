@@ -9,6 +9,7 @@ import { getClientsHomeKpis } from "@/lib/clients/dashboard.service";
 import { getClientCompletenessScore } from "@/lib/clients/completeness";
 import { formatDateForClients } from "@/lib/clients/dateFormat";
 import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
+import { canViewClientsReports } from "@/lib/clients/reports/permissions";
 import { tenantIdFromUser } from "@/lib/tenant";
 
 function startOfDay(date: Date) {
@@ -46,6 +47,7 @@ export default async function ClientesDashboardPage() {
   const currentUser = await getSessionUserFromCookies(cookies());
   if (!currentUser) redirect("/login");
   const tenantId = tenantIdFromUser(currentUser);
+  const canViewReports = canViewClientsReports(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
   const now = new Date();
   const todayStart = startOfDay(now);
@@ -172,13 +174,15 @@ export default async function ClientesDashboardPage() {
               <Building2 size={16} />
               Crear empresa
             </Link>
-            <Link
-              href="/admin/clientes/reportes"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-            >
-              <FileBarChart2 size={16} />
-              Ir a reportes
-            </Link>
+            {canViewReports && (
+              <Link
+                href="/admin/clientes/reportes"
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              >
+                <FileBarChart2 size={16} />
+                Ir a reportes
+              </Link>
+            )}
             <Link
               href="/admin/reception/check-in?mode=existing"
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"

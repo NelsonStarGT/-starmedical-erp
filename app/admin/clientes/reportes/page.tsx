@@ -1,21 +1,33 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { forbidden, redirect } from "next/navigation";
 import { ClientProfileType } from "@prisma/client";
-import { Download, FilterX } from "lucide-react";
+import { Mail, MessageCircle, Phone } from "lucide-react";
+import ClientsGeoMapPanel from "@/components/clients/reports/ClientsGeoMapPanel";
+import ClientsReportsChartCard from "@/components/clients/reports/ClientsReportsChartCard";
+import ClientsReportsFiltersForm from "@/components/clients/reports/ClientsReportsFiltersForm";
+import ClientsReportsPanelsLayout from "@/components/clients/reports/ClientsReportsPanelsLayout";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
 import {
+  canViewClientsReports,
+  resolveClientsReportsExportScope
+} from "@/lib/clients/reports/permissions";
+import {
   formatDateForClients,
-  getClientsDatePlaceholder,
   parseClientsDateInput,
   parseIsoDateString,
   type ClientsDateFormat
 } from "@/lib/clients/dateFormat";
 import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
 import { CLIENTS_COUNTRY_FILTER_ALL } from "@/lib/clients/operatingCountryContext";
-import { getClientsReportList, getClientsReportSummary, type ClientsReportFilters } from "@/lib/clients/reports.service";
+import {
+  getClientsReportBirthdays,
+  getClientsReportList,
+  getClientsReportSummary,
+  type ClientsReportFilters
+} from "@/lib/clients/reports.service";
 import { tenantIdFromUser } from "@/lib/tenant";
 
 type SearchParams = {
@@ -30,6 +42,8 @@ type SearchParams = {
   referred?: string | string[];
   page?: string | string[];
   pageSize?: string | string[];
+  birthMonth?: string | string[];
+  birthNextDays?: string | string[];
 };
 
 const TYPE_OPTIONS: Array<{ value: "ALL" | ClientProfileType; label: string }> = [
@@ -52,6 +66,27 @@ function parseDate(value: string | null | undefined, dateFormat: ClientsDateForm
   return parseIsoDateString(value);
 }
 
+function toIsoLocalDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseBirthdayMonth(value: string | undefined) {
+  if (!value || value === "ALL") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed >= 1 && parsed <= 12 ? parsed : null;
+}
+
+function parseBirthdayNextDays(value: string | undefined) {
+  if (!value || value === "ALL") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed >= 1 && parsed <= 90 ? parsed : null;
+}
+
 function buildFilters(
   searchParams: SearchParams | undefined,
   dateFormat: ClientsDateFormat,
@@ -61,12 +96,7 @@ function buildFilters(
   const page = Number(firstValue(searchParams?.page) || "1");
   const pageSize = Number(firstValue(searchParams?.pageSize) || "25");
   const rawType = firstValue(searchParams?.type);
-  const rawCountryId = firstValue(searchParams?.countryId) ?? firstValue(searchParams?.country);
-  const hasCountryParam = typeof rawCountryId === "string";
-  const requestedCountryId = String(rawCountryId || "").trim();
-  const countryFilterParam = hasCountryParam
-    ? requestedCountryId || CLIENTS_COUNTRY_FILTER_ALL
-    : defaultCountryId || CLIENTS_COUNTRY_FILTER_ALL;
+  const countryFilterParam = defaultCountryId || CLIENTS_COUNTRY_FILTER_ALL;
 
   const filters: ClientsReportFilters = {
     tenantId,
@@ -106,8 +136,10 @@ export default async function ClientesReportesPage({
   const cookieStore = await cookies();
   const currentUser = await getSessionUserFromCookies(cookieStore);
   if (!currentUser) redirect("/login");
+  if (!canViewClientsReports(currentUser)) forbidden();
   const tenantId = tenantIdFromUser(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
+  const exportScope = resolveClientsReportsExportScope(currentUser);
   const defaultCountryId = readClientsCountryFilterCookie(cookieStore);
   const { filters, countryFilterParam } = buildFilters(
     resolvedSearchParams,
@@ -116,7 +148,10 @@ export default async function ClientesReportesPage({
     defaultCountryId
   );
 
-  const [summary, list, sources, sourceDetails, countries] = await Promise.all([
+  const birthdayMonth = parseBirthdayMonth(firstValue(resolvedSearchParams?.birthMonth));
+  const birthdayNextDays = parseBirthdayNextDays(firstValue(resolvedSearchParams?.birthNextDays));
+
+  const [summary, list, sources, sourceDetails, countries, birthdays] = await Promise.all([
     getClientsReportSummary(filters),
     getClientsReportList(filters),
     prisma.clientAcquisitionSource.findMany({
@@ -133,26 +168,47 @@ export default async function ClientesReportesPage({
       where: { isActive: true },
       orderBy: { name: "asc" },
       select: { id: true, name: true }
+    }),
+    getClientsReportBirthdays({
+      tenantId,
+      countryId: filters.countryId,
+      q: filters.q,
+      type: filters.type,
+      month: birthdayMonth,
+      nextDays: birthdayNextDays,
+      limit: 300
     })
   ]);
 
   const queryParams = {
     q: filters.q || "",
     type: filters.type && filters.type !== "ALL" ? filters.type : "ALL",
-    from: filters.from ? formatDateForClients(filters.from, dateFormat) : "",
-    to: filters.to ? formatDateForClients(filters.to, dateFormat) : "",
-    countryId: countryFilterParam,
+    from: filters.from ? toIsoLocalDate(filters.from) : "",
+    to: filters.to ? toIsoLocalDate(filters.to) : "",
     sourceId: filters.acquisitionSourceId || "",
     detailId: filters.acquisitionDetailOptionId || "",
     referred: filters.referredOnly ? "1" : "",
-    pageSize: String(filters.pageSize || 25)
+    pageSize: String(filters.pageSize || 25),
+    birthMonth: birthdayMonth ? String(birthdayMonth) : "",
+    birthNextDays: birthdayNextDays ? String(birthdayNextDays) : ""
+  };
+
+  const birthdayFiltersQuery = {
+    q: queryParams.q || undefined,
+    type: queryParams.type !== "ALL" ? queryParams.type : undefined,
+    from: queryParams.from || undefined,
+    to: queryParams.to || undefined,
+    sourceId: queryParams.sourceId || undefined,
+    detailId: queryParams.detailId || undefined,
+    referred: queryParams.referred || undefined,
+    pageSize: queryParams.pageSize || undefined
   };
 
   const chips: Array<{ key: string; label: string }> = [];
   if (queryParams.q) chips.push({ key: "q", label: `Buscar: ${queryParams.q}` });
   if (queryParams.type && queryParams.type !== "ALL") chips.push({ key: "type", label: `Tipo: ${queryParams.type}` });
-  if (queryParams.countryId && queryParams.countryId !== CLIENTS_COUNTRY_FILTER_ALL) {
-    const countryLabel = countries.find((country) => country.id === queryParams.countryId)?.name ?? "País";
+  if (countryFilterParam && countryFilterParam !== CLIENTS_COUNTRY_FILTER_ALL) {
+    const countryLabel = countries.find((country) => country.id === countryFilterParam)?.name ?? "País";
     chips.push({ key: "countryId", label: `País: ${countryLabel}` });
   }
   if (queryParams.sourceId) {
@@ -163,20 +219,50 @@ export default async function ClientesReportesPage({
     const detailLabel = sourceDetails.find((detail) => detail.id === queryParams.detailId)?.name || "Detalle";
     chips.push({ key: "detailId", label: `Detalle: ${detailLabel}` });
   }
-  if (queryParams.from) chips.push({ key: "from", label: `Desde: ${queryParams.from}` });
-  if (queryParams.to) chips.push({ key: "to", label: `Hasta: ${queryParams.to}` });
+  if (filters.from) chips.push({ key: "from", label: `Desde: ${formatDateForClients(filters.from, dateFormat)}` });
+  if (filters.to) chips.push({ key: "to", label: `Hasta: ${formatDateForClients(filters.to, dateFormat)}` });
   if (queryParams.referred) chips.push({ key: "referred", label: "Solo referidos" });
+  if (birthdayMonth) {
+    const monthLabel = new Intl.DateTimeFormat("es-ES", { month: "long" }).format(new Date(2026, birthdayMonth - 1, 1));
+    chips.push({ key: "birthMonth", label: `Cumpleaños mes: ${monthLabel}` });
+  }
+  if (birthdayNextDays) chips.push({ key: "birthNextDays", label: `Cumpleaños próximos: ${birthdayNextDays} días` });
 
-  const exportQuery = buildQuery({
+  const baseExportParams = {
     q: queryParams.q || undefined,
     type: queryParams.type !== "ALL" ? queryParams.type : undefined,
     from: queryParams.from || undefined,
     to: queryParams.to || undefined,
-    countryId: queryParams.countryId || undefined,
     sourceId: queryParams.sourceId || undefined,
     detailId: queryParams.detailId || undefined,
     referred: queryParams.referred || undefined
+  };
+  const geoBaseQuery = buildQuery(baseExportParams);
+  const selectedCountryLabel = countryFilterParam && countryFilterParam !== CLIENTS_COUNTRY_FILTER_ALL
+    ? countries.find((country) => country.id === countryFilterParam)?.name ?? "País"
+    : "Todos los países";
+  const birthdayExportQuery = buildQuery({
+    ...birthdayFiltersQuery,
+    birthMonth: queryParams.birthMonth || undefined,
+    birthNextDays: queryParams.birthNextDays || undefined,
+    format: "csv"
   });
+  const birthdayMonthOptions = Array.from({ length: 12 }).map((_, index) => {
+    const month = index + 1;
+    return {
+      value: String(month),
+      label: new Intl.DateTimeFormat("es-ES", { month: "long" }).format(new Date(2026, index, 1))
+    };
+  });
+  const sectionCounts = {
+    by_type: summary.byType.length,
+    top_channels: summary.bySource.length,
+    insurers_by_line: summary.insurersByLine.length,
+    geo: summary.byGeo.countries.length + summary.byGeo.admin1.length + summary.byGeo.admin2.length,
+    top_referrers: summary.referrals.topReferrers.length,
+    birthdays: birthdays.total,
+    clients_list: list.total
+  } as const;
 
   return (
     <div className="space-y-4">
@@ -204,123 +290,30 @@ export default async function ClientesReportesPage({
       </section>
 
       <section className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
-        <form method="GET" className="grid gap-2 md:grid-cols-4 lg:grid-cols-8">
-          <input
-            name="q"
-            defaultValue={queryParams.q}
-            placeholder="Buscar por nombre, documento, teléfono o email"
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm md:col-span-2"
-          />
-
-          <select name="type" defaultValue={queryParams.type} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-            {TYPE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <select
-            name="countryId"
-            defaultValue={queryParams.countryId}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-          >
-            <option value={CLIENTS_COUNTRY_FILTER_ALL}>País (todos)</option>
-            {countries.map((country) => (
-              <option key={country.id} value={country.id}>
-                {country.name}
-              </option>
-            ))}
-          </select>
-
-          <select
-            name="sourceId"
-            defaultValue={queryParams.sourceId}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-          >
-            <option value="">Canal (todos)</option>
-            {sources.map((source) => (
-              <option key={source.id} value={source.id}>
-                {source.name}
-              </option>
-              ))}
-            </select>
-
-          <select
-            name="detailId"
-            defaultValue={queryParams.detailId}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-          >
-            <option value="">Detalle canal (todos)</option>
-            {sourceDetails
-              .filter((detail) => !queryParams.sourceId || detail.sourceId === queryParams.sourceId)
-              .map((detail) => (
-                <option key={detail.id} value={detail.id}>
-                  {detail.name}
-                </option>
-              ))}
-          </select>
-
-          <input
-            name="from"
-            type="text"
-            inputMode="numeric"
-            defaultValue={queryParams.from}
-            placeholder={getClientsDatePlaceholder(dateFormat)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-          />
-          <input
-            name="to"
-            type="text"
-            inputMode="numeric"
-            defaultValue={queryParams.to}
-            placeholder={getClientsDatePlaceholder(dateFormat)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-          />
-
-          <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-            <input type="checkbox" name="referred" value="1" defaultChecked={Boolean(queryParams.referred)} className="h-4 w-4 rounded border-slate-300 text-[#4aa59c]" />
-            Solo referidos
-          </label>
-
-          <input type="hidden" name="pageSize" value={queryParams.pageSize} />
-          <div className="md:col-span-4 lg:col-span-8 flex flex-wrap gap-2">
-            <button
-              type="submit"
-              className="inline-flex items-center gap-2 rounded-full bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#4aadf5]"
-            >
-              Aplicar filtros
-            </button>
-            <Link
-              href="/admin/clientes/reportes"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-            >
-              <FilterX size={15} />
-              Limpiar
-            </Link>
-            <Link
-              href={`/api/clientes/reportes/export?format=csv&${exportQuery}`}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-            >
-              <Download size={15} />
-              Exportar CSV
-            </Link>
-            <Link
-              href={`/api/clientes/reportes/export?format=xlsx&${exportQuery}`}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-            >
-              <Download size={15} />
-              Exportar Excel
-            </Link>
-            <Link
-              href={`/api/clientes/reportes/export?format=pdf&${exportQuery}`}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-            >
-              <Download size={15} />
-              Exportar PDF
-            </Link>
-          </div>
-        </form>
+        <ClientsReportsFiltersForm
+          initialFilters={{
+            q: queryParams.q,
+            type: queryParams.type,
+            from: queryParams.from,
+            to: queryParams.to,
+            sourceId: queryParams.sourceId,
+            detailId: queryParams.detailId,
+            referred: Boolean(queryParams.referred),
+            pageSize: queryParams.pageSize
+          }}
+          extraQuery={Object.fromEntries(
+            Object.entries({
+              birthMonth: queryParams.birthMonth,
+              birthNextDays: queryParams.birthNextDays
+            }).filter(([, value]) => Boolean(value))
+          )}
+          typeOptions={TYPE_OPTIONS}
+          sources={sources}
+          sourceDetails={sourceDetails}
+          canExportFull={exportScope === "full"}
+          canExportMasked={exportScope === "full" || exportScope === "masked"}
+          sectionCounts={sectionCounts}
+        />
 
         {chips.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -333,160 +326,382 @@ export default async function ClientesReportesPage({
         )}
       </section>
 
-      <section className="grid gap-3 lg:grid-cols-3">
-        <SimpleTable
-          title="Clientes por tipo"
-          rows={summary.byType.map((row) => ({
-            label:
-              row.type === ClientProfileType.PERSON
-                ? "Persona"
-                : row.type === ClientProfileType.COMPANY
-                  ? "Empresa"
-                  : row.type === ClientProfileType.INSTITUTION
-                    ? "Institución"
-                    : "Aseguradora",
-            value: row.total
-          }))}
-          emptyLabel="Sin datos por tipo"
-        />
-        <SimpleTable
-          title="Top canales"
-          rows={summary.bySource.map((row) => ({ label: row.sourceName, value: row.total }))}
-          emptyLabel="Sin canales para este rango"
-        />
-        <SimpleTable
-          title="Aseguradoras por ramo"
-          rows={summary.insurersByLine.map((row) => ({ label: row.line, value: row.total }))}
-          emptyLabel="Sin aseguradoras en el rango"
-        />
-      </section>
-
-      <section className="grid gap-3 lg:grid-cols-3">
-        <SimpleTable
-          title="Geo por país"
-          rows={summary.byGeo.countries.map((row) => ({
-            label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
-            value: row.total
-          }))}
-          emptyLabel="Sin datos geográficos por país"
-        />
-        <SimpleTable
-          title="Geo por departamento"
-          rows={summary.byGeo.admin1.map((row) => ({
-            label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
-            value: row.total
-          }))}
-          emptyLabel="Sin datos geográficos por departamento"
-        />
-        <SimpleTable
-          title="Geo por municipio/ciudad"
-          rows={summary.byGeo.admin2.map((row) => ({
-            label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
-            value: row.total
-          }))}
-          emptyLabel="Sin datos geográficos por municipio/ciudad"
-        />
-      </section>
-
-      <section className="grid gap-3 lg:grid-cols-2">
-        <SimpleTable
-          title="Top referrers"
-          rows={summary.referrals.topReferrers.map((row) => ({ label: row.referrerLabel, value: row.total }))}
-          emptyLabel="Sin referidos para este rango"
-        />
-      </section>
-
-      <section className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
-        <div className="overflow-hidden rounded-xl border border-slate-200">
-          <table className="min-w-full text-sm">
-            <thead className="bg-[#f8fafc] text-[#2e75ba]">
-              <tr>
-                <th className="px-3 py-2 text-left font-semibold">Fecha creación</th>
-                <th className="px-3 py-2 text-left font-semibold">Nombre</th>
-                <th className="px-3 py-2 text-left font-semibold">Tipo</th>
-                <th className="px-3 py-2 text-left font-semibold">Ubicación</th>
-                <th className="px-3 py-2 text-left font-semibold">Contacto</th>
-                <th className="px-3 py-2 text-left font-semibold">Canal</th>
-                <th className="px-3 py-2 text-left font-semibold">Detalle canal</th>
-                <th className="px-3 py-2 text-left font-semibold">Referido por</th>
-                <th className="px-3 py-2 text-right font-semibold">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.items.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-3 py-4 text-center text-slate-500">
-                    No hay resultados para los filtros seleccionados.
-                  </td>
-                </tr>
-              ) : (
-                list.items.map((item, index) => (
-                  <tr key={item.id} className={index % 2 ? "bg-slate-50/60" : "bg-white"}>
-                    <td className="px-3 py-2">{formatDateForClients(item.createdAt, dateFormat)}</td>
-                    <td className="px-3 py-2 font-semibold text-slate-900">{item.displayName}</td>
-                    <td className="px-3 py-2">{item.type}</td>
-                    <td className="px-3 py-2">{[item.department, item.city, item.country].filter(Boolean).join(", ") || "—"}</td>
-                    <td className="px-3 py-2">{item.phone || item.email || "—"}</td>
-                    <td className="px-3 py-2">{item.acquisitionSource || "—"}</td>
-                    <td className="px-3 py-2">{item.acquisitionDetail || "—"}</td>
-                    <td className="px-3 py-2">{item.referredBy || "—"}</td>
-                    <td className="px-3 py-2 text-right">
-                      <Link
-                        href={`/admin/clientes/${item.id}`}
-                        className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-                      >
-                        Ver perfil
-                      </Link>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
-          <p>
-            Mostrando {(list.page - 1) * list.pageSize + 1}–{Math.min(list.page * list.pageSize, list.total)} de {list.total}
-          </p>
-          <div className="flex gap-2">
-            <Link
-              href={
-                list.page > 1
-                  ? `/admin/clientes/reportes?${buildQuery({
-                      ...queryParams,
-                      page: String(list.page - 1)
-                    })}`
-                  : "#"
-              }
-              className={
-                list.page > 1
-                  ? "rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-                  : "cursor-not-allowed rounded-full border border-slate-200 bg-slate-100 px-3 py-1 font-semibold text-slate-400"
-              }
-            >
-              Prev
-            </Link>
-            <Link
-              href={
-                list.page < list.totalPages
-                  ? `/admin/clientes/reportes?${buildQuery({
-                      ...queryParams,
-                      page: String(list.page + 1)
-                    })}`
-                  : "#"
-              }
-              className={
-                list.page < list.totalPages
-                  ? "rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
-                  : "cursor-not-allowed rounded-full border border-slate-200 bg-slate-100 px-3 py-1 font-semibold text-slate-400"
-              }
-            >
-              Next
-            </Link>
+      <ClientsReportsPanelsLayout
+        byTypePanel={
+          <ClientsReportsChartCard
+            title="Clientes por tipo"
+            rows={summary.byType.map((row) => ({
+              label:
+                row.type === ClientProfileType.PERSON
+                  ? "Persona"
+                  : row.type === ClientProfileType.COMPANY
+                    ? "Empresa"
+                    : row.type === ClientProfileType.INSTITUTION
+                      ? "Institución"
+                      : "Aseguradora",
+              value: row.total
+            }))}
+            emptyLabel="Sin datos por tipo"
+          />
+        }
+        topChannelsPanel={
+          <ClientsReportsChartCard
+            title="Top canales"
+            rows={summary.bySource.map((row) => ({ label: row.sourceName, value: row.total }))}
+            emptyLabel="Sin canales para este rango"
+          />
+        }
+        insurersByLinePanel={
+          <SimpleTable
+            title="Aseguradoras por ramo"
+            rows={summary.insurersByLine.map((row) => ({ label: row.line, value: row.total }))}
+            emptyLabel="Sin aseguradoras en el rango"
+          />
+        }
+        geoPanel={
+          <div className="space-y-3">
+            <ClientsGeoMapPanel
+              initialGeo={summary.byGeo}
+              baseQuery={geoBaseQuery}
+              initialCountryId={countryFilterParam}
+              initialCountryLabel={selectedCountryLabel}
+            />
+            <section className="grid gap-3 lg:grid-cols-3">
+              <ClientsReportsChartCard
+                title="Geo por país"
+                rows={summary.byGeo.countries.map((row) => ({
+                  label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
+                  value: row.total
+                }))}
+                emptyLabel="Sin datos geográficos por país"
+              />
+              <SimpleTable
+                title="Geo por departamento"
+                rows={summary.byGeo.admin1.map((row) => ({
+                  label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
+                  value: row.total
+                }))}
+                emptyLabel="Sin datos geográficos por departamento"
+              />
+              <SimpleTable
+                title="Geo por municipio/ciudad"
+                rows={summary.byGeo.admin2.map((row) => ({
+                  label: row.source === "manual" ? `${row.label} · Manual entry` : row.label,
+                  value: row.total
+                }))}
+                emptyLabel="Sin datos geográficos por municipio/ciudad"
+              />
+            </section>
           </div>
-        </div>
-      </section>
+        }
+        topReferrersPanel={
+          <section className="grid gap-3 lg:grid-cols-2">
+            <SimpleTable
+              title="Top referidores"
+              rows={summary.referrals.topReferrers.map((row) => ({ label: row.referrerLabel, value: row.total }))}
+              emptyLabel="Sin referidos para este rango"
+            />
+          </section>
+        }
+        birthdaysPanel={
+          <section className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">Cumpleaños</p>
+                <p className="text-sm text-slate-600">Seguimiento operativo por mes y próximos días.</p>
+              </div>
+              <Link
+                href={`/api/clientes/reportes/birthdays?${birthdayExportQuery}`}
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              >
+                Exportar cumpleañeros CSV
+              </Link>
+            </div>
+
+            <form method="GET" className="mt-3 grid gap-2 md:grid-cols-4">
+              {Object.entries(birthdayFiltersQuery).map(([key, value]) =>
+                value ? <input key={key} type="hidden" name={key} value={value} /> : null
+              )}
+
+              <select
+                name="birthMonth"
+                defaultValue={queryParams.birthMonth || "ALL"}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              >
+                <option value="ALL">Mes (todos)</option>
+                {birthdayMonthOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                name="birthNextDays"
+                defaultValue={queryParams.birthNextDays || "ALL"}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              >
+                <option value="ALL">Próximos días (todos)</option>
+                <option value="7">Próximos 7 días</option>
+                <option value="14">Próximos 14 días</option>
+                <option value="30">Próximos 30 días</option>
+              </select>
+
+              <div className="md:col-span-2 flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 rounded-full bg-[#4aa59c] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#4aadf5]"
+                >
+                  Aplicar cumpleaños
+                </button>
+                <Link
+                  href={`/admin/clientes/reportes?${buildQuery(birthdayFiltersQuery)}`}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                >
+                  Limpiar cumpleaños
+                </Link>
+              </div>
+            </form>
+
+            <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-[#f8fafc] text-[#2e75ba]">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Cliente</th>
+                    <th className="px-3 py-2 text-left font-semibold">Nacimiento</th>
+                    <th className="px-3 py-2 text-left font-semibold">Próximo cumpleaños</th>
+                    <th className="px-3 py-2 text-left font-semibold">Contacto</th>
+                    <th className="px-3 py-2 text-right font-semibold">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {birthdays.items.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-4 text-center text-slate-500">
+                        No hay cumpleañeros para los filtros seleccionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    birthdays.items.map((item, index) => (
+                      <tr key={item.id} className={index % 2 ? "bg-slate-50/60" : "bg-white"}>
+                        <td className="px-3 py-2 font-semibold text-slate-900">{item.displayName}</td>
+                        <td className="px-3 py-2">
+                          {formatDateForClients(item.birthDate, dateFormat)}
+                          {typeof item.age === "number" ? (
+                            <span className="ml-2 text-xs text-slate-500">{item.age} años</span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2">
+                          {formatDateForClients(item.nextBirthday, dateFormat)}
+                          <span className="ml-2 text-xs text-slate-500">en {item.daysUntil} días</span>
+                        </td>
+                        <td className="px-3 py-2">{item.phone || item.email || "—"}</td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="inline-flex items-center gap-1">
+                            <Link
+                              href={`/admin/clientes/${item.id}`}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                              title="Ver perfil"
+                            >
+                              <span className="text-[10px] font-semibold">Ver</span>
+                            </Link>
+                            {item.phoneHref ? (
+                              <a
+                                href={item.phoneHref}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                                title="Llamar"
+                              >
+                                <Phone size={14} />
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-400"
+                                title="No disponible"
+                              >
+                                <Phone size={14} />
+                              </button>
+                            )}
+                            {item.whatsappHref ? (
+                              <a
+                                href={item.whatsappHref}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                                title="WhatsApp"
+                              >
+                                <MessageCircle size={14} />
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-400"
+                                title="No disponible"
+                              >
+                                <MessageCircle size={14} />
+                              </button>
+                            )}
+                            {item.emailHref ? (
+                              <a
+                                href={item.emailHref}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                                title="Email"
+                              >
+                                <Mail size={14} />
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-400"
+                                title="No disponible"
+                              >
+                                <Mail size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        }
+        clientsListPanel={
+          <section className="rounded-2xl border border-[#dce7f5] bg-white p-4 shadow-sm">
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-[#f8fafc] text-[#2e75ba]">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Fecha creación</th>
+                    <th className="px-3 py-2 text-left font-semibold">Nombre</th>
+                    <th className="px-3 py-2 text-left font-semibold">Tipo</th>
+                    <th className="px-3 py-2 text-left font-semibold">Ubicación</th>
+                    <th className="px-3 py-2 text-left font-semibold">Contacto</th>
+                    <th className="px-3 py-2 text-left font-semibold">Canal</th>
+                    <th className="px-3 py-2 text-left font-semibold">Detalle canal</th>
+                    <th className="px-3 py-2 text-left font-semibold">Referido por</th>
+                    <th className="px-3 py-2 text-right font-semibold">Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.items.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-3 py-4 text-center text-slate-500">
+                        No hay resultados para los filtros seleccionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    list.items.map((item, index) => (
+                      <tr key={item.id} className={index % 2 ? "bg-slate-50/60" : "bg-white"}>
+                        <td className="px-3 py-2">{formatDateForClients(item.createdAt, dateFormat)}</td>
+                        <td className="px-3 py-2">
+                          <div className="space-y-1">
+                            <p className="font-semibold text-slate-900">{item.displayName}</p>
+                            <div className="flex flex-wrap gap-1">
+                              {!item.hasPrimaryLocation ? (
+                                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                                  Falta ubicación
+                                </span>
+                              ) : null}
+                              {!item.hasPrimaryContact ? (
+                                <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                                  Falta contacto
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">{item.type}</td>
+                        <td className="px-3 py-2">
+                          <span className="block max-w-[240px] truncate" title={[item.department, item.city, item.country].filter(Boolean).join(", ") || "—"}>
+                            {[item.department, item.city, item.country].filter(Boolean).join(", ") || "—"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="space-y-0.5">
+                            <p>{item.phone || "—"}</p>
+                            <p className="text-xs text-slate-500">{item.email || "—"}</p>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="block max-w-[180px] truncate" title={item.acquisitionSource || "—"}>
+                            {item.acquisitionSource || "—"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="block max-w-[220px] truncate" title={item.acquisitionDetail || "—"}>
+                            {item.acquisitionDetail || "—"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="block max-w-[220px] truncate" title={item.referredBy || "—"}>
+                            {item.referredBy || "—"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <Link
+                            href={`/admin/clientes/${item.id}`}
+                            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                          >
+                            Ver perfil
+                          </Link>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+              <p>
+                Mostrando {(list.page - 1) * list.pageSize + 1}–{Math.min(list.page * list.pageSize, list.total)} de {list.total}
+              </p>
+              <div className="flex gap-2">
+                <Link
+                  href={
+                    list.page > 1
+                      ? `/admin/clientes/reportes?${buildQuery({
+                          ...queryParams,
+                          page: String(list.page - 1)
+                        })}`
+                      : "#"
+                  }
+                  className={
+                    list.page > 1
+                      ? "rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                      : "cursor-not-allowed rounded-full border border-slate-200 bg-slate-100 px-3 py-1 font-semibold text-slate-400"
+                  }
+                >
+                  Prev
+                </Link>
+                <Link
+                  href={
+                    list.page < list.totalPages
+                      ? `/admin/clientes/reportes?${buildQuery({
+                          ...queryParams,
+                          page: String(list.page + 1)
+                        })}`
+                      : "#"
+                  }
+                  className={
+                    list.page < list.totalPages
+                      ? "rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                      : "cursor-not-allowed rounded-full border border-slate-200 bg-slate-100 px-3 py-1 font-semibold text-slate-400"
+                  }
+                >
+                  Next
+                </Link>
+              </div>
+            </div>
+          </section>
+        }
+      />
     </div>
   );
 }

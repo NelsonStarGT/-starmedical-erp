@@ -23,6 +23,8 @@ export type ClientCommercialListItem = {
   displayName: string;
   type: ClientProfileType;
   identifier: string | null;
+  hasPrimaryLocation: boolean;
+  hasPrimaryContact: boolean;
   primaryPhone: string | null;
   primaryPhoneHref: string | null;
   primaryEmail: string | null;
@@ -215,7 +217,10 @@ export async function listClientsCommercial(query: ClientCommercialListQuery): P
   };
 
   const rows = await prisma.clientProfile.findMany({
-    where,
+    where: {
+      ...where,
+      tenantId
+    },
     select: {
       id: true,
       clientCode: true,
@@ -265,6 +270,16 @@ export async function listClientsCommercial(query: ClientCommercialListQuery): P
           email: true,
           isPrimary: true
         }
+      },
+      clientLocations: {
+        where: {
+          isActive: true,
+          isPrimary: true
+        },
+        select: {
+          id: true
+        },
+        take: 1
       }
     }
   });
@@ -287,6 +302,8 @@ export async function listClientsCommercial(query: ClientCommercialListQuery): P
       displayName: displayName(row),
       type: row.type,
       identifier: row.type === ClientProfileType.PERSON ? row.dpi : row.nit,
+      hasPrimaryLocation: row.clientLocations.length > 0,
+      hasPrimaryContact: Boolean(primaryPhone.value || primaryEmail.value),
       primaryPhone: primaryPhone.value,
       primaryPhoneHref: primaryPhone.href,
       primaryEmail: primaryEmail.value,

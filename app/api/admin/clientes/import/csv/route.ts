@@ -31,6 +31,7 @@ import {
 } from "@/lib/clients/bulk/clientBulkSchema";
 import { importExcelViaProcessingService } from "@/lib/processing-service/excel";
 import { isPrismaMissingTableError, isPrismaSchemaMismatchError } from "@/lib/prisma/errors.server";
+import { recordClientsAccessBlocked } from "@/lib/clients/securityEvents";
 import { prisma } from "@/lib/prisma";
 import { tenantIdFromUser } from "@/lib/tenant";
 import { isValidEmail } from "@/lib/utils";
@@ -1481,9 +1482,21 @@ export async function POST(req: NextRequest) {
   const canProcess = canProcessClientImport(auth.user);
 
   if (mode === "analyze" && !canAnalyze) {
+    await recordClientsAccessBlocked({
+      user: auth.user,
+      route: "/api/admin/clientes/import/csv",
+      capability: "CLIENTS_IMPORT_ANALYZE",
+      resourceType: "bulk_import"
+    });
     return NextResponse.json({ ok: false, error: "No autorizado para analizar importaciones." }, { status: 403 });
   }
   if (mode === "process" && !canProcess) {
+    await recordClientsAccessBlocked({
+      user: auth.user,
+      route: "/api/admin/clientes/import/csv",
+      capability: "CLIENTS_IMPORT_PROCESS",
+      resourceType: "bulk_import"
+    });
     return NextResponse.json({ ok: false, error: "No autorizado para procesar importaciones." }, { status: 403 });
   }
 
