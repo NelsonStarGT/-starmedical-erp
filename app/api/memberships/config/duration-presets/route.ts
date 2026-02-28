@@ -3,7 +3,7 @@ import { ensureMembershipAccess } from "@/lib/api/memberships";
 import { createDurationPresetSchema, listDurationPresetsQuerySchema } from "@/lib/memberships/schemas";
 import { createDurationPreset, listDurationPresets } from "@/lib/memberships/service";
 import { PERMISSIONS } from "@/lib/rbac";
-import { handleMembershipApiError } from "@/app/api/memberships/_utils";
+import { handleMembershipApiError, parseBooleanQueryParam } from "@/app/api/memberships/_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -11,15 +11,15 @@ export async function GET(req: NextRequest) {
   const auth = ensureMembershipAccess(req, PERMISSIONS.MEMBERSHIPS_READ);
   if (auth.errorResponse) return auth.errorResponse;
 
-  const parsed = listDurationPresetsQuerySchema.safeParse({
-    includeInactive: req.nextUrl.searchParams.get("includeInactive") || undefined
-  });
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Parámetros inválidos", details: parsed.error.flatten().fieldErrors }, { status: 400 });
-  }
-
   try {
+    const parsed = listDurationPresetsQuerySchema.safeParse({
+      includeInactive: parseBooleanQueryParam(req.nextUrl.searchParams.get("includeInactive"))
+    });
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Parámetros inválidos", details: parsed.error.flatten().fieldErrors }, { status: 400 });
+    }
+
     const data = await listDurationPresets(parsed.data, auth.user);
     return NextResponse.json({ data });
   } catch (error) {

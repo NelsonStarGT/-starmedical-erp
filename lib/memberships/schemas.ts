@@ -20,10 +20,7 @@ export const planBenefitInputSchema = z.object({
 });
 
 export const listPlansQuerySchema = z.object({
-  active: z
-    .union([z.literal("true"), z.literal("false")])
-    .transform((value) => value === "true")
-    .optional(),
+  active: z.boolean().optional(),
   segment: membershipPlanSegmentSchema.optional(),
   type: membershipPlanTypeSchema.optional()
 });
@@ -177,10 +174,7 @@ export const registerPaymentSchema = z.object({
 
 export const listPlanCategoriesQuerySchema = z.object({
   segment: membershipPlanSegmentSchema.optional(),
-  includeInactive: z
-    .union([z.literal("true"), z.literal("false")])
-    .transform((value) => value === "true")
-    .optional()
+  includeInactive: z.boolean().optional()
 });
 
 export const membershipConfigSchema = z.object({
@@ -197,10 +191,7 @@ export const membershipConfigSchema = z.object({
 });
 
 export const listDurationPresetsQuerySchema = z.object({
-  includeInactive: z
-    .union([z.literal("true"), z.literal("false")])
-    .transform((value) => value === "true")
-    .optional()
+  includeInactive: z.boolean().optional()
 });
 
 export const createDurationPresetSchema = z.object({
@@ -212,10 +203,7 @@ export const createDurationPresetSchema = z.object({
 });
 
 export const listBenefitsQuerySchema = z.object({
-  includeInactive: z
-    .union([z.literal("true"), z.literal("false")])
-    .transform((value) => value === "true")
-    .optional(),
+  includeInactive: z.boolean().optional(),
   serviceType: membershipBenefitServiceTypeSchema.optional()
 });
 

@@ -3,7 +3,7 @@ import { ensureMembershipAccess } from "@/lib/api/memberships";
 import { createPlanSchema, listPlansQuerySchema } from "@/lib/memberships/schemas";
 import { createPlan, listPlans } from "@/lib/memberships/service";
 import { PERMISSIONS } from "@/lib/rbac";
-import { handleMembershipApiError } from "@/app/api/memberships/_utils";
+import { handleMembershipApiError, parseBooleanQueryParam } from "@/app/api/memberships/_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -11,17 +11,17 @@ export async function GET(req: NextRequest) {
   const auth = ensureMembershipAccess(req, PERMISSIONS.MEMBERSHIPS_READ);
   if (auth.errorResponse) return auth.errorResponse;
 
-  const parsed = listPlansQuerySchema.safeParse({
-    active: req.nextUrl.searchParams.get("active") || undefined,
-    segment: req.nextUrl.searchParams.get("segment") || undefined,
-    type: req.nextUrl.searchParams.get("type") || undefined
-  });
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Parámetros inválidos", details: parsed.error.flatten().fieldErrors }, { status: 400 });
-  }
-
   try {
+    const parsed = listPlansQuerySchema.safeParse({
+      active: parseBooleanQueryParam(req.nextUrl.searchParams.get("active")),
+      segment: req.nextUrl.searchParams.get("segment") || undefined,
+      type: req.nextUrl.searchParams.get("type") || undefined
+    });
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Parámetros inválidos", details: parsed.error.flatten().fieldErrors }, { status: 400 });
+    }
+
     const data = await listPlans(parsed.data);
     return NextResponse.json({ data });
   } catch (error) {
