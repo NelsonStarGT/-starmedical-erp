@@ -89,10 +89,10 @@ const warnedMembershipSchemaFallbackContexts = new Set<string>();
 
 const PORTAL_MEMBERSHIP_CONTRACT_SELECT = {
   id: true,
-  MembershipPlan: {
+  plan: {
     select: {
       name: true,
-      MembershipBenefit: {
+      legacyBenefits: {
         where: { active: true },
         orderBy: { createdAt: "asc" },
         take: 6,
@@ -106,7 +106,7 @@ const PORTAL_MEMBERSHIP_CONTRACT_SELECT = {
       }
     }
   },
-  MembershipUsage: {
+  usages: {
     select: {
       benefitId: true
     }
@@ -595,7 +595,7 @@ export async function getPortalInvoices(client: PortalSessionClient): Promise<Po
 }
 
 function formatMembershipBenefitLabel(
-  benefit: PortalMembershipContractRow["MembershipPlan"]["MembershipBenefit"][number]
+  benefit: PortalMembershipContractRow["plan"]["legacyBenefits"][number]
 ) {
   const target = humanizeMembershipEnum(benefit.targetType);
   const discountPercent = benefit.discountPercent ? decimalToNumber(benefit.discountPercent) : null;
@@ -641,16 +641,16 @@ export async function getPortalMembershipSummary(clientId: string): Promise<Port
       };
     }
 
-    const benefits = contract.MembershipPlan.MembershipBenefit.map(formatMembershipBenefitLabel).slice(0, 6);
+    const benefits = contract.plan.legacyBenefits.map(formatMembershipBenefitLabel).slice(0, 6);
     const usedBenefits = new Set(
-      contract.MembershipUsage.map((usage) => usage.benefitId).filter((value): value is string => Boolean(value))
+      contract.usages.map((usage) => usage.benefitId).filter((value): value is string => Boolean(value))
     );
     const total = benefits.length;
     const used = total > 0 ? Math.min(total, usedBenefits.size) : usedBenefits.size;
 
     return {
       hasMembership: true,
-      planName: contract.MembershipPlan.name,
+      planName: contract.plan.name,
       used,
       total,
       benefits,

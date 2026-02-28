@@ -3862,16 +3862,16 @@ model MembershipContract {
   lastInvoiceId                       String?
   createdAt                           DateTime                              @default(now())
   updatedAt                           DateTime
-  Branch                              Branch?                               @relation(fields: [assignedBranchId], references: [id])
-  ClientProfile                       ClientProfile?                        @relation(fields: [ownerId], references: [id])
-  MembershipPlan                      MembershipPlan                        @relation(fields: [planId], references: [id])
-  MembershipContractBillingProfile    MembershipContractBillingProfile?
-  MembershipDependent                 MembershipDependent[]
-  MembershipException                 MembershipException[]
-  MembershipPayment                   MembershipPayment[]
-  MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
-  MembershipWebhookEvent              MembershipWebhookEvent[]
-  MembershipUsage                     MembershipUsage[]
+  branch                              Branch?                               @relation(fields: [assignedBranchId], references: [id])
+  owner                               ClientProfile?                        @relation(fields: [ownerId], references: [id])
+  plan                                MembershipPlan                        @relation(fields: [planId], references: [id])
+  billingProfile                      MembershipContractBillingProfile?
+  dependents                          MembershipDependent[]
+  exceptions                          MembershipException[]
+  payments                            MembershipPayment[]
+  publicSubscriptionRequests          MembershipPublicSubscriptionRequest[]
+  webhookEvents                       MembershipWebhookEvent[]
+  usages                              MembershipUsage[]
 
   @@index([lastInvoiceId])
   @@index([nextRenewAt])
@@ -3887,8 +3887,8 @@ model MembershipDependent {
   relationType       String?
   active             Boolean            @default(true)
   createdAt          DateTime           @default(now())
-  MembershipContract MembershipContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  ClientProfile      ClientProfile?     @relation(fields: [personId], references: [id])
+  contract           MembershipContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  person             ClientProfile?     @relation(fields: [personId], references: [id])
 
   @@index([contractId])
   @@index([personId])
@@ -3902,8 +3902,8 @@ model MembershipException {
   expiresAt          DateTime?
   createdByUserId    String?
   createdAt          DateTime           @default(now())
-  MembershipContract MembershipContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  User               User?              @relation(fields: [createdByUserId], references: [id])
+  contract           MembershipContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  createdBy          User?              @relation(fields: [createdByUserId], references: [id])
 
   @@index([contractId])
   @@index([createdByUserId])
@@ -3922,7 +3922,7 @@ model MembershipPayment {
   invoiceId          String?
   notes              String?
   createdAt          DateTime                @default(now())
-  MembershipContract MembershipContract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  contract           MembershipContract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   @@index([contractId])
   @@index([kind])
@@ -3939,7 +3939,7 @@ model MembershipContractBillingProfile {
   status                   String                    @default("ACTIVE")
   createdAt                DateTime                  @default(now())
   updatedAt                DateTime                  @default(now())
-  MembershipContract       MembershipContract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  contract                 MembershipContract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   @@index([provider, status])
 }
@@ -3956,7 +3956,7 @@ model MembershipWebhookEvent {
   processedAt        DateTime?
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @default(now())
-  MembershipContract MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  contract           MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
 
   @@index([provider, createdAt])
   @@index([contractId])
@@ -3980,12 +3980,12 @@ model MembershipPlan {
   maxDependents                       Int?
   createdAt                           DateTime                              @default(now())
   updatedAt                           DateTime
-  MembershipBenefit                   MembershipBenefit[]
-  MembershipPlanBenefit               MembershipPlanBenefit[]
-  MembershipPlanCategory              MembershipPlanCategory?               @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  MembershipDurationPreset            MembershipDurationPreset?             @relation(fields: [durationPresetId], references: [id], onDelete: SetNull)
-  MembershipContract                  MembershipContract[]
-  MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
+  legacyBenefits                      MembershipBenefit[]
+  benefits                            MembershipPlanBenefit[]
+  category                            MembershipPlanCategory?               @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  durationPreset                      MembershipDurationPreset?             @relation(fields: [durationPresetId], references: [id], onDelete: SetNull)
+  contracts                           MembershipContract[]
+  publicSubscriptionRequests          MembershipPublicSubscriptionRequest[]
 
   @@index([categoryId])
   @@index([durationPresetId])
@@ -4002,7 +4002,7 @@ model MembershipDurationPreset {
   branchId       String?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @default(now())
-  MembershipPlan MembershipPlan[]
+  plans          MembershipPlan[]
 
   @@unique([branchId, name])
   @@index([isActive, sortOrder])
@@ -4020,7 +4020,7 @@ model MembershipBenefitCatalog {
   branchId              String?
   createdAt             DateTime                     @default(now())
   updatedAt             DateTime                     @default(now())
-  MembershipPlanBenefit MembershipPlanBenefit[]
+  planBenefits          MembershipPlanBenefit[]
 
   @@unique([branchId, title, serviceType])
   @@index([isActive, sortOrder])
@@ -4036,8 +4036,8 @@ model MembershipPlanBenefit {
   notes                    String?
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @default(now())
-  MembershipPlan           MembershipPlan           @relation(fields: [planId], references: [id], onDelete: Cascade)
-  MembershipBenefitCatalog MembershipBenefitCatalog @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+  plan                     MembershipPlan           @relation(fields: [planId], references: [id], onDelete: Cascade)
+  benefitCatalog           MembershipBenefitCatalog @relation(fields: [benefitId], references: [id], onDelete: Cascade)
 
   @@unique([planId, benefitId])
   @@index([benefitId])
@@ -4051,8 +4051,8 @@ model MembershipPlanCategory {
   sortOrder                           Int                                   @default(0)
   createdAt                           DateTime                              @default(now())
   updatedAt                           DateTime                              @default(now())
-  MembershipPlan                      MembershipPlan[]
-  MembershipPublicSubscriptionRequest MembershipPublicSubscriptionRequest[]
+  plans                               MembershipPlan[]
+  publicSubscriptionRequests          MembershipPublicSubscriptionRequest[]
 
   @@unique([name, segment])
   @@index([segment, isActive, sortOrder])
@@ -4073,10 +4073,10 @@ model MembershipPublicSubscriptionRequest {
   responsePayload        Json?
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @default(now())
-  MembershipPlan         MembershipPlan          @relation(fields: [planId], references: [id], onDelete: Cascade)
-  MembershipPlanCategory MembershipPlanCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  ClientProfile          ClientProfile?          @relation(fields: [clientProfileId], references: [id], onDelete: SetNull)
-  MembershipContract     MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  plan                   MembershipPlan          @relation(fields: [planId], references: [id], onDelete: Cascade)
+  category               MembershipPlanCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  clientProfile          ClientProfile?          @relation(fields: [clientProfileId], references: [id], onDelete: SetNull)
+  contract               MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
 
   @@index([clientProfileId])
   @@index([contractId])
@@ -4097,9 +4097,9 @@ model MembershipUsage {
   exceeded           Boolean               @default(false)
   branchId           String?
   createdAt          DateTime              @default(now())
-  MembershipBenefit  MembershipBenefit?    @relation(fields: [benefitId], references: [id])
-  Branch             Branch?               @relation(fields: [branchId], references: [id])
-  MembershipContract MembershipContract    @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  legacyBenefit      MembershipBenefit?    @relation(fields: [benefitId], references: [id])
+  branch             Branch?               @relation(fields: [branchId], references: [id])
+  contract           MembershipContract    @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   @@index([benefitId])
   @@index([contractId])
