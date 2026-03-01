@@ -2723,6 +2723,8 @@ model Branch {
   userAccesses               UserBranchAccess[]
   billingProfiles            BranchBillingProfile[]
   tradeUnits                 TradeUnit[]
+  pharmacyMedicationSubscriptions PharmacyMedicationSubscription[]
+  pharmacyDiscountSubscriptions   PharmacyDiscountSubscription[]
 
   @@index([parentId])
   @@index([tenantId])
@@ -4105,6 +4107,99 @@ model MembershipUsage {
   @@index([contractId])
   @@index([module])
   @@index([occurredAt])
+}
+
+model PharmacySubscriptionConfig {
+  id                Int      @id @default(1)
+  medicationEnabled Boolean  @default(true)
+  discountEnabled   Boolean  @default(false)
+  reminderLeadDays  Int      @default(3)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model PharmacyMedicationSubscription {
+  id                String                            @id @default(cuid())
+  patientId         String
+  branchId          String?
+  frequency         PharmacyRegimenFrequency          @default(MONTHLY)
+  customDays        Int?
+  nextFillAt        DateTime
+  lastFillAt        DateTime?
+  deliveryMethod    PharmacyDeliveryMethod            @default(PICKUP)
+  contactPreference PharmacyContactPreference         @default(WHATSAPP)
+  status            PharmacySubscriptionStatus        @default(ACTIVE)
+  notes             String?
+  createdAt         DateTime                          @default(now())
+  updatedAt         DateTime                          @updatedAt
+  branch            Branch?                           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  items             PharmacyMedicationSubscriptionItem[]
+  events            PharmacyReminderEvent[]
+
+  @@index([branchId, status, nextFillAt])
+  @@index([patientId, status])
+}
+
+model PharmacyMedicationSubscriptionItem {
+  id             String                        @id @default(cuid())
+  subscriptionId String
+  medicationId   String
+  qty            Decimal                       @default(1) @db.Decimal(12, 2)
+  instructions   String?
+  createdAt      DateTime                      @default(now())
+  updatedAt      DateTime                      @updatedAt
+  subscription   PharmacyMedicationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([medicationId])
+}
+
+model PharmacyReminderEvent {
+  id             String                        @id @default(cuid())
+  subscriptionId String
+  eventType      PharmacyReminderEventType
+  notes          String?
+  happenedAt     DateTime                      @default(now())
+  createdAt      DateTime                      @default(now())
+  subscription   PharmacyMedicationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, happenedAt])
+  @@index([eventType, happenedAt])
+}
+
+model PharmacyDiscountSubscriptionPlan {
+  id            String                         @id @default(cuid())
+  name          String
+  percentage    Decimal                        @db.Decimal(5, 2)
+  rules         Json?
+  isActive      Boolean                        @default(true)
+  startsAt      DateTime?
+  endsAt        DateTime?
+  createdAt     DateTime                       @default(now())
+  updatedAt     DateTime                       @updatedAt
+  subscriptions PharmacyDiscountSubscription[]
+
+  @@index([isActive, createdAt])
+}
+
+model PharmacyDiscountSubscription {
+  id        String                          @id @default(cuid())
+  planId    String
+  clientId  String?
+  patientId String?
+  branchId  String?
+  status    PharmacySubscriptionStatus      @default(ACTIVE)
+  startedAt DateTime                        @default(now())
+  endedAt   DateTime?
+  createdAt DateTime                        @default(now())
+  updatedAt DateTime                        @updatedAt
+  plan      PharmacyDiscountSubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  branch    Branch?                         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([planId, status])
+  @@index([clientId, status])
+  @@index([patientId, status])
+  @@index([branchId, status])
 }
 
 model NotificationOutbox {
@@ -6656,6 +6751,38 @@ enum MembershipUsageModule {
   IMAGEN
   FARMACIA
   CAJA
+}
+
+enum PharmacySubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+}
+
+enum PharmacyRegimenFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  CUSTOM_DAYS
+}
+
+enum PharmacyDeliveryMethod {
+  PICKUP
+  DELIVERY
+}
+
+enum PharmacyContactPreference {
+  CALL
+  WHATSAPP
+  EMAIL
+}
+
+enum PharmacyReminderEventType {
+  PREPARED
+  CONTACTED
+  DELIVERED
+  PICKUP_READY
+  BILLING_LINK
 }
 
 enum NotificationChannel {

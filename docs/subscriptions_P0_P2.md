@@ -35,4 +35,18 @@ As-of date: 2026-02-28
 ## P2 (Recurrente + Farmacia)
 - Ver commits de P2 para:
   - `recurrente` (checkout + webhook + auto-factura)
-  - `farmacia` (suscripciones por medicamento + descuento scaffold)
+  - `farmacia` (suscripciones por medicamento + cola operativa + descuento scaffold)
+
+### P2.B Farmacia
+- UI `/admin/suscripciones/farmacia` con tabs:
+  - Suscripciones por medicamento
+  - Suscripción de descuento
+  - Configuración
+- API canónica:
+  - `/api/subscriptions/pharmacy/medication-subscriptions`
+  - `/api/subscriptions/pharmacy/queue`
+  - `/api/subscriptions/pharmacy/config`
+  - `/api/subscriptions/pharmacy/discount-plans`
+  - `/api/subscriptions/pharmacy/discount-subscriptions`
+- Modelo de descuento preparado con feature flag (DB + override ENV):
+  - `SUBSCRIPTIONS_PHARMACY_DISCOUNT_ENABLED`
