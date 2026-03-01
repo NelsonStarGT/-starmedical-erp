@@ -103,7 +103,7 @@ export async function reserveNextClientCodeTx(
     INSERT INTO "ClientSequenceCounter"
       ("tenantId", "clientType", "prefix", "nextNumber", "createdAt", "updatedAt")
     VALUES
-      (${tenantId}, ${input.clientType}, ${prefix}, 2, NOW(), NOW())
+      (${tenantId}, CAST(${input.clientType} AS "ClientProfileType"), ${prefix}, 2, NOW(), NOW())
     ON CONFLICT ("tenantId", "clientType")
     DO UPDATE SET
       "nextNumber" = "ClientSequenceCounter"."nextNumber" + 1,

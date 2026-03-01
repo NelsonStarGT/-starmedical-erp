@@ -75,3 +75,24 @@ test("correlativo reinicia por tenant y por tipo", async () => {
   assert.equal(personT2.code, "C001");
   assert.equal(companyT1.code, "E001");
 });
+
+test("reserva de correlativo castea clientType a enum ClientProfileType en SQL", async () => {
+  let capturedSql: Prisma.Sql | null = null;
+
+  const tx = {
+    $queryRaw: async (sql: Prisma.Sql) => {
+      capturedSql = sql;
+      return [{ prefix: "C", nextNumber: 2 }];
+    }
+  } as unknown as Prisma.TransactionClient;
+
+  await reserveNextClientCodeTx(tx, {
+    tenantId: "tenant-cast",
+    clientType: ClientProfileType.PERSON
+  });
+
+  assert.ok(capturedSql);
+  const sqlText = (capturedSql as Prisma.Sql).strings.join(" ");
+  assert.match(sqlText, /CAST\(/);
+  assert.match(sqlText, /AS "ClientProfileType"\)/);
+});
