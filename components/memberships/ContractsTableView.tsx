@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { FiltersBar } from "@/components/memberships/FiltersBar";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
+import { SubscriptionMembershipEnrollDrawer } from "@/components/memberships/SubscriptionMembershipEnrollDrawer";
 import { contractStatusBadgeClass, dateLabel, money } from "@/app/admin/suscripciones/membresias/_lib";
 import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
 
@@ -16,6 +18,30 @@ type PlanOption = {
   name: string;
   segment: "B2C" | "B2B";
   active: boolean;
+  priceMonthly: number;
+  priceAnnual: number;
+  currency?: string;
+  category?: {
+    id: string;
+    name: string;
+    segment: "B2C" | "B2B";
+  } | null;
+  durationPreset?: {
+    id: string;
+    name: string;
+    days: number;
+  } | null;
+  customDurationDays?: number | null;
+  benefits?: Array<{
+    id: string;
+    quantity?: number | null;
+    isUnlimited?: boolean;
+    benefitCatalog?: {
+      id: string;
+      title: string;
+      serviceType: string;
+    } | null;
+  }>;
 };
 
 type ContractRow = {
@@ -56,10 +82,10 @@ type ContractsTableViewProps = {
   description: string;
 };
 
-const BILLING_FREQUENCIES = ["MONTHLY", "ANNUAL", "SEMIANNUAL", "QUARTERLY"] as const;
 const STATUS_OPTIONS = ["ACTIVO", "PENDIENTE", "PENDIENTE_PAGO", "SUSPENDIDO", "VENCIDO", "CANCELADO"] as const;
 
 export function ContractsTableView({ ownerType, title, description }: ContractsTableViewProps) {
+  const searchParams = useSearchParams();
   const [contracts, setContracts] = useState<ContractRow[]>([]);
   const [plans, setPlans] = useState<PlanOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,8 +100,10 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<"" | "MANUAL" | "RECURRENT">("");
   const [renewWindowFilter, setRenewWindowFilter] = useState<"" | "7" | "15" | "30">("");
   const [branchFilter, setBranchFilter] = useState("");
+  const [enrollOpen, setEnrollOpen] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-
+  const [canViewPricing, setCanViewPricing] = useState(false);
+  const [hidePricesForOperators, setHidePricesForOperators] = useState(true);
   const [createForm, setCreateForm] = useState({
     ownerId: "",
     planId: "",
@@ -101,19 +129,24 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
     if (branchFilter) params.set("branchId", branchFilter);
 
     try {
-      const [contractsRes, plansRes] = await Promise.all([
+      const [contractsRes, plansRes, configRes] = await Promise.all([
         fetch(`/api/subscriptions/memberships/contracts?${params.toString()}`, { cache: "no-store" }),
-        fetch("/api/subscriptions/memberships/plans?active=true", { cache: "no-store" })
+        fetch("/api/subscriptions/memberships/plans?active=true", { cache: "no-store" }),
+        fetch("/api/subscriptions/memberships/config", { cache: "no-store" })
       ]);
 
       const contractsJson: ContractsResponse = await contractsRes.json();
       const plansJson = await plansRes.json();
+      const configJson = await configRes.json();
 
       if (!contractsRes.ok) throw new Error((contractsJson as any)?.error || "No se pudo cargar afiliaciones");
       if (!plansRes.ok) throw new Error(plansJson?.error || "No se pudo cargar planes");
+      if (!configRes.ok) throw new Error(configJson?.error || "No se pudo cargar configuración");
 
       setContracts(Array.isArray(contractsJson.data) ? contractsJson.data : []);
       setPlans(Array.isArray(plansJson.data) ? plansJson.data : []);
+      setCanViewPricing(Boolean(configJson?.meta?.canViewPricing));
+      setHidePricesForOperators(Boolean(configJson?.data?.hidePricesForOperators));
     } catch (err: any) {
       setError(err?.message || "Error cargando afiliaciones");
     } finally {
@@ -126,7 +159,12 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function submitCreate(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    const openByQuery = searchParams?.get("enroll");
+    if (openByQuery === "1" && ownerType === "PERSON") setEnrollOpen(true);
+  }, [ownerType, searchParams]);
+
+  async function submitCreateCompanyQuick(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
 
@@ -231,10 +269,10 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       actions={
         <button
           type="button"
-          onClick={() => setShowCreate((prev) => !prev)}
+          onClick={() => (ownerType === "PERSON" ? setEnrollOpen(true) : setShowCreate((prev) => !prev))}
           className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
         >
-          {showCreate ? "Cerrar" : "Afiliar"}
+          {ownerType === "PERSON" ? "Afiliar" : showCreate ? "Cerrar" : "Afiliar"}
         </button>
       }
     >
@@ -335,11 +373,11 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
         </div>
       </FiltersBar>
 
-      {showCreate ? (
-        <form onSubmit={submitCreate} className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Afiliación rápida</h3>
+      {ownerType === "COMPANY" && showCreate ? (
+        <form onSubmit={submitCreateCompanyQuick} className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Afiliación rápida empresa</h3>
           <p className="mt-1 text-[11px] text-slate-600">
-            MVP seguro: requiere <code>ownerId</code> existente en Clientes. Próximo paso: wizard con búsqueda avanzada.
+            Flujo rápido para B2B usando <code>ownerId</code> existente en Clientes.
           </p>
 
           <div className="mt-3 grid gap-2 md:grid-cols-4">
@@ -388,11 +426,10 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
                 value={createForm.billingFrequency}
                 onChange={(event) => setCreateForm((prev) => ({ ...prev, billingFrequency: event.target.value }))}
               >
-                {BILLING_FREQUENCIES.map((frequency) => (
-                  <option key={frequency} value={frequency}>
-                    {frequency}
-                  </option>
-                ))}
+                <option value="MONTHLY">MONTHLY</option>
+                <option value="QUARTERLY">QUARTERLY</option>
+                <option value="SEMIANNUAL">SEMIANNUAL</option>
+                <option value="ANNUAL">ANNUAL</option>
               </select>
             </label>
           </div>
@@ -416,7 +453,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
         <EmptyState
           title="No hay afiliaciones"
           description="Afiliar un titular habilita renovación, estados y seguimiento operativo."
-          ctaHref="#"
+          ctaHref={ownerType === "PERSON" ? "/admin/suscripciones/membresias/afiliaciones/pacientes?enroll=1" : undefined}
           ctaLabel="Afiliar titular"
         />
       ) : null}
@@ -513,6 +550,19 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
             );
           })}
         </CompactTable>
+      ) : null}
+
+      {ownerType === "PERSON" ? (
+        <SubscriptionMembershipEnrollDrawer
+          open={enrollOpen}
+          onClose={() => setEnrollOpen(false)}
+          plans={filteredPlans}
+          canViewPricing={canViewPricing}
+          hidePricesForOperators={hidePricesForOperators}
+          onCreated={async () => {
+            await loadData();
+          }}
+        />
       ) : null}
     </MembershipsShell>
   );
