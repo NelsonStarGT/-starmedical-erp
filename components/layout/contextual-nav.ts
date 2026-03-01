@@ -132,18 +132,6 @@ const CONTEXTUAL_MODULES: ContextualNavModule[] = [
     ]
   },
   {
-    id: "membresias",
-    label: "Membresias",
-    matchPrefixes: ["/admin/membresias"],
-    items: [
-      { id: "dashboard", label: "Dashboard", href: "/admin/membresias" },
-      { id: "contratos", label: "Contratos", href: "/admin/membresias/contratos" },
-      { id: "planes", label: "Planes", href: "/admin/membresias/planes" },
-      { id: "renovaciones", label: "Renovaciones", href: "/admin/membresias/renovaciones" },
-      { id: "configuracion", label: "Configuracion", href: "/admin/membresias/configuracion" }
-    ]
-  },
-  {
     id: "finanzas",
     label: "Finanzas",
     matchPrefixes: ["/admin/finanzas"],
