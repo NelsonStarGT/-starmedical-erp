@@ -65,6 +65,9 @@ test("country-filter route persiste cookie con countryId válido", async () => {
 
     const setCookie = res.headers.get("set-cookie") || "";
     assert.match(setCookie, new RegExp(`${CLIENTS_COUNTRY_FILTER_COOKIE}=country-co`));
+    assert.match(setCookie, /Path=\//i);
+    assert.match(setCookie, /SameSite=Lax/i);
+    assert.match(setCookie, /Max-Age=\d+/i);
   } finally {
     delegate.findFirst = originalFindFirst;
   }
@@ -105,4 +108,6 @@ test("country-filter route permite seleccionar todos los países", async () => {
 
   const setCookie = res.headers.get("set-cookie") || "";
   assert.match(setCookie, new RegExp(`${CLIENTS_COUNTRY_FILTER_COOKIE}=ALL`));
+  assert.match(setCookie, /Path=\//i);
+  assert.match(setCookie, /SameSite=Lax/i);
 });

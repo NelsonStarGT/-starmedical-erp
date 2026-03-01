@@ -7,6 +7,7 @@ import { Eye, Mail, MessageCircle, Phone, Plus } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { canExportClientData, canExportClientTemplate } from "@/lib/clients/bulk/permissions";
+import { getClientsCountryFilterFromCookies } from "@/lib/clients/countryFilterCookies.server";
 import { tenantIdFromUser } from "@/lib/tenant";
 import { formatDateForClients } from "@/lib/clients/dateFormat";
 import { getClientsDateFormat } from "@/lib/clients/dateFormatConfig";
@@ -100,9 +101,11 @@ export default async function ClientesListaPage({
   searchParams?: Promise<SearchParams | undefined> | SearchParams;
 }) {
   const resolved = searchParams ? await searchParams : undefined;
-  const currentUser = await getSessionUserFromCookies(cookies());
+  const cookieStore = await cookies();
+  const currentUser = await getSessionUserFromCookies(cookieStore);
   if (!currentUser) redirect("/login");
   const tenantId = tenantIdFromUser(currentUser);
+  const countryId = await getClientsCountryFilterFromCookies(cookieStore);
   const canExportTemplate = canExportClientTemplate(currentUser);
   const canExportData = canExportClientData(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
@@ -125,6 +128,7 @@ export default async function ClientesListaPage({
       tenantId,
       q,
       type,
+      countryId,
       statusId,
       includeArchived,
       page,

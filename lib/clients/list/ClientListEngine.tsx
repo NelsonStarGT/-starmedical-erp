@@ -10,7 +10,7 @@ import {
   canExportClientTemplate,
   canProcessClientImport
 } from "@/lib/clients/bulk/permissions";
-import { readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
+import { getClientsCountryFilterFromCookies } from "@/lib/clients/countryFilterCookies.server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
@@ -166,15 +166,13 @@ function buildBaseColumns(kind: ClientListKind): ColumnDef<ClientListItem>[] {
 }
 
 function buildActionsColumn({
-  canViewDocs,
-  kind
+  canViewDocs
 }: {
   canViewDocs: boolean;
-  kind: ClientListKind;
 }): ColumnDef<ClientListItem> {
   return {
     header: "Acciones",
-    width: kind === "PERSON" ? "w-[156px]" : "w-[120px]",
+    width: "w-[120px]",
     render: (row) => (
       <ClientRowActions
         row={{
@@ -191,7 +189,7 @@ function buildActionsColumn({
           isArchived: row.isArchived
         }}
         canViewDocs={canViewDocs}
-        mode={kind === "PERSON" ? "direct" : "menu"}
+        mode="menu"
       />
     )
   };
@@ -223,6 +221,7 @@ async function defaultFetcher(
   const result = await listClients({
     tenantId: context?.tenantId,
     type,
+    countryId: context?.countryId ?? null,
     q: params.q,
     statusId: params.status || undefined,
     alert: params.alertFilter || undefined,
@@ -309,7 +308,7 @@ export async function ClientListEngine({
   const cookieStore = await cookies();
   const currentUser = await getSessionUserFromCookies(cookieStore);
   const tenantId = tenantIdFromUser(currentUser);
-  const countryId = readClientsCountryFilterCookie(cookieStore);
+  const countryId = await getClientsCountryFilterFromCookies(cookieStore);
 
   const queryObject = toSearchParamsObject(parsed);
   const queryForTabs: HrefQuery = {
@@ -337,7 +336,7 @@ export async function ClientListEngine({
   const columns = [
     ...(canBulkMutate ? [buildSelectionColumn()] : []),
     ...config.columns,
-    buildActionsColumn({ canViewDocs: docPermissions.canViewDocs, kind: config.kind })
+    buildActionsColumn({ canViewDocs: docPermissions.canViewDocs })
   ];
 
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));

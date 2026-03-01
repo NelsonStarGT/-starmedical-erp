@@ -9,7 +9,7 @@ import ClientsReportsFiltersForm from "@/components/clients/reports/ClientsRepor
 import ClientsReportsPanelsLayout from "@/components/clients/reports/ClientsReportsPanelsLayout";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserFromCookies } from "@/lib/auth";
-import { readClientsCountryFilterCookie } from "@/lib/clients/countryFilter.server";
+import { getClientsCountryFilterFromCookies } from "@/lib/clients/countryFilterCookies.server";
 import {
   canViewClientsReports,
   resolveClientsReportsExportScope
@@ -140,7 +140,7 @@ export default async function ClientesReportesPage({
   const tenantId = tenantIdFromUser(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
   const exportScope = resolveClientsReportsExportScope(currentUser);
-  const defaultCountryId = readClientsCountryFilterCookie(cookieStore);
+  const defaultCountryId = await getClientsCountryFilterFromCookies(cookieStore);
   const { filters, countryFilterParam } = buildFilters(
     resolvedSearchParams,
     dateFormat,
