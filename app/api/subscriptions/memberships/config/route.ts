@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ensureMembershipAccess } from "@/lib/api/memberships";
 import { getMembershipConfig, updateMembershipConfig } from "@/lib/memberships/service";
 import { membershipConfigSchema } from "@/lib/memberships/schemas";
-import { PERMISSIONS, hasPermission } from "@/lib/rbac";
+import { PERMISSIONS, hasPermission, isAdmin } from "@/lib/rbac";
 import { handleMembershipApiError } from "@/app/api/memberships/_utils";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,8 @@ export async function GET(req: NextRequest) {
       data,
       meta: {
         canAdmin: hasPermission(auth.user, PERMISSIONS.MEMBERSHIPS_ADMIN),
-        canViewPricing: hasPermission(auth.user, PERMISSIONS.MEMBERSHIPS_PRICING_VIEW)
+        // Pricing must stay admin-only even if legacy role catalogs still include PRICING_VIEW.
+        canViewPricing: isAdmin(auth.user)
       }
     });
   } catch (error) {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRM_DEV_ROLE_HEADER_ENABLED } from "@/lib/constants";
 import { requireAuth, type SessionUser } from "@/lib/auth";
 import { auditPermissionDenied } from "@/lib/audit";
-import { buildPermissionsFromRoles, hasPermission, normalizeRoleName, roleLabel } from "@/lib/rbac";
+import { buildPermissionsFromRoles, hasPermission, isAdmin, normalizeRoleName, roleLabel } from "@/lib/rbac";
 import { roleFromRequest } from "@/lib/api/auth";
 
 type EnsureMembershipResult = {
@@ -42,7 +42,19 @@ export function ensureMembershipAccess(req: NextRequest, requiredPermissions?: s
   const role = roleLabel(user);
   if (requiredPermissions) {
     const permissions = Array.isArray(requiredPermissions) ? requiredPermissions : [requiredPermissions];
-    const allowed = permissions.every((permission) => hasPermission(user, permission));
+    const normalizedRoles = new Set((user.roles || []).map((role) => normalizeRoleName(role)));
+    const receptionOrOpsMembershipWriter = normalizedRoles.has("RECEPTION") || normalizedRoles.has("RECEPTIONIST") || normalizedRoles.has("OPS");
+
+    const allowed = permissions.every((permission) => {
+      const key = String(permission || "").toUpperCase();
+
+      // Runtime hardening: pricing visibility is admin-only regardless of stale role catalogs.
+      if (key === "MEMBERSHIPS:PRICING:VIEW") return isAdmin(user);
+
+      if ((key === "MEMBERSHIPS:READ" || key === "MEMBERSHIPS:WRITE") && receptionOrOpsMembershipWriter) return true;
+
+      return hasPermission(user, key);
+    });
     if (!allowed) {
       auditPermissionDenied(user, req, "MEMBERSHIPS", "permission");
       return {
