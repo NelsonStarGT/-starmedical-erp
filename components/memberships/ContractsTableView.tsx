@@ -6,7 +6,7 @@ import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { FiltersBar } from "@/components/memberships/FiltersBar";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
-import { contractStatusBadgeClass, dateLabel, money } from "@/app/admin/membresias/_lib";
+import { contractStatusBadgeClass, dateLabel, money } from "@/app/admin/suscripciones/membresias/_lib";
 import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
 
 type OwnerType = "PERSON" | "COMPANY";
@@ -102,8 +102,8 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
 
     try {
       const [contractsRes, plansRes] = await Promise.all([
-        fetch(`/api/memberships/contracts?${params.toString()}`, { cache: "no-store" }),
-        fetch("/api/memberships/plans?active=true", { cache: "no-store" })
+        fetch(`/api/subscriptions/memberships/contracts?${params.toString()}`, { cache: "no-store" }),
+        fetch("/api/subscriptions/memberships/plans?active=true", { cache: "no-store" })
       ]);
 
       const contractsJson: ContractsResponse = await contractsRes.json();
@@ -137,7 +137,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
 
     try {
       setBusy(true);
-      const res = await fetch("/api/memberships/contracts", {
+      const res = await fetch("/api/subscriptions/memberships/contracts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -165,7 +165,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   async function changeStatus(contractId: string, status: string) {
     try {
       setStatusBusyId(contractId);
-      const res = await fetch(`/api/memberships/contracts/${contractId}/status`, {
+      const res = await fetch(`/api/subscriptions/memberships/contracts/${contractId}/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status })
@@ -183,7 +183,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   async function renewMembership(contractId: string) {
     try {
       setRenewBusyId(contractId);
-      const res = await fetch(`/api/memberships/contracts/${contractId}/renew`, {
+      const res = await fetch(`/api/subscriptions/memberships/contracts/${contractId}/renew`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ markAsPaid: false })
@@ -201,7 +201,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   async function activateRecurrent(contractId: string) {
     try {
       setRecurrentBusyId(contractId);
-      const res = await fetch(`/api/memberships/contracts/${contractId}/recurrente/checkout`, {
+      const res = await fetch(`/api/subscriptions/memberships/contracts/${contractId}/recurrente/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -452,7 +452,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap items-center gap-1">
                     <Link
-                      href={`/admin/membresias/contratos/${contract.id}`}
+                      href={`/admin/suscripciones/membresias/contratos/${contract.id}`}
                       className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
                     >
                       Ver
@@ -466,7 +466,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
                       Renovar
                     </button>
                     <Link
-                      href={`/admin/membresias/contratos/${contract.id}`}
+                      href={`/admin/suscripciones/membresias/contratos/${contract.id}`}
                       className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
                     >
                       Registrar pago

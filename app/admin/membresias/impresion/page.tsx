@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { EmptyState } from "@/components/memberships/EmptyState";
-import { dateLabel } from "@/app/admin/membresias/_lib";
+import { dateLabel } from "@/app/admin/suscripciones/membresias/_lib";
 
 type ContractCardRow = {
   id: string;
@@ -36,7 +36,7 @@ export default function MembershipPrintPage() {
     (async () => {
       try {
         setLoading(true);
-        const res = await fetch("/api/memberships/contracts?status=ACTIVO&take=200", { cache: "no-store" });
+        const res = await fetch("/api/subscriptions/memberships/contracts?status=ACTIVO&take=200", { cache: "no-store" });
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error || "No se pudo cargar cola de impresión");
 

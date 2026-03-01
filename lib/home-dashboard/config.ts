@@ -87,8 +87,8 @@ export const HOME_QUICK_ACTION_CATALOG: Array<{
     key: "memberships_contracts",
     label: "Contratos membresia",
     description: "Renovaciones y pendientes.",
-    href: "/admin/membresias/contratos",
-    module: "Membresias"
+    href: "/admin/suscripciones/membresias/afiliaciones/pacientes",
+    module: "Suscripciones"
   },
   {
     key: "users_list",

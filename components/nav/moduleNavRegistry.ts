@@ -180,6 +180,35 @@ export const moduleNavRegistry: ModuleNavConfig[] = [
     ]
   },
   {
+    moduleKey: "suscripciones",
+    moduleLabel: "SUSCRIPCIONES",
+    matchPrefixes: ["/admin/suscripciones"],
+    items: [
+      { key: "dashboard", label: "Dashboard", href: "/admin/suscripciones", icon: Gauge },
+      {
+        key: "membresias",
+        label: "Membresías",
+        href: "/admin/suscripciones/membresias/afiliaciones/pacientes",
+        matchPrefix: "/admin/suscripciones/membresias",
+        icon: FileText
+      },
+      { key: "farmacia", label: "Farmacia", href: "/admin/suscripciones/farmacia", icon: BriefcaseBusiness },
+      {
+        key: "pasarela",
+        label: "Pasarela",
+        href: "/admin/suscripciones/membresias/configuracion?tab=pasarela",
+        matchPrefix: "/admin/suscripciones/membresias/configuracion",
+        icon: CreditCard
+      },
+      {
+        key: "configuracion",
+        label: "Configuración",
+        href: "/admin/suscripciones/membresias/configuracion",
+        icon: Settings
+      }
+    ]
+  },
+  {
     moduleKey: "membresias",
     moduleLabel: "MEMBRESIAS",
     matchPrefixes: ["/admin/membresias"],

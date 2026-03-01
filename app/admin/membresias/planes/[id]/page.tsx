@@ -46,7 +46,7 @@ export default function MembershipPlanEditPage() {
     (async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/memberships/plans/${planId}`, { cache: "no-store" });
+        const res = await fetch(`/api/subscriptions/memberships/plans/${planId}`, { cache: "no-store" });
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error || "No se pudo cargar plan");
         if (mounted) setPlan(json.data as PlanDetail);

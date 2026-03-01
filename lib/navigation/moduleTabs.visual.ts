@@ -36,6 +36,13 @@ export const MODULE_TABS_VISUAL = {
     { key: "cobranza", label: "Cobranza" },
     { key: "configuracion", label: "Configuración" }
   ],
+  suscripciones: [
+    { key: "dashboard", label: "Dashboard" },
+    { key: "membresias", label: "Membresías" },
+    { key: "farmacia", label: "Farmacia" },
+    { key: "pasarela", label: "Pasarela" },
+    { key: "configuracion", label: "Configuración" }
+  ],
   agenda: [
     { key: "dashboard", label: "Dashboard" },
     { key: "calendario", label: "Calendario" },

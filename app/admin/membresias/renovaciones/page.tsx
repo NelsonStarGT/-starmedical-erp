@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
-import { dateLabel, money, contractStatusBadgeClass } from "@/app/admin/membresias/_lib";
+import { dateLabel, money, contractStatusBadgeClass } from "@/app/admin/suscripciones/membresias/_lib";
 import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
 
 type RenewalRow = {
@@ -44,7 +44,7 @@ export default function MembershipRenewalsPage() {
     (async () => {
       try {
         setLoading(true);
-        const res = await fetch("/api/memberships/contracts?renewWindowDays=30&take=200", { cache: "no-store" });
+        const res = await fetch("/api/subscriptions/memberships/contracts?renewWindowDays=30&take=200", { cache: "no-store" });
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error || "No se pudo cargar renovaciones");
         if (mounted) setRows(Array.isArray(json.data) ? json.data : []);
@@ -139,7 +139,7 @@ export default function MembershipRenewalsPage() {
                       Generar factura
                     </Link>
                     <Link
-                      href={`/admin/membresias/contratos/${row.id}`}
+                      href={`/admin/suscripciones/membresias/contratos/${row.id}`}
                       className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
                     >
                       Ver contrato

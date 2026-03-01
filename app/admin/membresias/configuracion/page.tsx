@@ -149,10 +149,10 @@ export default function MembershipConfigPage() {
     setError(null);
     try {
       const [configRes, categoriesRes, presetsRes, benefitsRes] = await Promise.all([
-        fetch("/api/memberships/config", { cache: "no-store" }),
-        fetch("/api/memberships/plan-categories?includeInactive=true", { cache: "no-store" }),
-        fetch("/api/memberships/config/duration-presets?includeInactive=true", { cache: "no-store" }),
-        fetch("/api/memberships/config/benefits?includeInactive=true", { cache: "no-store" })
+        fetch("/api/subscriptions/memberships/config", { cache: "no-store" }),
+        fetch("/api/subscriptions/memberships/plan-categories?includeInactive=true", { cache: "no-store" }),
+        fetch("/api/subscriptions/memberships/config/duration-presets?includeInactive=true", { cache: "no-store" }),
+        fetch("/api/subscriptions/memberships/config/benefits?includeInactive=true", { cache: "no-store" })
       ]);
 
       const configJson: ConfigResponse = await configRes.json();
@@ -170,7 +170,7 @@ export default function MembershipConfigPage() {
       setCanAdmin(adminAccess);
 
       if (adminAccess) {
-        const gatewayRes = await fetch("/api/memberships/config/gateway", { cache: "no-store" });
+        const gatewayRes = await fetch("/api/subscriptions/memberships/config/gateway", { cache: "no-store" });
         const gatewayJson = await gatewayRes.json();
         if (!gatewayRes.ok) throw new Error(gatewayJson?.error || "No se pudo cargar pasarela");
         setGateway(gatewayJson?.data || DEFAULT_GATEWAY);
@@ -208,7 +208,7 @@ export default function MembershipConfigPage() {
     setMessage(null);
     try {
       setSavingConfig(true);
-      const res = await fetch("/api/memberships/config", {
+      const res = await fetch("/api/subscriptions/memberships/config", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config)
@@ -230,7 +230,7 @@ export default function MembershipConfigPage() {
 
     try {
       setSavingId("new-category");
-      const res = await fetch("/api/memberships/plan-categories", {
+      const res = await fetch("/api/subscriptions/memberships/plan-categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -258,7 +258,7 @@ export default function MembershipConfigPage() {
 
     try {
       setSavingId(category.id);
-      const res = await fetch(`/api/memberships/plan-categories/${category.id}`, {
+      const res = await fetch(`/api/subscriptions/memberships/plan-categories/${category.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -280,7 +280,7 @@ export default function MembershipConfigPage() {
   async function toggleCategory(category: Category) {
     try {
       setSavingId(category.id);
-      const res = await fetch(`/api/memberships/plan-categories/${category.id}/status`, {
+      const res = await fetch(`/api/subscriptions/memberships/plan-categories/${category.id}/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: !category.isActive })
@@ -302,7 +302,7 @@ export default function MembershipConfigPage() {
 
     try {
       setSavingId("new-preset");
-      const res = await fetch("/api/memberships/config/duration-presets", {
+      const res = await fetch("/api/subscriptions/memberships/config/duration-presets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -327,7 +327,7 @@ export default function MembershipConfigPage() {
   async function togglePreset(preset: DurationPreset) {
     try {
       setSavingId(preset.id);
-      const res = await fetch(`/api/memberships/config/duration-presets/${preset.id}/status`, {
+      const res = await fetch(`/api/subscriptions/memberships/config/duration-presets/${preset.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: !preset.isActive })
@@ -349,7 +349,7 @@ export default function MembershipConfigPage() {
 
     try {
       setSavingId("new-benefit");
-      const res = await fetch("/api/memberships/config/benefits", {
+      const res = await fetch("/api/subscriptions/memberships/config/benefits", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -376,7 +376,7 @@ export default function MembershipConfigPage() {
   async function toggleBenefit(benefit: BenefitCatalog) {
     try {
       setSavingId(benefit.id);
-      const res = await fetch(`/api/memberships/config/benefits/${benefit.id}/status`, {
+      const res = await fetch(`/api/subscriptions/memberships/config/benefits/${benefit.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: !benefit.isActive })
@@ -407,7 +407,7 @@ export default function MembershipConfigPage() {
       if (gatewayApiKey.trim()) payload.apiKey = gatewayApiKey.trim();
       if (gatewayWebhookSecret.trim()) payload.webhookSecret = gatewayWebhookSecret.trim();
 
-      const res = await fetch("/api/memberships/config/gateway", {
+      const res = await fetch("/api/subscriptions/memberships/config/gateway", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -431,7 +431,7 @@ export default function MembershipConfigPage() {
     setGatewayTestMessage(null);
     try {
       setTestingGateway(true);
-      const res = await fetch("/api/memberships/config/gateway/test", {
+      const res = await fetch("/api/subscriptions/memberships/config/gateway/test", {
         method: "POST"
       });
       const json = await res.json();

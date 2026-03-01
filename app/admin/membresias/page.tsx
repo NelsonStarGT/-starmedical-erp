@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
-import { money } from "@/app/admin/membresias/_lib";
+import { money } from "@/app/admin/suscripciones/membresias/_lib";
 
 type DashboardResponse = {
   data: {
@@ -45,7 +45,7 @@ export default function MembershipsDashboardPage() {
     (async () => {
       try {
         setLoading(true);
-        const res = await fetch("/api/memberships/dashboard", { cache: "no-store" });
+        const res = await fetch("/api/subscriptions/memberships/dashboard", { cache: "no-store" });
         const json: DashboardResponse = await res.json();
         if (!res.ok) throw new Error((json as any)?.error || "No se pudo cargar dashboard");
         if (!mounted) return;
@@ -120,7 +120,7 @@ export default function MembershipsDashboardPage() {
               <EmptyState
                 title="Sin KPIs por categoría"
                 description="Crea categorías y planes para habilitar esta vista analítica."
-                ctaHref="/admin/membresias/configuracion"
+                ctaHref="/admin/suscripciones/membresias/configuracion"
                 ctaLabel="Configurar categorías"
               />
             ) : (

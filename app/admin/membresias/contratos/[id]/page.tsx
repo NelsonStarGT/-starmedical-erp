@@ -5,7 +5,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { CompactTable } from "@/components/memberships/CompactTable";
-import { dateLabel, money, contractStatusBadgeClass } from "@/app/admin/membresias/_lib";
+import { dateLabel, money, contractStatusBadgeClass } from "@/app/admin/suscripciones/membresias/_lib";
 import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
 
 type ContractDetail = {
@@ -71,7 +71,7 @@ export default function MembershipContractDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/memberships/contracts/${contractId}`, { cache: "no-store" });
+      const res = await fetch(`/api/subscriptions/memberships/contracts/${contractId}`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "No se pudo cargar contrato");
       setContract(json.data);
@@ -103,7 +103,7 @@ export default function MembershipContractDetailPage() {
 
     try {
       setBusyPayment(true);
-      const res = await fetch(`/api/memberships/contracts/${contractId}/payment`, {
+      const res = await fetch(`/api/subscriptions/memberships/contracts/${contractId}/payment`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -132,7 +132,7 @@ export default function MembershipContractDetailPage() {
     setError(null);
     try {
       setBusyRecurrent(true);
-      const res = await fetch(`/api/memberships/contracts/${contractId}/recurrente/checkout`, {
+      const res = await fetch(`/api/subscriptions/memberships/contracts/${contractId}/recurrente/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1181,7 +1181,7 @@ export async function listRenewalQueue(user: SessionUser | null) {
       plan: serializePlan(row.plan),
       actions: {
         invoiceUrl: buildMembershipInvoiceLink({ contractId: row.id }),
-        contractUrl: `/admin/membresias/contratos/${row.id}`
+        contractUrl: `/admin/suscripciones/membresias/contratos/${row.id}`
       }
     };
   });

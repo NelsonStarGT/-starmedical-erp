@@ -118,10 +118,10 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       try {
         setLoadingCatalogs(true);
         const [categoriesRes, presetsRes, benefitsRes, configRes] = await Promise.all([
-          fetch("/api/memberships/plan-categories?includeInactive=true", { cache: "no-store" }),
-          fetch("/api/memberships/config/duration-presets?includeInactive=true", { cache: "no-store" }),
-          fetch("/api/memberships/config/benefits?includeInactive=true", { cache: "no-store" }),
-          fetch("/api/memberships/config", { cache: "no-store" })
+          fetch("/api/subscriptions/memberships/plan-categories?includeInactive=true", { cache: "no-store" }),
+          fetch("/api/subscriptions/memberships/config/duration-presets?includeInactive=true", { cache: "no-store" }),
+          fetch("/api/subscriptions/memberships/config/benefits?includeInactive=true", { cache: "no-store" }),
+          fetch("/api/subscriptions/memberships/config", { cache: "no-store" })
         ]);
 
         const categoriesJson = await categoriesRes.json();
@@ -228,7 +228,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
 
     try {
       setBusy(true);
-      const url = mode === "create" ? "/api/memberships/plans" : `/api/memberships/plans/${planId}`;
+      const url = mode === "create" ? "/api/subscriptions/memberships/plans" : `/api/subscriptions/memberships/plans/${planId}`;
       const method = mode === "create" ? "POST" : "PATCH";
       const res = await fetch(url, {
         method,
@@ -237,7 +237,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "No se pudo guardar plan");
-      router.push("/admin/membresias/planes");
+      router.push("/admin/suscripciones/membresias/planes");
       router.refresh();
     } catch (err: any) {
       setError(err?.message || "No se pudo guardar");
@@ -550,7 +550,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
         <button
           type="button"
           className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700"
-          onClick={() => router.push("/admin/membresias/planes")}
+          onClick={() => router.push("/admin/suscripciones/membresias/planes")}
           disabled={busy}
         >
           Cancelar

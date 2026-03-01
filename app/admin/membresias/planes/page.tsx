@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
-import { money } from "@/app/admin/membresias/_lib";
+import { money } from "@/app/admin/suscripciones/membresias/_lib";
 
 type PlanRow = {
   id: string;
@@ -49,8 +49,8 @@ export default function MembershipPlansPage() {
     setError(null);
     try {
       const [plansRes, configRes] = await Promise.all([
-        fetch("/api/memberships/plans", { cache: "no-store" }),
-        fetch("/api/memberships/config", { cache: "no-store" })
+        fetch("/api/subscriptions/memberships/plans", { cache: "no-store" }),
+        fetch("/api/subscriptions/memberships/config", { cache: "no-store" })
       ]);
       const json = await plansRes.json();
       const configJson = await configRes.json();
@@ -73,7 +73,7 @@ export default function MembershipPlansPage() {
   async function togglePlanStatus(plan: PlanRow) {
     try {
       setBusyId(plan.id);
-      const res = await fetch(`/api/memberships/plans/${plan.id}/status`, {
+      const res = await fetch(`/api/subscriptions/memberships/plans/${plan.id}/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: !plan.active })
@@ -91,7 +91,7 @@ export default function MembershipPlansPage() {
   async function duplicatePlan(plan: PlanRow) {
     try {
       setBusyId(plan.id);
-      const res = await fetch("/api/memberships/plans", {
+      const res = await fetch("/api/subscriptions/memberships/plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -127,7 +127,7 @@ export default function MembershipPlansPage() {
       description="Oferta comercial de membresías por segmento y categoría."
       actions={
         <Link
-          href="/admin/membresias/planes/nuevo"
+          href="/admin/suscripciones/membresias/planes/nuevo"
           className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
         >
           Crear plan
@@ -141,7 +141,7 @@ export default function MembershipPlansPage() {
         <EmptyState
           title="No hay planes cargados"
           description="Configura categorías y crea el primer plan para habilitar contratos."
-          ctaHref="/admin/membresias/planes/nuevo"
+          ctaHref="/admin/suscripciones/membresias/planes/nuevo"
           ctaLabel="Crear primer plan"
         />
       ) : null}
@@ -195,7 +195,7 @@ export default function MembershipPlansPage() {
               <td className="px-3 py-2">
                 <div className="flex flex-wrap gap-1">
                   <Link
-                    href={`/admin/membresias/planes/${plan.id}`}
+                    href={`/admin/suscripciones/membresias/planes/${plan.id}`}
                     className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
                   >
                     Editar

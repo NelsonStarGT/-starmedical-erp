@@ -63,7 +63,7 @@ export const navSections: NavSection[] = [
         ]
       },
       { label: "CRM", href: "/admin/crm", icon: BriefcaseBusiness },
-      { label: "Membresías", href: "/admin/membresias", icon: IdCard },
+      { label: "Suscripciones", href: "/admin/suscripciones", icon: IdCard },
       { label: "Agenda", href: "/admin/agenda", icon: CalendarDays }
     ]
   },
