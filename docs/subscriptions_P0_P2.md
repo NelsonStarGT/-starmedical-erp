@@ -22,7 +22,15 @@ As-of date: 2026-02-28
   - Beneficios demo: Consulta general, Hemograma, Rx tórax, Audiometría
 
 ## P1 (Afiliaciones + Renovaciones)
-- Ver commit de P1 para alias de rutas `afiliaciones` y filtros operativos.
+- UI:
+  - `/admin/suscripciones/membresias/afiliaciones/pacientes`
+  - `/admin/suscripciones/membresias/afiliaciones/empresas`
+  - subnav compacta Pacientes/Empresas.
+- API aliases:
+  - `/api/subscriptions/memberships/afiliaciones/*` -> contrato subyacente.
+  - `/api/membresias/afiliaciones/*` -> compat en español.
+- Renovaciones se mantiene en:
+  - `/admin/suscripciones/membresias/renovaciones`
 
 ## P2 (Recurrente + Farmacia)
 - Ver commits de P2 para:
