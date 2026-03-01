@@ -1224,10 +1224,11 @@ async function main() {
     { name: "Escolar", segment: membershipSegmentValues.B2C, sortOrder: 20 },
     { name: "Familiar", segment: membershipSegmentValues.B2C, sortOrder: 30 },
     { name: "Familiar Plus", segment: membershipSegmentValues.B2C, sortOrder: 40 },
-    { name: "Oro", segment: membershipSegmentValues.B2B, sortOrder: 10 },
-    { name: "Plata", segment: membershipSegmentValues.B2B, sortOrder: 20 },
-    { name: "Platino", segment: membershipSegmentValues.B2B, sortOrder: 30 },
-    { name: "Salud Ocupacional", segment: membershipSegmentValues.B2B, sortOrder: 40 }
+    { name: "Empresarial", segment: membershipSegmentValues.B2B, sortOrder: 10 },
+    { name: "Oro", segment: membershipSegmentValues.B2B, sortOrder: 20 },
+    { name: "Plata", segment: membershipSegmentValues.B2B, sortOrder: 30 },
+    { name: "Platino", segment: membershipSegmentValues.B2B, sortOrder: 40 },
+    { name: "Salud Ocupacional", segment: membershipSegmentValues.B2B, sortOrder: 50 }
   ];
 
   if (!membershipPlanCategoryDelegate?.upsert) {
