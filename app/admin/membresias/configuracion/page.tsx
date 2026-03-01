@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 
@@ -99,6 +100,7 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export default function MembershipConfigPage() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabId>("catalogos");
   const [config, setConfig] = useState<MembershipConfig>(DEFAULT_CONFIG);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -201,6 +203,12 @@ export default function MembershipConfigPage() {
   useEffect(() => {
     loadAll();
   }, []);
+
+  useEffect(() => {
+    const rawTab = (searchParams?.get("tab") || "").trim().toLowerCase();
+    const nextTab = TABS.find((tab) => tab.id === rawTab)?.id;
+    if (nextTab) setActiveTab(nextTab);
+  }, [searchParams]);
 
   async function saveConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

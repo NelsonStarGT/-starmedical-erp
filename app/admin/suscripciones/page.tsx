@@ -1,5 +1,1 @@
-import { redirect } from "next/navigation";
-
-export default function SubscriptionsRootPage() {
-  redirect("/admin/suscripciones/membresias");
-}
+export { default } from "@/app/admin/membresias/page";

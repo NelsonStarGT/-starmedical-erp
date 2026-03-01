@@ -184,27 +184,38 @@ export const moduleNavRegistry: ModuleNavConfig[] = [
     moduleLabel: "SUSCRIPCIONES",
     matchPrefixes: ["/admin/suscripciones"],
     items: [
-      { key: "dashboard", label: "Dashboard", href: "/admin/suscripciones", icon: Gauge },
+      {
+        key: "dashboard",
+        label: "Dashboard",
+        href: "/admin/suscripciones",
+        icon: Gauge,
+        preserveQueryKeys: ["focus"],
+        isActive: ({ pathname }) => pathname === "/admin/suscripciones"
+      },
       {
         key: "membresias",
         label: "Membresías",
-        href: "/admin/suscripciones/membresias/afiliaciones/pacientes",
+        href: "/admin/suscripciones/membresias",
         matchPrefix: "/admin/suscripciones/membresias",
-        icon: FileText
+        icon: FileText,
+        preserveQueryKeys: ["focus"]
       },
-      { key: "farmacia", label: "Farmacia", href: "/admin/suscripciones/farmacia", icon: BriefcaseBusiness },
+      { key: "farmacia", label: "Farmacia", href: "/admin/suscripciones/farmacia", icon: BriefcaseBusiness, preserveQueryKeys: ["focus"] },
       {
         key: "pasarela",
         label: "Pasarela",
-        href: "/admin/suscripciones/membresias/configuracion?tab=pasarela",
-        matchPrefix: "/admin/suscripciones/membresias/configuracion",
-        icon: CreditCard
+        href: "/admin/suscripciones/pasarela",
+        matchPrefix: "/admin/suscripciones/pasarela",
+        icon: CreditCard,
+        preserveQueryKeys: ["focus"]
       },
       {
         key: "configuracion",
         label: "Configuración",
-        href: "/admin/suscripciones/membresias/configuracion",
-        icon: Settings
+        href: "/admin/suscripciones/configuracion",
+        matchPrefix: "/admin/suscripciones/configuracion",
+        icon: Settings,
+        preserveQueryKeys: ["focus"]
       }
     ]
   },

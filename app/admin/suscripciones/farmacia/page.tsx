@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
@@ -58,7 +59,22 @@ type DiscountSubscription = {
   plan: DiscountPlan;
 };
 
-type TabId = "medicamentos" | "descuento" | "config";
+type ClientOption = {
+  id: string;
+  type: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+};
+
+type InventoryOption = {
+  id: string;
+  sku?: string | null;
+  name: string;
+  unit?: string | null;
+};
+
+type TabId = "cola" | "medicamentos" | "descuento" | "config";
 
 const TAB_STYLE = "rounded-lg border px-3 py-2 text-xs font-semibold transition";
 
@@ -69,8 +85,19 @@ function dateLabel(value?: string | null) {
   return date.toLocaleDateString("es-GT", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+function normalizePharmacyTab(raw: string | null | undefined): TabId {
+  const normalized = String(raw || "").trim().toLowerCase();
+  if (normalized === "cola") return "cola";
+  if (normalized === "descuento") return "descuento";
+  if (normalized === "config") return "config";
+  return "medicamentos";
+}
+
 export default function SubscriptionsPharmacyPage() {
-  const [activeTab, setActiveTab] = useState<TabId>("medicamentos");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<TabId>(() => normalizePharmacyTab(searchParams?.get("tab")));
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +131,11 @@ export default function SubscriptionsPharmacyPage() {
     patientId: "",
     clientId: ""
   });
+
+  const [patientSearch, setPatientSearch] = useState("");
+  const [patientOptions, setPatientOptions] = useState<ClientOption[]>([]);
+  const [medicationSearch, setMedicationSearch] = useState("");
+  const [medicationOptions, setMedicationOptions] = useState<InventoryOption[]>([]);
 
   const queueCounters = useMemo(() => {
     return queue.reduce(
@@ -159,6 +191,64 @@ export default function SubscriptionsPharmacyPage() {
     loadAll();
   }, []);
 
+  useEffect(() => {
+    setActiveTab(normalizePharmacyTab(searchParams?.get("tab")));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const query = patientSearch.trim();
+    if (query.length < 2) {
+      setPatientOptions([]);
+      return;
+    }
+
+    const timeout = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/subscriptions/memberships/clients?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+        const json = await res.json();
+        if (!res.ok) return;
+        setPatientOptions(Array.isArray(json?.data) ? json.data : []);
+      } catch {
+        setPatientOptions([]);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [patientSearch]);
+
+  useEffect(() => {
+    const query = medicationSearch.trim();
+    if (query.length < 2) {
+      setMedicationOptions([]);
+      return;
+    }
+
+    const timeout = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/medical/inventory/search?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+        const json = await res.json();
+        if (!res.ok) return;
+        setMedicationOptions(Array.isArray(json?.data?.items) ? json.data.items : []);
+      } catch {
+        setMedicationOptions([]);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [medicationSearch]);
+
+  function selectTab(nextTab: TabId) {
+    setActiveTab(nextTab);
+    const next = new URLSearchParams(searchParams?.toString() || "");
+    if (nextTab === "medicamentos") {
+      next.delete("tab");
+    } else {
+      next.set("tab", nextTab);
+    }
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
+
   async function createMedicationSubscription(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -200,6 +290,10 @@ export default function SubscriptionsPharmacyPage() {
         contactPreference: "WHATSAPP",
         notes: ""
       });
+      setPatientSearch("");
+      setMedicationSearch("");
+      setPatientOptions([]);
+      setMedicationOptions([]);
 
       setMessage("Suscripción por medicamento creada");
       await loadAll();
@@ -337,7 +431,18 @@ export default function SubscriptionsPharmacyPage() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => setActiveTab("medicamentos")}
+          onClick={() => selectTab("cola")}
+          className={`${TAB_STYLE} ${
+            activeTab === "cola"
+              ? "border-[#4aa59c] bg-[#4aa59c]/10 text-[#2e75ba]"
+              : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5]"
+          }`}
+        >
+          Cola operativa
+        </button>
+        <button
+          type="button"
+          onClick={() => selectTab("medicamentos")}
           className={`${TAB_STYLE} ${
             activeTab === "medicamentos"
               ? "border-[#4aa59c] bg-[#4aa59c]/10 text-[#2e75ba]"
@@ -348,18 +453,18 @@ export default function SubscriptionsPharmacyPage() {
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("descuento")}
+          onClick={() => selectTab("descuento")}
           className={`${TAB_STYLE} ${
             activeTab === "descuento"
-              ? "border-[#4aa59c] bg-[#4aa59c]/10 text-[#2e75ba]"
-              : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5]"
+              ? "border-slate-300 bg-slate-100 text-slate-600"
+              : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300"
           }`}
         >
-          Suscripción de descuento
+          Suscripción de descuento · Próximamente
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("config")}
+          onClick={() => selectTab("config")}
           className={`${TAB_STYLE} ${
             activeTab === "config"
               ? "border-[#4aa59c] bg-[#4aa59c]/10 text-[#2e75ba]"
@@ -374,7 +479,7 @@ export default function SubscriptionsPharmacyPage() {
       {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
       {message ? <p className="text-xs font-semibold text-emerald-700">{message}</p> : null}
 
-      {activeTab === "medicamentos" ? (
+      {activeTab === "cola" || activeTab === "medicamentos" ? (
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-3">
             <article className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-3 shadow-sm">
@@ -391,104 +496,222 @@ export default function SubscriptionsPharmacyPage() {
             </article>
           </div>
 
-          <form onSubmit={createMedicationSubscription} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-5">
-            <input
-              required
-              value={newMedication.patientId}
-              onChange={(event) => setNewMedication((prev) => ({ ...prev, patientId: event.target.value }))}
-              placeholder="Paciente ID"
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            />
-            <input
-              required
-              value={newMedication.medicationId}
-              onChange={(event) => setNewMedication((prev) => ({ ...prev, medicationId: event.target.value }))}
-              placeholder="Medicamento ID"
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            />
-            <input
-              required
-              type="number"
-              min={1}
-              step="0.01"
-              value={newMedication.qty}
-              onChange={(event) => setNewMedication((prev) => ({ ...prev, qty: event.target.value }))}
-              placeholder="Cantidad"
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            />
-            <select
-              value={newMedication.frequency}
-              onChange={(event) => setNewMedication((prev) => ({ ...prev, frequency: event.target.value }))}
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            >
-              <option value="WEEKLY">Semanal</option>
-              <option value="BIWEEKLY">Quincenal</option>
-              <option value="MONTHLY">Mensual</option>
-              <option value="CUSTOM_DAYS">Custom (días)</option>
-            </select>
-            <input
-              type="date"
-              value={newMedication.nextFillAt}
-              onChange={(event) => setNewMedication((prev) => ({ ...prev, nextFillAt: event.target.value }))}
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            />
+          <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <h2 className="text-sm font-semibold text-[#2e75ba]">Cola operativa</h2>
+            <p className="mt-1 text-xs text-slate-600">Trabajo priorizado por fecha de próximo surtido.</p>
+            {queue.length === 0 ? (
+              <p className="mt-3 text-xs text-slate-500">No hay pendientes en la cola operativa.</p>
+            ) : (
+              <div className="mt-3">
+                <CompactTable columns={["Paciente", "Medicamento(s)", "Próximo surtido", "Estado", "Acciones"]}>
+                  {queue.map((row) => (
+                    <tr key={`queue-${row.id}`}>
+                      <td className="px-3 py-2 text-slate-800">{row.patientId}</td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {row.items.map((item) => `${item.medicationId} x${item.qty}`).join(", ")}
+                      </td>
+                      <td className="px-3 py-2 text-slate-700">{dateLabel(row.nextFillAt)}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.status}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            onClick={() => registerEvent(row.id, "PREPARED")}
+                            disabled={busyId === row.id}
+                            className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
+                          >
+                            Preparado
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => registerEvent(row.id, "CONTACTED")}
+                            disabled={busyId === row.id}
+                            className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
+                          >
+                            Contactado
+                          </button>
+                          <Link
+                            href={`/admin/facturacion?source=pharmacy&subscriptionId=${encodeURIComponent(row.id)}`}
+                            className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
+                            onClick={() => {
+                              registerEvent(row.id, "BILLING_LINK");
+                            }}
+                          >
+                            Generar cobro
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </CompactTable>
+              </div>
+            )}
+          </section>
 
-            {newMedication.frequency === "CUSTOM_DAYS" ? (
+          {activeTab === "medicamentos" ? (
+            <form onSubmit={createMedicationSubscription} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-2 xl:grid-cols-6">
+              <div className="space-y-1 xl:col-span-3">
+                <label className="text-xs font-semibold text-slate-700">Titular (paciente)</label>
+                <input
+                  value={patientSearch}
+                  onChange={(event) => setPatientSearch(event.target.value)}
+                  placeholder="Buscar por nombre, correo, teléfono o NIT"
+                  className="w-full rounded-lg border border-slate-200 px-2 py-2 text-xs"
+                />
+                {patientOptions.length > 0 ? (
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      const selected = patientOptions.find((row) => row.id === event.target.value);
+                      if (!selected) return;
+                      setNewMedication((prev) => ({ ...prev, patientId: selected.id }));
+                      setPatientSearch(selected.name);
+                    }}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-2 text-xs"
+                  >
+                    <option value="">Seleccionar paciente encontrado</option>
+                    {patientOptions.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.name} · {row.id}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-[11px] text-slate-500">Escribe al menos 2 caracteres para buscar.</p>
+                )}
+                <input
+                  required
+                  value={newMedication.patientId}
+                  onChange={(event) => setNewMedication((prev) => ({ ...prev, patientId: event.target.value }))}
+                  placeholder="ID de paciente (manual o autocompletado)"
+                  className="w-full rounded-lg border border-slate-200 px-2 py-2 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1 xl:col-span-3">
+                <label className="text-xs font-semibold text-slate-700">Medicamento</label>
+                <input
+                  value={medicationSearch}
+                  onChange={(event) => setMedicationSearch(event.target.value)}
+                  placeholder="Buscar medicamento por nombre o código"
+                  className="w-full rounded-lg border border-slate-200 px-2 py-2 text-xs"
+                />
+                {medicationOptions.length > 0 ? (
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      const selected = medicationOptions.find((row) => row.id === event.target.value);
+                      if (!selected) return;
+                      setNewMedication((prev) => ({ ...prev, medicationId: selected.id }));
+                      setMedicationSearch(selected.name);
+                    }}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-2 text-xs"
+                  >
+                    <option value="">Seleccionar medicamento encontrado</option>
+                    {medicationOptions.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.name}
+                        {row.sku ? ` · ${row.sku}` : ""} · {row.id}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-[11px] text-slate-500">Escribe al menos 2 caracteres para buscar.</p>
+                )}
+                <input
+                  required
+                  value={newMedication.medicationId}
+                  onChange={(event) => setNewMedication((prev) => ({ ...prev, medicationId: event.target.value }))}
+                  placeholder="ID de medicamento (manual o autocompletado)"
+                  className="w-full rounded-lg border border-slate-200 px-2 py-2 text-xs"
+                />
+              </div>
+
               <input
                 required
                 type="number"
                 min={1}
-                max={365}
-                value={newMedication.customDays}
-                onChange={(event) => setNewMedication((prev) => ({ ...prev, customDays: event.target.value }))}
-                placeholder="Días custom"
+                step="0.01"
+                value={newMedication.qty}
+                onChange={(event) => setNewMedication((prev) => ({ ...prev, qty: event.target.value }))}
+                placeholder="Cantidad mensual"
                 className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
               />
-            ) : (
-              <div className="hidden md:block" />
-            )}
+              <select
+                value={newMedication.frequency}
+                onChange={(event) => setNewMedication((prev) => ({ ...prev, frequency: event.target.value }))}
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+              >
+                <option value="WEEKLY">Semanal</option>
+                <option value="BIWEEKLY">Quincenal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="CUSTOM_DAYS">Personalizado (días)</option>
+              </select>
+              <input
+                type="date"
+                value={newMedication.nextFillAt}
+                onChange={(event) => setNewMedication((prev) => ({ ...prev, nextFillAt: event.target.value }))}
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+              />
 
-            <select
-              value={newMedication.deliveryMethod}
-              onChange={(event) => setNewMedication((prev) => ({ ...prev, deliveryMethod: event.target.value }))}
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            >
-              <option value="PICKUP">Pickup</option>
-              <option value="DELIVERY">Delivery</option>
-            </select>
+              {newMedication.frequency === "CUSTOM_DAYS" ? (
+                <input
+                  required
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={newMedication.customDays}
+                  onChange={(event) => setNewMedication((prev) => ({ ...prev, customDays: event.target.value }))}
+                  placeholder="Intervalo personalizado en días"
+                  className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+                />
+              ) : (
+                <div className="hidden xl:block" />
+              )}
 
-            <select
-              value={newMedication.contactPreference}
-              onChange={(event) => setNewMedication((prev) => ({ ...prev, contactPreference: event.target.value }))}
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            >
-              <option value="CALL">Llamada</option>
-              <option value="WHATSAPP">WhatsApp</option>
-              <option value="EMAIL">Email</option>
-            </select>
+              <select
+                value={newMedication.deliveryMethod}
+                onChange={(event) => setNewMedication((prev) => ({ ...prev, deliveryMethod: event.target.value }))}
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+              >
+                <option value="PICKUP">Entrega en sede (pickup)</option>
+                <option value="DELIVERY">Entrega a domicilio</option>
+              </select>
 
-            <input
-              value={newMedication.notes}
-              onChange={(event) => setNewMedication((prev) => ({ ...prev, notes: event.target.value }))}
-              placeholder="Notas operativas"
-              className="md:col-span-2 rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            />
+              <select
+                value={newMedication.contactPreference}
+                onChange={(event) => setNewMedication((prev) => ({ ...prev, contactPreference: event.target.value }))}
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+              >
+                <option value="CALL">Llamada</option>
+                <option value="WHATSAPP">WhatsApp</option>
+                <option value="EMAIL">Correo</option>
+              </select>
 
-            <button
-              type="submit"
-              disabled={busyId === "create-medication"}
-              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
-            >
-              Crear suscripción
-            </button>
-          </form>
+              <input
+                value={newMedication.notes}
+                onChange={(event) => setNewMedication((prev) => ({ ...prev, notes: event.target.value }))}
+                placeholder="Notas operativas para surtido y contacto"
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs xl:col-span-2"
+              />
 
-          {subscriptions.length === 0 ? (
+              <button
+                type="submit"
+                disabled={busyId === "create-medication"}
+                className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
+              >
+                Crear suscripción
+              </button>
+            </form>
+          ) : null}
+
+          {activeTab === "medicamentos" && subscriptions.length === 0 ? (
             <EmptyState
               title="Sin suscripciones por medicamento"
               description="Crea la primera suscripción para activar la cola operativa de farmacia."
             />
           ) : (
+            activeTab === "medicamentos" ? (
             <CompactTable columns={["Paciente", "Medicamentos", "Próximo surtido", "Canal", "Estado", "Acciones"]}>
               {subscriptions.map((row) => (
                 <tr key={row.id}>
@@ -576,6 +799,7 @@ export default function SubscriptionsPharmacyPage() {
                 </tr>
               ))}
             </CompactTable>
+            ) : null
           )}
         </div>
       ) : null}
@@ -585,72 +809,75 @@ export default function SubscriptionsPharmacyPage() {
           <div className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-3 text-xs text-slate-700">
             <span className="rounded-full bg-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700">Próximamente</span>
             <p className="mt-2">
-              La suscripción de descuento está preparada en DB/API. Estado actual: <strong>{config.discountEnabled ? "habilitada" : "deshabilitada"}</strong>.
+              La suscripción de descuento está preparada en DB/API, pero la activación operativa queda pausada hasta su salida formal.
             </p>
+            <p className="mt-1 text-[11px] text-slate-500">Estado actual del feature flag: {config.discountEnabled ? "habilitada" : "deshabilitada"}.</p>
           </div>
 
-          <form onSubmit={createDiscountPlan} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-3">
-            <input
-              required
-              value={newDiscountPlan.name}
-              onChange={(event) => setNewDiscountPlan((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="Nombre plan descuento"
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            />
-            <input
-              required
-              type="number"
-              min={1}
-              max={100}
-              step="0.01"
-              value={newDiscountPlan.percentage}
-              onChange={(event) => setNewDiscountPlan((prev) => ({ ...prev, percentage: event.target.value }))}
-              placeholder="% descuento"
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            />
-            <button
-              type="submit"
-              disabled={busyId === "create-discount-plan"}
-              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
-            >
-              Crear plan
-            </button>
-          </form>
+          <fieldset disabled className="space-y-4 opacity-70">
+            <form onSubmit={createDiscountPlan} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-3">
+              <input
+                required
+                value={newDiscountPlan.name}
+                onChange={(event) => setNewDiscountPlan((prev) => ({ ...prev, name: event.target.value }))}
+                placeholder="Nombre plan descuento"
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+              />
+              <input
+                required
+                type="number"
+                min={1}
+                max={100}
+                step="0.01"
+                value={newDiscountPlan.percentage}
+                onChange={(event) => setNewDiscountPlan((prev) => ({ ...prev, percentage: event.target.value }))}
+                placeholder="% descuento"
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+              />
+              <button
+                type="submit"
+                disabled
+                className="rounded-lg bg-slate-300 px-3 py-2 text-xs font-semibold text-slate-600"
+              >
+                Crear plan
+              </button>
+            </form>
 
-          <form onSubmit={createDiscountSubscription} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-4">
-            <select
-              required
-              value={newDiscountSubscription.planId}
-              onChange={(event) => setNewDiscountSubscription((prev) => ({ ...prev, planId: event.target.value }))}
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            >
-              <option value="">Plan de descuento</option>
-              {discountPlans.filter((plan) => plan.isActive).map((plan) => (
-                <option key={plan.id} value={plan.id}>
-                  {plan.name} ({plan.percentage}%)
-                </option>
-              ))}
-            </select>
-            <input
-              value={newDiscountSubscription.patientId}
-              onChange={(event) => setNewDiscountSubscription((prev) => ({ ...prev, patientId: event.target.value }))}
-              placeholder="Paciente ID"
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            />
-            <input
-              value={newDiscountSubscription.clientId}
-              onChange={(event) => setNewDiscountSubscription((prev) => ({ ...prev, clientId: event.target.value }))}
-              placeholder="Cliente ID (opcional)"
-              className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
-            />
-            <button
-              type="submit"
-              disabled={!config.discountEnabled || busyId === "create-discount-sub"}
-              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Crear suscripción descuento
-            </button>
-          </form>
+            <form onSubmit={createDiscountSubscription} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-4">
+              <select
+                required
+                value={newDiscountSubscription.planId}
+                onChange={(event) => setNewDiscountSubscription((prev) => ({ ...prev, planId: event.target.value }))}
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+              >
+                <option value="">Plan de descuento</option>
+                {discountPlans.filter((plan) => plan.isActive).map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name} ({plan.percentage}%)
+                  </option>
+                ))}
+              </select>
+              <input
+                value={newDiscountSubscription.patientId}
+                onChange={(event) => setNewDiscountSubscription((prev) => ({ ...prev, patientId: event.target.value }))}
+                placeholder="Paciente ID"
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+              />
+              <input
+                value={newDiscountSubscription.clientId}
+                onChange={(event) => setNewDiscountSubscription((prev) => ({ ...prev, clientId: event.target.value }))}
+                placeholder="Cliente ID (opcional)"
+                className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
+              />
+              <button
+                type="submit"
+                disabled
+                className="rounded-lg bg-slate-300 px-3 py-2 text-xs font-semibold text-slate-600"
+              >
+                Crear suscripción descuento
+              </button>
+            </form>
+          </fieldset>
 
           <CompactTable columns={["Plan", "%", "Estado", "Vigencia"]}>
             {discountPlans.map((plan) => (
