@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  ClientAffiliationPayerType,
+  ClientAffiliationStatus,
   ClientBloodType,
   ClientCatalogType,
   ClientLocationType,
@@ -33,6 +35,8 @@ import { importExcelViaProcessingService } from "@/lib/processing-service/excel"
 import { isPrismaMissingTableError, isPrismaSchemaMismatchError } from "@/lib/prisma/errors.server";
 import { recordClientsAccessBlocked } from "@/lib/clients/securityEvents";
 import { prisma } from "@/lib/prisma";
+import { reserveNextClientCodeTx } from "@/lib/clients/clientCode";
+import { isAdmin } from "@/lib/rbac";
 import { tenantIdFromUser } from "@/lib/tenant";
 import { isValidEmail } from "@/lib/utils";
 import { dpiSchema } from "@/lib/validation/identity";
@@ -56,11 +60,13 @@ type ProcessResult = {
   updated: number;
   skipped: number;
   errors: number;
+  linked: number;
   errorsCsv: string;
   errorsPreview: Array<{ row: number; message: string }>;
   duplicates: number;
   duplicatesCsv: string;
   duplicatesPreview: DuplicateConflict[];
+  personClientIds: string[];
 };
 
 type DuplicateConflict = {
@@ -256,6 +262,294 @@ function buildDuplicatesCsv(rows: DuplicateConflict[]) {
 function normalizeEmailLower(value: string | null | undefined) {
   const normalized = normalizeOptional(value);
   return normalized ? normalized.toLowerCase() : null;
+}
+
+type CompanyLinkDraft = {
+  companyId: string;
+  relationType: string | null;
+  isPrimary: boolean;
+  isActive: boolean;
+};
+
+type ResolvedCompanyLookup = {
+  id: string;
+  label: string;
+  created: boolean;
+};
+
+function parseCompanyLinkToken(raw: string) {
+  const normalized = normalizeOptional(raw);
+  if (!normalized) return null;
+
+  const delimiter = normalized.indexOf(":");
+  if (delimiter < 0) {
+    return { mode: "AUTO" as const, value: normalized };
+  }
+
+  const modeRaw = normalized.slice(0, delimiter).trim().toUpperCase();
+  const value = normalizeOptional(normalized.slice(delimiter + 1));
+  if (!value) return null;
+
+  if (modeRaw === "NIT") return { mode: "NIT" as const, value };
+  if (modeRaw === "CODE" || modeRaw === "CLIENT_CODE") return { mode: "CODE" as const, value };
+  if (modeRaw === "ID") return { mode: "ID" as const, value };
+  return { mode: "AUTO" as const, value: normalized };
+}
+
+async function ensureCompanyCoreForAutoCreate(input: {
+  tenantId: string;
+  clientProfileId: string;
+  legalName: string;
+  tradeName: string;
+  taxId: string | null;
+}) {
+  await upsertCompanyCore({
+    tenantId: input.tenantId,
+    clientProfileId: input.clientProfileId,
+    kind: CompanyKind.COMPANY,
+    legalName: input.legalName,
+    tradeName: input.tradeName,
+    taxId: input.taxId,
+    website: null,
+    billingEmail: null,
+    billingPhone: null,
+    notes: null,
+    metadata: {}
+  });
+}
+
+async function resolveCompanyForLink(input: {
+  tenantId: string;
+  tokenRaw: string;
+  cache: Map<string, ResolvedCompanyLookup | null>;
+  allowAutocreate: boolean;
+  defaultStatusId: string | null;
+}) {
+  const token = parseCompanyLinkToken(input.tokenRaw);
+  if (!token) return null;
+
+  const cacheKey = `${input.tenantId}:${token.mode}:${token.value}`.toLowerCase();
+  if (input.cache.has(cacheKey)) return input.cache.get(cacheKey) ?? null;
+
+  const baseSelect = {
+    id: true,
+    companyName: true,
+    tradeName: true,
+    nit: true,
+    clientCode: true
+  } as const;
+
+  let existing =
+    token.mode === "ID"
+      ? await prisma.clientProfile.findFirst({
+          where: {
+            id: token.value,
+            tenantId: input.tenantId,
+            type: ClientProfileType.COMPANY,
+            deletedAt: null
+          },
+          select: baseSelect
+        })
+      : null;
+
+  if (!existing && token.mode === "NIT") {
+    existing = await prisma.clientProfile.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        type: ClientProfileType.COMPANY,
+        nit: token.value,
+        deletedAt: null
+      },
+      select: baseSelect
+    });
+  }
+
+  if (!existing && token.mode === "CODE") {
+    existing = await prisma.clientProfile.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        type: ClientProfileType.COMPANY,
+        clientCode: token.value.toUpperCase(),
+        deletedAt: null
+      },
+      select: baseSelect
+    });
+  }
+
+  if (!existing && token.mode === "AUTO") {
+    existing = await prisma.clientProfile.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        type: ClientProfileType.COMPANY,
+        deletedAt: null,
+        OR: [{ nit: token.value }, { clientCode: token.value.toUpperCase() }]
+      },
+      select: baseSelect
+    });
+  }
+
+  if (existing) {
+    const found: ResolvedCompanyLookup = {
+      id: existing.id,
+      label: existing.companyName || existing.tradeName || existing.clientCode || existing.nit || token.value,
+      created: false
+    };
+    input.cache.set(cacheKey, found);
+    return found;
+  }
+
+  if (!input.allowAutocreate) {
+    input.cache.set(cacheKey, null);
+    return null;
+  }
+
+  const safeBaseName = token.mode === "AUTO" ? token.value : token.value.replace(/[^a-zA-Z0-9\- ]+/g, " ").trim();
+  const legalName = safeBaseName ? `Empresa ${safeBaseName}` : "Empresa importada";
+  const tradeName = legalName;
+  const taxId = token.mode === "NIT" ? token.value : null;
+
+  const created = await prisma.$transaction(async (tx) => {
+    const reserved = await reserveNextClientCodeTx(tx, {
+      tenantId: input.tenantId,
+      clientType: ClientProfileType.COMPANY
+    });
+
+    const profile = await tx.clientProfile.create({
+      data: {
+        tenantId: input.tenantId,
+        clientCode: reserved.code,
+        type: ClientProfileType.COMPANY,
+        companyName: legalName,
+        tradeName,
+        nit: taxId,
+        statusId: input.defaultStatusId,
+        serviceSegments: [ClientServiceSegment.COMPANY]
+      },
+      select: {
+        id: true,
+        companyName: true,
+        tradeName: true,
+        clientCode: true,
+        nit: true
+      }
+    });
+
+    return profile;
+  });
+
+  await ensureCompanyCoreForAutoCreate({
+    tenantId: input.tenantId,
+    clientProfileId: created.id,
+    legalName: created.companyName || legalName,
+    tradeName: created.tradeName || tradeName,
+    taxId: created.nit
+  });
+
+  const autoCreated: ResolvedCompanyLookup = {
+    id: created.id,
+    label: created.companyName || created.tradeName || created.clientCode || created.nit || legalName,
+    created: true
+  };
+  input.cache.set(cacheKey, autoCreated);
+  return autoCreated;
+}
+
+function normalizeCompanyLinkPrimary(links: CompanyLinkDraft[]) {
+  if (!links.length) return links;
+  const activeRows = links
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.isActive);
+  if (!activeRows.length) return links.map((row) => ({ ...row, isPrimary: false }));
+  const keepPrimary = activeRows.find(({ row }) => row.isPrimary)?.index ?? activeRows[0]!.index;
+  return links.map((row, index) => ({
+    ...row,
+    isPrimary: row.isActive ? index === keepPrimary : false
+  }));
+}
+
+async function upsertPersonCompanyLinksAndAffiliations(input: {
+  tenantId: string;
+  personClientId: string;
+  links: CompanyLinkDraft[];
+}) {
+  if (!input.links.length) return 0;
+  const now = new Date();
+  const normalized = normalizeCompanyLinkPrimary(input.links);
+  let linked = 0;
+
+  for (const row of normalized) {
+    await prisma.personCompanyLink.upsert({
+      where: {
+        personId_companyId: {
+          personId: input.personClientId,
+          companyId: row.companyId
+        }
+      },
+      update: {
+        tenantId: input.tenantId,
+        relationType: row.relationType,
+        isPrimary: row.isPrimary,
+        isActive: row.isActive,
+        startAt: now,
+        endAt: row.isActive ? null : now,
+        deletedAt: row.isActive ? null : now,
+        updatedAt: now
+      },
+      create: {
+        tenantId: input.tenantId,
+        personId: input.personClientId,
+        companyId: row.companyId,
+        relationType: row.relationType,
+        isPrimary: row.isPrimary,
+        isActive: row.isActive,
+        startAt: now,
+        endAt: row.isActive ? null : now,
+        deletedAt: row.isActive ? null : now
+      }
+    });
+
+    const existingAffiliation = await prisma.clientAffiliation.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        personClientId: input.personClientId,
+        entityType: ClientProfileType.COMPANY,
+        entityClientId: row.companyId,
+        deletedAt: null
+      },
+      select: { id: true }
+    });
+
+    const affiliationPayload = {
+      role: row.relationType,
+      notes: null,
+      status: row.isActive ? ClientAffiliationStatus.ACTIVE : ClientAffiliationStatus.INACTIVE,
+      lastVerifiedAt: row.isActive ? now : null,
+      payerType: ClientAffiliationPayerType.PERSON,
+      payerClientId: null,
+      isPrimaryPayer: false
+    } as const;
+
+    if (existingAffiliation?.id) {
+      await prisma.clientAffiliation.update({
+        where: { id: existingAffiliation.id },
+        data: affiliationPayload
+      });
+    } else {
+      await prisma.clientAffiliation.create({
+        data: {
+          tenantId: input.tenantId,
+          personClientId: input.personClientId,
+          entityType: ClientProfileType.COMPANY,
+          entityClientId: row.companyId,
+          ...affiliationPayload
+        }
+      });
+    }
+
+    linked += 1;
+  }
+
+  return linked;
 }
 
 function buildRowLabel(type: ClientProfileType, values: Record<string, string>) {
@@ -823,21 +1117,25 @@ async function processRows(params: {
   rows: ParsedRow[];
   mapping: Record<string, string>;
   dedupeMode: "skip" | "update";
+  allowCompanyAutocreate: boolean;
 }): Promise<ProcessResult> {
-  const { tenantId, type, rows, mapping, dedupeMode } = params;
+  const { tenantId, type, rows, mapping, dedupeMode, allowCompanyAutocreate } = params;
   const defaultStatusId = await getDefaultStatusId();
 
   let processedRows = 0;
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  let linked = 0;
   const errors: Array<{ row: number; message: string }> = [];
   const duplicates: DuplicateConflict[] = [];
+  const personClientIds: string[] = [];
 
   const catalogCache = new Map<string, string>();
   const acquisitionSourceCache = new Map<string, string>();
   const acquisitionDetailCache = new Map<string, string>();
   const countryCache = new Map<string, { id: string; name: string; iso2: string } | null>();
+  const companyLookupCache = new Map<string, ResolvedCompanyLookup | null>();
 
   for (const row of rows) {
     try {
@@ -984,6 +1282,47 @@ async function processRows(params: {
         }
 
         await upsertImportNote(clientId, notes);
+
+        const companyKeyTokens = splitBulkCsvList(values.company_keys);
+        const companyRoleTokens = splitBulkCsvList(values.company_roles);
+        if (companyKeyTokens.length > 0) {
+          const links: CompanyLinkDraft[] = [];
+          const seenCompanyIds = new Set<string>();
+
+          for (let index = 0; index < companyKeyTokens.length; index += 1) {
+            const keyToken = companyKeyTokens[index];
+            const roleToken = companyRoleTokens[index] ?? null;
+            const resolvedCompany = await resolveCompanyForLink({
+              tenantId,
+              tokenRaw: keyToken,
+              cache: companyLookupCache,
+              allowAutocreate: allowCompanyAutocreate,
+              defaultStatusId
+            });
+            if (!resolvedCompany) {
+              throw new Error(
+                `Empresa no encontrada para vínculo (${keyToken}). Verifica NIT/CODE o habilita autocreate como administrador.`
+              );
+            }
+            if (seenCompanyIds.has(resolvedCompany.id)) continue;
+            seenCompanyIds.add(resolvedCompany.id);
+
+            links.push({
+              companyId: resolvedCompany.id,
+              relationType: normalizeOptional(roleToken),
+              isPrimary: index === 0,
+              isActive: true
+            });
+          }
+
+          linked += await upsertPersonCompanyLinksAndAffiliations({
+            tenantId,
+            personClientId: clientId,
+            links
+          });
+        }
+
+        personClientIds.push(clientId);
       }
 
       if (type === ClientProfileType.COMPANY) {
@@ -1459,11 +1798,13 @@ async function processRows(params: {
     updated,
     skipped,
     errors: errors.length,
+    linked,
     errorsCsv: buildErrorCsv(errors),
     errorsPreview: errors.slice(0, 25),
     duplicates: duplicates.length,
     duplicatesCsv: buildDuplicatesCsv(duplicates),
-    duplicatesPreview: duplicates.slice(0, 50)
+    duplicatesPreview: duplicates.slice(0, 50),
+    personClientIds: Array.from(new Set(personClientIds))
   };
 }
 
@@ -1578,9 +1919,26 @@ export async function POST(req: NextRequest) {
   const dedupeModeRaw = String(formData.get("dedupeMode") || "skip").toLowerCase();
   const allowUpdate = canProcessClientImportUpdate(auth.user) && dedupeModeRaw === "update";
   const dedupeMode: "skip" | "update" = allowUpdate ? "update" : "skip";
+  const autocreateCompaniesRaw = String(formData.get("autocreateCompanies") || "").trim().toLowerCase();
+  const autocreateCompaniesRequested =
+    autocreateCompaniesRaw === "1" || autocreateCompaniesRaw === "true" || autocreateCompaniesRaw === "yes";
+  if (autocreateCompaniesRequested && !isAdmin(auth.user)) {
+    return NextResponse.json(
+      { ok: false, error: "No autorizado para autocrear empresas desde importación." },
+      { status: 403 }
+    );
+  }
+  const allowCompanyAutocreate = autocreateCompaniesRequested && isAdmin(auth.user);
 
   try {
-    const result = await processRows({ tenantId, type, rows: parsed.rows, mapping, dedupeMode });
+    const result = await processRows({
+      tenantId,
+      type,
+      rows: parsed.rows,
+      mapping,
+      dedupeMode,
+      allowCompanyAutocreate
+    });
     return NextResponse.json({
       ok: true,
       summary: {
@@ -1590,12 +1948,14 @@ export async function POST(req: NextRequest) {
         updated: result.updated,
         skipped: result.skipped,
         errors: result.errors,
-        duplicates: result.duplicates
+        duplicates: result.duplicates,
+        linked: result.linked
       },
       errorsCsv: result.errorsCsv,
       errorsPreview: result.errorsPreview,
       duplicatesCsv: result.duplicatesCsv,
       duplicatesPreview: result.duplicatesPreview,
+      personClientIds: result.personClientIds,
       dedupeMode,
       ignoredColumns
     });

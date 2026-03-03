@@ -56,6 +56,24 @@ const PERSON_COLUMNS: ClientBulkColumn[] = [
   col({ key: "service_segments", headerDisplay: "SegmentosServicio", required: false, example: "PARTICULAR", target: "clientProfile.serviceSegments", parser: "list", aliases: ["service_segments", "segmentos_servicio"] }),
   col({ key: "acquisition_source", headerDisplay: "CanalAdquisicion", required: false, example: "Referido", target: "clientProfile.acquisitionSource", parser: "string", aliases: ["acquisition_source", "source", "canal_adquisicion"] }),
   col({ key: "acquisition_detail", headerDisplay: "DetalleAdquisicion", required: false, example: "Medico tratante", target: "clientProfile.acquisitionDetailOption", parser: "string", aliases: ["acquisition_detail", "source_detail", "detalle_adquisicion"] }),
+  col({
+    key: "company_keys",
+    headerDisplay: "EmpresasVinculadas",
+    required: false,
+    example: "NIT:1234567-8;CODE:E001",
+    target: "personCompanyLink.companyClientId[]",
+    parser: "list",
+    aliases: ["company_keys", "empresas_vinculadas", "empresa_keys", "companies"]
+  }),
+  col({
+    key: "company_roles",
+    headerDisplay: "RolesEmpresa",
+    required: false,
+    example: "Colaborador;Supervisor",
+    target: "personCompanyLink.relationType[]",
+    parser: "list",
+    aliases: ["company_roles", "roles_empresa", "empresa_roles"]
+  }),
   col({ key: "notes", headerDisplay: "Notas", required: false, example: "Cliente con expediente previo.", target: "clientNote/admin", parser: "string", aliases: ["notes", "nota", "observaciones"] })
 ];
 
@@ -271,7 +289,7 @@ export function extractClientBulkRowValues(
 
 export function splitBulkCsvList(raw: string) {
   return raw
-    .split(",")
+    .split(/[;,|]/)
     .map((item) => item.trim())
     .filter(Boolean);
 }

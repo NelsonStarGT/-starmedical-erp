@@ -47,6 +47,7 @@ type ProcessResponse = {
     skipped: number;
     errors: number;
     duplicates: number;
+    linked?: number;
   };
   errorsCsv: string;
   errorsPreview: Array<{ row: number; message: string }>;
@@ -54,6 +55,7 @@ type ProcessResponse = {
   duplicatesPreview: DuplicateConflict[];
   dedupeMode: "skip" | "update";
   ignoredColumns: string[];
+  personClientIds?: string[];
 };
 
 type ApiErrorResponse = {
@@ -415,7 +417,7 @@ export default function ClientCsvImportButton({
               ) : null}
 
               <p className="text-sm text-slate-800">
-                Total: <span className="font-semibold">{result.summary.totalRows}</span> · Procesadas: <span className="font-semibold">{result.summary.processedRows}</span> · Creadas: <span className="font-semibold text-emerald-700">{result.summary.created}</span> · Actualizadas: <span className="font-semibold text-[#2e75ba]">{result.summary.updated}</span> · SKIP: <span className="font-semibold text-amber-700">{result.summary.skipped}</span> · Errores: <span className="font-semibold text-rose-700">{result.summary.errors}</span>
+                Total: <span className="font-semibold">{result.summary.totalRows}</span> · Procesadas: <span className="font-semibold">{result.summary.processedRows}</span> · Creadas: <span className="font-semibold text-emerald-700">{result.summary.created}</span> · Actualizadas: <span className="font-semibold text-[#2e75ba]">{result.summary.updated}</span> · Vinculadas: <span className="font-semibold text-[#2e75ba]">{result.summary.linked ?? 0}</span> · SKIP: <span className="font-semibold text-amber-700">{result.summary.skipped}</span> · Errores: <span className="font-semibold text-rose-700">{result.summary.errors}</span>
               </p>
 
               <div className="flex flex-wrap items-center gap-2">

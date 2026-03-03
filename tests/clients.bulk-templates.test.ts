@@ -36,6 +36,8 @@ const EXPECTED_HEADERS: Record<ClientProfileType, string[]> = {
     "SegmentosServicio",
     "CanalAdquisicion",
     "DetalleAdquisicion",
+    "EmpresasVinculadas",
+    "RolesEmpresa",
     "Notas"
   ],
   [ClientProfileType.COMPANY]: [
