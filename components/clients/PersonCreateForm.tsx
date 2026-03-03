@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { type HTMLAttributes, type HTMLInputTypeAttribute, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -42,7 +42,6 @@ import {
   requiresAcquisitionOtherNote,
   validateAcquisitionConditionalFields
 } from "@/lib/clients/acquisition";
-import { CLIENT_TYPE_LABELS } from "@/lib/clients/constants";
 import {
   CLIENTS_DATE_FORMAT_DEFAULT,
   formatIsoDateForClients,
@@ -153,9 +152,11 @@ type FormState = {
 type FieldErrors = Partial<Record<keyof FormState, string>>;
 
 type AffiliationDraft = {
-  entityType: ClientProfileType;
   entityClientId: string;
   entityLabel: string;
+  role: string;
+  isPrimary: boolean;
+  isActive: boolean;
 };
 
 type IdentityStatus = {
@@ -235,17 +236,16 @@ const step1Schema = z.object({
   phone: z.string().trim().min(1, "Teléfono requerido.")
 });
 
-const ENTITY_OPTIONS: Array<{ value: ClientProfileType; label: string }> = [
-  { value: ClientProfileType.COMPANY, label: "Empresa" },
-  { value: ClientProfileType.INSTITUTION, label: "Institución" },
-  { value: ClientProfileType.INSURER, label: "Aseguradora" }
-];
-
-const AFFILIATION_TYPE_BY_SEGMENT: Partial<Record<ClientServiceSegment, ClientProfileType>> = {
-  COMPANY: ClientProfileType.COMPANY,
-  INSTITUTION: ClientProfileType.INSTITUTION,
-  INSURER: ClientProfileType.INSURER
-};
+const COMPANY_LINK_ROLE_OPTIONS = [
+  "Colaborador",
+  "Empleado",
+  "Supervisor",
+  "Encargado",
+  "Gerencia",
+  "Operativo",
+  "Administrativo",
+  "Otro"
+] as const;
 
 const CALENDAR_MONTHS_ES = [
   "Enero",
@@ -364,9 +364,11 @@ function calculateAgeYears(birthDateRaw: string) {
 }
 
 const DEFAULT_AFFILIATION: AffiliationDraft = {
-  entityType: ClientProfileType.COMPANY,
   entityClientId: "",
-  entityLabel: ""
+  entityLabel: "",
+  role: "",
+  isPrimary: false,
+  isActive: true
 };
 
 const BLOOD_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -628,14 +630,7 @@ export default function PersonCreateForm({
   const hasResidenceCountrySelection = Boolean(!form.residenceSameAsIdentity && form.residenceCountryId);
   const hasResidenceDetails = hasResidenceGeoSelection || hasResidenceAddress || hasResidenceCountrySelection;
   const hasResidenceIntent = form.hasResidenceRecord || hasResidenceDetails;
-  const affiliationEntityOptions = useMemo(() => {
-    const allowed = form.serviceSegments
-      .map((segment) => AFFILIATION_TYPE_BY_SEGMENT[segment])
-      .filter((segment): segment is ClientProfileType => Boolean(segment));
-    const allowedSet = new Set(allowed);
-    if (!allowedSet.size) return ENTITY_OPTIONS;
-    return ENTITY_OPTIONS.filter((option) => allowedSet.has(option.value));
-  }, [form.serviceSegments]);
+  const canLinkCompanies = form.serviceSegments.includes("COMPANY");
 
   const upsertPrimaryPhone = useCallback((patch: Partial<ClientContactsDraft["phones"][number]>) => {
     setContacts((prev) => {
@@ -994,17 +989,6 @@ export default function PersonCreateForm({
   }, [sourceNeedsOtherNote, form.acquisitionOtherNote]);
 
   useEffect(() => {
-    if (!affiliationEntityOptions.length) return;
-    if (affiliationEntityOptions.some((option) => option.value === affDraft.entityType)) return;
-    setAffDraft((prev) => ({
-      ...prev,
-      entityType: affiliationEntityOptions[0].value,
-      entityClientId: "",
-      entityLabel: ""
-    }));
-  }, [affDraft.entityType, affiliationEntityOptions]);
-
-  useEffect(() => {
     return () => {
       if (profilePhoto?.previewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(profilePhoto.previewUrl);
@@ -1133,21 +1117,76 @@ export default function PersonCreateForm({
       return;
     }
 
-    const duplicate = affiliations.some(
-      (item) => item.entityType === affDraft.entityType && item.entityClientId === affDraft.entityClientId
-    );
+    const duplicate = affiliations.some((item) => item.entityClientId === affDraft.entityClientId);
     if (duplicate) {
-      setError("Esta afiliación ya fue agregada.");
+      setError("Esta empresa ya fue vinculada.");
       return;
     }
 
-    setAffiliations((prev) => [...prev, affDraft]);
-    setAffDraft(DEFAULT_AFFILIATION);
+    setAffiliations((prev) => {
+      const next = [...prev, affDraft];
+      const activeIndexes = next
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.isActive);
+      const keepPrimary =
+        activeIndexes.find(({ item }) => item.isPrimary)?.index ??
+        activeIndexes[0]?.index ??
+        -1;
+      return next.map((item, index) => ({
+        ...item,
+        isPrimary: item.isActive ? index === keepPrimary : false
+      }));
+    });
+    setAffDraft((prev) => ({
+      ...DEFAULT_AFFILIATION,
+      role: prev.role
+    }));
     setError(null);
   }
 
   function removeAffiliation(index: number) {
-    setAffiliations((prev) => prev.filter((_, i) => i !== index));
+    const selected = affiliations[index];
+    if (!selected) return;
+    const confirmed = window.confirm(`¿Quitar vínculo con ${selected.entityLabel || "la empresa"}?`);
+    if (!confirmed) return;
+
+    setAffiliations((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      const activeIndexes = next
+        .map((item, idx) => ({ item, idx }))
+        .filter(({ item }) => item.isActive);
+      const keepPrimary =
+        activeIndexes.find(({ item }) => item.isPrimary)?.idx ??
+        activeIndexes[0]?.idx ??
+        -1;
+      return next.map((item, idx) => ({
+        ...item,
+        isPrimary: item.isActive ? idx === keepPrimary : false
+      }));
+    });
+  }
+
+  function updateAffiliation(index: number, patch: Partial<AffiliationDraft>) {
+    setAffiliations((prev) => {
+      const next = prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item));
+      if (!next.length) return next;
+
+      const activeIndexes = next
+        .map((item, idx) => ({ item, idx }))
+        .filter(({ item }) => item.isActive);
+      if (!activeIndexes.length) {
+        return next.map((item) => ({ ...item, isPrimary: false }));
+      }
+
+      const requestedPrimary = patch.isPrimary ? index : null;
+      const currentPrimary = activeIndexes.find(({ item }) => item.isPrimary)?.idx ?? null;
+      const keepPrimary = requestedPrimary ?? currentPrimary ?? activeIndexes[0]!.idx;
+
+      return next.map((item, idx) => ({
+        ...item,
+        isPrimary: item.isActive ? idx === keepPrimary : false
+      }));
+    });
   }
 
   function toggleServiceSegment(segment: ClientServiceSegment) {
@@ -1442,8 +1481,17 @@ export default function PersonCreateForm({
             phone: item.phone || undefined
           })),
           affiliations: affiliations.map((item) => ({
-            entityType: item.entityType,
-            entityClientId: item.entityClientId
+            entityType: ClientProfileType.COMPANY,
+            entityClientId: item.entityClientId,
+            role: item.role || undefined,
+            status: item.isActive ? "ACTIVE" : "INACTIVE",
+            isPrimaryPayer: item.isPrimary
+          })),
+          companyLinks: affiliations.map((item) => ({
+            companyClientId: item.entityClientId,
+            relationType: item.role || undefined,
+            isPrimary: item.isPrimary,
+            isActive: item.isActive
           }))
         });
 
@@ -1472,7 +1520,11 @@ export default function PersonCreateForm({
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4 pb-24">
+    <form
+      autoComplete="on"
+      onSubmit={(event) => event.preventDefault()}
+      className="mx-auto w-full max-w-6xl space-y-4 pb-24"
+    >
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
@@ -1564,17 +1616,24 @@ export default function PersonCreateForm({
                   onChange={(firstName) => setForm((prev) => ({ ...prev, firstName }))}
                   placeholder="Primer nombre *"
                   error={errors.firstName}
+                  name="firstName"
+                  autoComplete="given-name"
+                  type="text"
                   bold
                 />
                 <InputField
                   value={form.middleName}
                   onChange={(middleName) => setForm((prev) => ({ ...prev, middleName }))}
                   placeholder="Segundo nombre (opcional)"
+                  name="middleName"
+                  autoComplete="additional-name"
                 />
                 <InputField
                   value={form.thirdName}
                   onChange={(thirdName) => setForm((prev) => ({ ...prev, thirdName }))}
                   placeholder="Tercer nombre (opcional)"
+                  name="thirdName"
+                  autoComplete="additional-name"
                 />
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -1583,17 +1642,23 @@ export default function PersonCreateForm({
                   onChange={(lastName) => setForm((prev) => ({ ...prev, lastName }))}
                   placeholder="Primer apellido *"
                   error={errors.lastName}
+                  name="lastName"
+                  autoComplete="family-name"
                   bold
                 />
                 <InputField
                   value={form.secondLastName}
                   onChange={(secondLastName) => setForm((prev) => ({ ...prev, secondLastName }))}
                   placeholder="Segundo apellido (opcional)"
+                  name="secondLastName"
+                  autoComplete="family-name"
                 />
                 <InputField
                   value={form.thirdLastName}
                   onChange={(thirdLastName) => setForm((prev) => ({ ...prev, thirdLastName }))}
                   placeholder="Apellido de casado/a (opcional)"
+                  name="thirdLastName"
+                  autoComplete="family-name"
                 />
               </div>
             </div>
@@ -1674,6 +1739,10 @@ export default function PersonCreateForm({
                 <IconInput
                   icon={<IdCard size={16} className="text-slate-400" />}
                   value={form.identityDocumentValue}
+                  name="documentNumber"
+                  autoComplete="off"
+                  type="text"
+                  inputMode="numeric"
                   onChange={(identityDocumentValue) => {
                     setForm((prev) => ({ ...prev, identityDocumentValue }));
                     setErrors((prev) => ({ ...prev, identityDocumentValue: undefined }));
@@ -1791,6 +1860,10 @@ export default function PersonCreateForm({
                   <PhoneInput
                     label=""
                     value={primaryPhoneRow?.value ?? ""}
+                    name="phone"
+                    autoComplete="tel"
+                    type="tel"
+                    inputMode="tel"
                     preferredGeoCountryId={form.identityCountryId || form.geoCountryId || null}
                     localOnly
                     onChange={(nextValue, meta) => {
@@ -1920,6 +1993,8 @@ export default function PersonCreateForm({
               disabled={isPending}
               requirePhone={false}
               showPhones={false}
+              emailInputName="email"
+              emailInputAutoComplete="email"
               title=""
               subtitle=""
               className="border-none bg-transparent p-0 shadow-none"
@@ -2067,6 +2142,8 @@ export default function PersonCreateForm({
               <BirthDateField
                 label="Fecha de nacimiento"
                 value={form.birthDate}
+                name="birthDate"
+                autoComplete="bday"
                 dateFormat={clientsDateFormat}
                 onChange={(birthDate) => {
                   setForm((prev) => ({ ...prev, birthDate }));
@@ -2197,6 +2274,8 @@ export default function PersonCreateForm({
                 value={form.birthCity}
                 onChange={(birthCity) => setForm((prev) => ({ ...prev, birthCity }))}
                 placeholder="Ciudad / poblado (opcional)"
+                name="city"
+                autoComplete="address-level2"
               />
             </div>
 
@@ -2323,6 +2402,11 @@ export default function PersonCreateForm({
               disabled={isPending}
               title="Ubicación de residencia"
               subtitle="País, departamento y municipio."
+              autofillFieldNames={{
+                country: "country",
+                department: "department",
+                city: "city"
+              }}
             />
 
             <div className="space-y-1">
@@ -2332,6 +2416,9 @@ export default function PersonCreateForm({
               <IconInput
                 icon={<MapPin size={16} className="text-slate-400" />}
                 value={form.addressGeneral}
+                name="address"
+                autoComplete="street-address"
+                type="text"
                 onChange={(addressGeneral) => {
                   setForm((prev) => ({
                     ...prev,
@@ -2493,49 +2580,18 @@ export default function PersonCreateForm({
           {step === 4 ? (
             <CollapsibleSection
               id="person-section-affiliations"
-              title={`Afiliaciones${affiliations.length ? ` (${affiliations.length})` : ""}`}
-              subtitle="Empresa, institución o aseguradora."
+              title={`Vinculación empresarial${affiliations.length ? ` (${affiliations.length})` : ""}`}
+              subtitle="Vincula la persona con una o más empresas (B2B)."
               open={openSections.affiliations}
               onToggle={() => toggleSection("affiliations")}
             >
             <div className="grid gap-2">
-              {affiliationEntityOptions.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  {affiliationEntityOptions.map((option) => {
-                    const active = affDraft.entityType === option.value;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() =>
-                          setAffDraft({
-                            entityType: option.value,
-                            entityClientId: "",
-                            entityLabel: ""
-                          })
-                        }
-                        disabled={isPending}
-                        className={cn(
-                          "rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
-                          active
-                            ? "border-[#4aa59c] bg-[#4aa59c]/12 text-[#2e75ba]"
-                            : "border-slate-200 bg-white text-slate-600 hover:border-[#4aadf5]/50",
-                          isPending && "cursor-not-allowed opacity-60"
-                        )}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-
               <ClientProfileLookup
-                label={`Buscar ${CLIENT_TYPE_LABELS[affDraft.entityType]?.toLowerCase() ?? "entidad"}`}
-                types={[affDraft.entityType]}
+                label="Empresa (nombre, NIT o código)"
+                types={[ClientProfileType.COMPANY]}
                 value={
                   affDraft.entityClientId
-                    ? { id: affDraft.entityClientId, type: affDraft.entityType, label: affDraft.entityLabel }
+                    ? { id: affDraft.entityClientId, type: ClientProfileType.COMPANY, label: affDraft.entityLabel }
                     : null
                 }
                 onChange={(item) => {
@@ -2546,10 +2602,65 @@ export default function PersonCreateForm({
                   }));
                 }}
                 disabled={isPending}
-                placeholder="Escribe para buscar..."
+                placeholder="Buscar empresa existente..."
               />
 
-              <div className="flex justify-end">
+              <div className="grid gap-2 md:grid-cols-3">
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-slate-600">Rol / tipo de vínculo</span>
+                  <input
+                    value={affDraft.role}
+                    onChange={(event) => setAffDraft((prev) => ({ ...prev, role: event.target.value }))}
+                    list="person-company-link-roles"
+                    placeholder="Ej. Empleado, supervisor"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25"
+                  />
+                  <datalist id="person-company-link-roles">
+                    {COMPANY_LINK_ROLE_OPTIONS.map((option) => (
+                      <option key={option} value={option} />
+                    ))}
+                  </datalist>
+                </label>
+                <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3">
+                  <input
+                    type="checkbox"
+                    checked={affDraft.isActive}
+                    onChange={(event) =>
+                      setAffDraft((prev) => ({
+                        ...prev,
+                        isActive: event.target.checked,
+                        isPrimary: event.target.checked ? prev.isPrimary : false
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-[#4aa59c] focus:ring-[#4aa59c]"
+                  />
+                  <span className="text-xs font-semibold text-slate-700">Vínculo activo</span>
+                </label>
+                <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3">
+                  <input
+                    type="checkbox"
+                    checked={affDraft.isPrimary}
+                    onChange={(event) =>
+                      setAffDraft((prev) => ({
+                        ...prev,
+                        isPrimary: event.target.checked,
+                        isActive: event.target.checked ? true : prev.isActive
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-[#4aa59c] focus:ring-[#4aa59c]"
+                  />
+                  <span className="text-xs font-semibold text-slate-700">Principal</span>
+                </label>
+              </div>
+
+              <div className="flex justify-between">
+                {!canLinkCompanies ? (
+                  <p className="text-xs text-amber-700">
+                    Activa el segmento <span className="font-semibold">Empresa</span> para mantener coherencia operativa B2B.
+                  </p>
+                ) : (
+                  <span />
+                )}
                 <button
                   type="button"
                   onClick={addAffiliation}
@@ -2568,24 +2679,54 @@ export default function PersonCreateForm({
             {affiliations.length > 0 ? (
               <div className="mt-2 space-y-2">
                 {affiliations.map((item, index) => (
-                  <div key={`${item.entityType}-${item.entityClientId}`} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{item.entityLabel}</p>
-                      <p className="text-xs text-slate-500">{CLIENT_TYPE_LABELS[item.entityType]}</p>
+                  <div key={`${item.entityClientId}-${index}`} className="space-y-2 rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{item.entityLabel}</p>
+                        <p className="text-xs text-slate-500">Empresa</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeAffiliation(index)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700"
+                      >
+                        <Trash2 size={13} />
+                        Quitar
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => removeAffiliation(index)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700"
-                    >
-                      <Trash2 size={13} />
-                      Quitar
-                    </button>
+                    <div className="grid gap-2 md:grid-cols-3">
+                      <input
+                        value={item.role}
+                        onChange={(event) => updateAffiliation(index, { role: event.target.value })}
+                        placeholder="Rol / vínculo"
+                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25"
+                      />
+                      <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3">
+                        <input
+                          type="checkbox"
+                          checked={item.isActive}
+                          onChange={(event) => updateAffiliation(index, { isActive: event.target.checked })}
+                          className="h-4 w-4 rounded border-slate-300 text-[#4aa59c] focus:ring-[#4aa59c]"
+                        />
+                        <span className="text-xs font-semibold text-slate-700">Activo</span>
+                      </label>
+                      <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3">
+                        <input
+                          type="checkbox"
+                          checked={item.isPrimary}
+                          onChange={(event) => updateAffiliation(index, { isPrimary: event.target.checked })}
+                          className="h-4 w-4 rounded border-slate-300 text-[#4aa59c] focus:ring-[#4aa59c]"
+                        />
+                        <span className="text-xs font-semibold text-slate-700">Principal</span>
+                      </label>
+                    </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="mt-2 rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2 text-xs text-slate-500">Sin afiliaciones todavía.</p>
+              <p className="mt-2 rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2 text-xs text-slate-500">
+                Sin empresas vinculadas todavía.
+              </p>
             )}
             </CollapsibleSection>
           ) : null}
@@ -2655,7 +2796,7 @@ export default function PersonCreateForm({
       <p className="text-xs text-slate-500">
         ¿Ya existe este cliente? Usa <Link href="/admin/clientes/personas" className="font-semibold text-[#2e75ba]">Personas</Link> para buscar y abrir el perfil.
       </p>
-    </div>
+    </form>
   );
 }
 
@@ -2761,6 +2902,8 @@ function buildCalendarCells(monthDate: Date) {
 function BirthDateField({
   label,
   value,
+  name,
+  autoComplete,
   dateFormat,
   onChange,
   onErrorChange,
@@ -2769,6 +2912,8 @@ function BirthDateField({
 }: {
   label: string;
   value: string;
+  name?: string;
+  autoComplete?: string;
   dateFormat: ClientsDateFormat;
   onChange: (value: string) => void;
   onErrorChange?: (error?: string) => void;
@@ -2895,6 +3040,7 @@ function BirthDateField({
       <p className="text-xs font-semibold text-slate-500">{label}</p>
       <div className="relative">
         <input
+          name={name}
           value={inputValue}
           onChange={(event) => {
             const masked = maskBirthDateInput(event.target.value, dateFormat);
@@ -2926,6 +3072,7 @@ function BirthDateField({
             }
           }}
           placeholder={getClientsDatePlaceholder(dateFormat)}
+          autoComplete={autoComplete}
           inputMode="numeric"
           maxLength={10}
           disabled={disabled}
@@ -3059,20 +3206,32 @@ function InputField({
   onChange,
   placeholder,
   error,
-  bold
+  bold,
+  name,
+  autoComplete,
+  type = "text",
+  inputMode
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   error?: string;
   bold?: boolean;
+  name?: string;
+  autoComplete?: string;
+  type?: HTMLInputTypeAttribute;
+  inputMode?: HTMLAttributes<HTMLInputElement>["inputMode"];
 }) {
   return (
     <div>
       <input
+        name={name}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        autoComplete={autoComplete}
+        type={type}
+        inputMode={inputMode}
         className={cn(
           "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/25",
           bold && "font-semibold",
@@ -3090,7 +3249,11 @@ function IconInput({
   onChange,
   placeholder,
   onBlur,
-  error
+  error,
+  name,
+  autoComplete,
+  type = "text",
+  inputMode
 }: {
   icon: ReactNode;
   value: string;
@@ -3098,6 +3261,10 @@ function IconInput({
   placeholder: string;
   onBlur?: () => void;
   error?: string;
+  name?: string;
+  autoComplete?: string;
+  type?: HTMLInputTypeAttribute;
+  inputMode?: HTMLAttributes<HTMLInputElement>["inputMode"];
 }) {
   return (
     <div>
@@ -3109,10 +3276,14 @@ function IconInput({
       >
         {icon}
         <input
+          name={name}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           placeholder={placeholder}
+          autoComplete={autoComplete}
+          type={type}
+          inputMode={inputMode}
           className="w-full bg-transparent text-sm text-slate-700 outline-none"
         />
       </div>
