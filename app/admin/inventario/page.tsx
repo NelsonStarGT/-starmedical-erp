@@ -6,6 +6,7 @@ import { KpiCard } from "@/components/inventario/KpiCard";
 import { RankingList } from "@/components/inventario/RankingList";
 import { AlertList } from "@/components/inventario/AlertList";
 import { getSummaryKPIs, getProductKPIs, getServiceKPIs, getComboKPIs, getOperativeKPIs, type TimeRange } from "@/lib/inventory/kpis";
+import type { Combo, Producto, Servicio } from "@/lib/types/inventario";
 
 const rangeOptions: { label: string; value: TimeRange }[] = [
   { label: "Hoy", value: "hoy" },
@@ -16,18 +17,66 @@ const rangeOptions: { label: string; value: TimeRange }[] = [
 
 export default function InventarioDashboardPage() {
   const [range, setRange] = useState<TimeRange>("30d");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [servicios, setServicios] = useState<Servicio[]>([]);
+  const [combos, setCombos] = useState<Combo[]>([]);
 
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 350);
-    return () => clearTimeout(t);
-  }, [range]);
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [productosRes, serviciosRes, combosRes] = await Promise.all([
+          fetch("/api/inventario/productos", { cache: "no-store", headers: { "x-role": "Administrador" } }),
+          fetch("/api/inventario/servicios", { cache: "no-store", headers: { "x-role": "Administrador" } }),
+          fetch("/api/inventario/combos", { cache: "no-store", headers: { "x-role": "Administrador" } })
+        ]);
 
-  const summary = useMemo(() => getSummaryKPIs(range), [range]);
-  const productKpis = useMemo(() => getProductKPIs(range), [range]);
-  const serviceKpis = useMemo(() => getServiceKPIs(range), [range]);
-  const comboKpis = useMemo(() => getComboKPIs(range), [range]);
-  const operative = useMemo(() => getOperativeKPIs(range), [range]);
+        const [productosJson, serviciosJson, combosJson] = await Promise.all([
+          productosRes.json().catch(() => ({})),
+          serviciosRes.json().catch(() => ({})),
+          combosRes.json().catch(() => ({}))
+        ]);
+
+        if (!mounted) return;
+
+        if (!productosRes.ok || !serviciosRes.ok || !combosRes.ok) {
+          const message =
+            (productosJson as { error?: string })?.error ||
+            (serviciosJson as { error?: string })?.error ||
+            (combosJson as { error?: string })?.error ||
+            "No se pudo cargar Inventario.";
+          setError(message);
+        }
+
+        setProductos(Array.isArray((productosJson as { data?: Producto[] })?.data) ? (productosJson as { data?: Producto[] }).data || [] : []);
+        setServicios(Array.isArray((serviciosJson as { data?: Servicio[] })?.data) ? (serviciosJson as { data?: Servicio[] }).data || [] : []);
+        setCombos(Array.isArray((combosJson as { data?: Combo[] })?.data) ? (combosJson as { data?: Combo[] }).data || [] : []);
+      } catch {
+        if (!mounted) return;
+        setError("No se pudo cargar Inventario.");
+        setProductos([]);
+        setServicios([]);
+        setCombos([]);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const sources = useMemo(() => ({ productos, servicios, combos }), [productos, servicios, combos]);
+  const summary = useMemo(() => getSummaryKPIs(range, sources), [range, sources]);
+  const productKpis = useMemo(() => getProductKPIs(range, sources), [range, sources]);
+  const serviceKpis = useMemo(() => getServiceKPIs(range, sources), [range, sources]);
+  const comboKpis = useMemo(() => getComboKPIs(range, sources), [range, sources]);
+  const operative = useMemo(() => getOperativeKPIs(range, sources), [range, sources]);
 
   return (
     <div className="space-y-6">
@@ -35,6 +84,7 @@ export default function InventarioDashboardPage() {
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Dashboard de inventario</h1>
           <p className="text-sm text-slate-500">Vista de control gerencial</p>
+          {error ? <p className="mt-1 text-xs text-amber-700">Se cargaron datos parciales: {error}</p> : null}
         </div>
         <div className="flex gap-2 rounded-full border border-slate-200 bg-white/80 p-1 shadow-inner">
           {rangeOptions.map((opt) => (
