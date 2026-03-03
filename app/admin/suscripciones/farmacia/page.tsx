@@ -75,6 +75,7 @@ type InventoryOption = {
 };
 
 type TabId = "cola" | "medicamentos" | "descuento" | "config";
+type FulfillmentMode = "PICKUP" | "DELIVERY" | "THIRD_PARTY";
 
 const TAB_STYLE = "rounded-lg border px-3 py-2 text-xs font-semibold transition";
 
@@ -116,7 +117,7 @@ export default function SubscriptionsPharmacyPage() {
     frequency: "MONTHLY",
     customDays: "",
     nextFillAt: new Date().toISOString().slice(0, 10),
-    deliveryMethod: "PICKUP",
+    fulfillmentMode: "PICKUP" as FulfillmentMode,
     contactPreference: "WHATSAPP",
     notes: ""
   });
@@ -136,6 +137,8 @@ export default function SubscriptionsPharmacyPage() {
   const [patientOptions, setPatientOptions] = useState<ClientOption[]>([]);
   const [medicationSearch, setMedicationSearch] = useState("");
   const [medicationOptions, setMedicationOptions] = useState<InventoryOption[]>([]);
+  const [stockStateById, setStockStateById] = useState<Record<string, "OK" | "LOW" | "NO_STOCK" | "UNKNOWN">>({});
+  const [substituteById, setSubstituteById] = useState<Record<string, string>>({});
 
   const queueCounters = useMemo(() => {
     return queue.reduce(
@@ -149,6 +152,24 @@ export default function SubscriptionsPharmacyPage() {
       { today: 0, in3: 0, in7: 0 }
     );
   }, [queue]);
+
+  function getStockState(subscriptionId: string) {
+    return stockStateById[subscriptionId] || "UNKNOWN";
+  }
+
+  function stockBadgeClass(stockState: "OK" | "LOW" | "NO_STOCK" | "UNKNOWN") {
+    if (stockState === "OK") return "bg-emerald-100 text-emerald-700";
+    if (stockState === "LOW") return "bg-amber-100 text-amber-700";
+    if (stockState === "NO_STOCK") return "bg-rose-100 text-rose-700";
+    return "bg-slate-200 text-slate-700";
+  }
+
+  async function handleNoStock(subscriptionId: string) {
+    setSubstituteById((prev) => ({ ...prev, [subscriptionId]: prev[subscriptionId] || "" }));
+    setStockStateById((prev) => ({ ...prev, [subscriptionId]: "NO_STOCK" }));
+    setMessage("Sin stock detectado: suscripción pausada y alerta operativa registrada (placeholder UI).");
+    await updateStatus(subscriptionId, "PAUSED");
+  }
 
   async function loadAll() {
     setLoading(true);
@@ -264,9 +285,14 @@ export default function SubscriptionsPharmacyPage() {
           frequency: newMedication.frequency,
           customDays: newMedication.frequency === "CUSTOM_DAYS" ? Number(newMedication.customDays || 0) : null,
           nextFillAt: new Date(`${newMedication.nextFillAt}T09:00:00`).toISOString(),
-          deliveryMethod: newMedication.deliveryMethod,
+          deliveryMethod: newMedication.fulfillmentMode === "THIRD_PARTY" ? "DELIVERY" : newMedication.fulfillmentMode,
           contactPreference: newMedication.contactPreference,
-          notes: newMedication.notes || null,
+          notes: [
+            newMedication.notes || "",
+            newMedication.fulfillmentMode === "THIRD_PARTY" ? "Entrega gestionada por tercero autorizado." : ""
+          ]
+            .filter(Boolean)
+            .join(" | "),
           items: [
             {
               medicationId: newMedication.medicationId,
@@ -286,7 +312,7 @@ export default function SubscriptionsPharmacyPage() {
         frequency: "MONTHLY",
         customDays: "",
         nextFillAt: new Date().toISOString().slice(0, 10),
-        deliveryMethod: "PICKUP",
+        fulfillmentMode: "PICKUP",
         contactPreference: "WHATSAPP",
         notes: ""
       });
@@ -449,7 +475,7 @@ export default function SubscriptionsPharmacyPage() {
               : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5]"
           }`}
         >
-          Suscripciones por medicamento
+          Suscripciones
         </button>
         <button
           type="button"
@@ -460,7 +486,7 @@ export default function SubscriptionsPharmacyPage() {
               : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300"
           }`}
         >
-          Suscripción de descuento · Próximamente
+          Descuento · Próximamente
         </button>
         <button
           type="button"
@@ -478,6 +504,9 @@ export default function SubscriptionsPharmacyPage() {
       {loading ? <p className="text-xs text-slate-500">Cargando farmacia...</p> : null}
       {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
       {message ? <p className="text-xs font-semibold text-emerald-700">{message}</p> : null}
+      <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2 text-xs text-slate-600">
+        Validación de stock: si no hay existencia, pausa cobro y registra alerta operativa. Puedes sugerir sustituto mientras se regulariza inventario.
+      </div>
 
       {activeTab === "cola" || activeTab === "medicamentos" ? (
         <div className="space-y-4">
@@ -503,7 +532,7 @@ export default function SubscriptionsPharmacyPage() {
               <p className="mt-3 text-xs text-slate-500">No hay pendientes en la cola operativa.</p>
             ) : (
               <div className="mt-3">
-                <CompactTable columns={["Paciente", "Medicamento(s)", "Próximo surtido", "Estado", "Acciones"]}>
+                <CompactTable columns={["Paciente", "Medicamento(s)", "Próximo surtido", "Stock", "Estado", "Acciones"]}>
                   {queue.map((row) => (
                     <tr key={`queue-${row.id}`}>
                       <td className="px-3 py-2 text-slate-800">{row.patientId}</td>
@@ -511,6 +540,23 @@ export default function SubscriptionsPharmacyPage() {
                         {row.items.map((item) => `${item.medicationId} x${item.qty}`).join(", ")}
                       </td>
                       <td className="px-3 py-2 text-slate-700">{dateLabel(row.nextFillAt)}</td>
+                      <td className="px-3 py-2">
+                        <div className="space-y-1">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${stockBadgeClass(getStockState(row.id))}`}
+                          >
+                            {getStockState(row.id)}
+                          </span>
+                          <input
+                            value={substituteById[row.id] || ""}
+                            onChange={(event) =>
+                              setSubstituteById((prev) => ({ ...prev, [row.id]: event.target.value }))
+                            }
+                            placeholder="Sustituto sugerido (opcional)"
+                            className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px]"
+                          />
+                        </div>
+                      </td>
                       <td className="px-3 py-2 text-slate-700">{row.status}</td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-1">
@@ -529,6 +575,40 @@ export default function SubscriptionsPharmacyPage() {
                             className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
                           >
                             Contactado
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => registerEvent(row.id, "DELIVERED")}
+                            disabled={busyId === row.id}
+                            className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
+                          >
+                            Entregado
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateStatus(row.id, row.status === "ACTIVE" ? "PAUSED" : "ACTIVE")}
+                            disabled={busyId === row.id || row.status === "CANCELLED"}
+                            className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-50"
+                          >
+                            {row.status === "ACTIVE" ? "Pausar" : "Reactivar"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateStatus(row.id, "CANCELLED")}
+                            disabled={busyId === row.id || row.status === "CANCELLED"}
+                            className="rounded-md border border-rose-300 px-2 py-1 text-[11px] font-semibold text-rose-700 disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleNoStock(row.id);
+                            }}
+                            disabled={busyId === row.id}
+                            className="rounded-md border border-amber-300 px-2 py-1 text-[11px] font-semibold text-amber-700 disabled:opacity-50"
+                          >
+                            Sin stock
                           </button>
                           <Link
                             href={`/admin/facturacion?source=pharmacy&subscriptionId=${encodeURIComponent(row.id)}`}
@@ -670,12 +750,15 @@ export default function SubscriptionsPharmacyPage() {
               )}
 
               <select
-                value={newMedication.deliveryMethod}
-                onChange={(event) => setNewMedication((prev) => ({ ...prev, deliveryMethod: event.target.value }))}
+                value={newMedication.fulfillmentMode}
+                onChange={(event) =>
+                  setNewMedication((prev) => ({ ...prev, fulfillmentMode: event.target.value as FulfillmentMode }))
+                }
                 className="rounded-lg border border-slate-200 px-2 py-2 text-xs"
               >
                 <option value="PICKUP">Entrega en sede (pickup)</option>
                 <option value="DELIVERY">Entrega a domicilio</option>
+                <option value="THIRD_PARTY">Entrega por tercero autorizado</option>
               </select>
 
               <select
@@ -712,7 +795,7 @@ export default function SubscriptionsPharmacyPage() {
             />
           ) : (
             activeTab === "medicamentos" ? (
-            <CompactTable columns={["Paciente", "Medicamentos", "Próximo surtido", "Canal", "Estado", "Acciones"]}>
+            <CompactTable columns={["Paciente", "Medicamentos", "Próximo surtido", "Canal", "Stock", "Estado", "Acciones"]}>
               {subscriptions.map((row) => (
                 <tr key={row.id}>
                   <td className="px-3 py-2 text-slate-800">
@@ -729,6 +812,23 @@ export default function SubscriptionsPharmacyPage() {
                   <td className="px-3 py-2 text-slate-700">
                     <p>{row.deliveryMethod}</p>
                     <p className="text-[11px] text-slate-500">{row.contactPreference}</p>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="space-y-1">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${stockBadgeClass(getStockState(row.id))}`}
+                      >
+                        {getStockState(row.id)}
+                      </span>
+                      <input
+                        value={substituteById[row.id] || ""}
+                        onChange={(event) =>
+                          setSubstituteById((prev) => ({ ...prev, [row.id]: event.target.value }))
+                        }
+                        placeholder="Sustituto sugerido"
+                        className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px]"
+                      />
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <span
@@ -776,6 +876,16 @@ export default function SubscriptionsPharmacyPage() {
                         className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-50"
                       >
                         {row.status === "ACTIVE" ? "Pausar" : "Reactivar"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleNoStock(row.id);
+                        }}
+                        disabled={busyId === row.id}
+                        className="rounded-md border border-amber-300 px-2 py-1 text-[11px] font-semibold text-amber-700 disabled:opacity-50"
+                      >
+                        Sin stock
                       </button>
                       <button
                         type="button"
