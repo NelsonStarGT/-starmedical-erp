@@ -57,22 +57,76 @@ const PERSON_COLUMNS: ClientBulkColumn[] = [
   col({ key: "acquisition_source", headerDisplay: "CanalAdquisicion", required: false, example: "Referido", target: "clientProfile.acquisitionSource", parser: "string", aliases: ["acquisition_source", "source", "canal_adquisicion"] }),
   col({ key: "acquisition_detail", headerDisplay: "DetalleAdquisicion", required: false, example: "Medico tratante", target: "clientProfile.acquisitionDetailOption", parser: "string", aliases: ["acquisition_detail", "source_detail", "detalle_adquisicion"] }),
   col({
+    key: "company_nit",
+    headerDisplay: "EmpresaNIT",
+    required: false,
+    example: "1234567-8",
+    target: "personCompanyLink.company.nit",
+    parser: "string",
+    aliases: ["company_nit", "empresa_nit", "nit_empresa"]
+  }),
+  col({
+    key: "company_code",
+    headerDisplay: "EmpresaCodigo",
+    required: false,
+    example: "E001",
+    target: "personCompanyLink.company.clientCode",
+    parser: "string",
+    aliases: ["company_code", "empresa_codigo", "codigo_empresa", "company_client_code"]
+  }),
+  col({
+    key: "company_name",
+    headerDisplay: "EmpresaNombre",
+    required: false,
+    example: "Empresa Demo",
+    target: "personCompanyLink.company.name",
+    parser: "string",
+    aliases: ["company_name", "empresa_nombre", "nombre_empresa"]
+  }),
+  col({
+    key: "company_role",
+    headerDisplay: "RolEmpresa",
+    required: false,
+    example: "Colaborador",
+    target: "personCompanyLink.relationType",
+    parser: "string",
+    aliases: ["company_role", "rol_empresa", "empresa_rol"]
+  }),
+  col({
+    key: "company_primary",
+    headerDisplay: "EmpresaPrincipal",
+    required: false,
+    example: "true",
+    target: "personCompanyLink.isPrimary",
+    parser: "boolean",
+    aliases: ["company_primary", "empresa_principal", "principal_empresa"]
+  }),
+  col({
+    key: "company_active",
+    headerDisplay: "VinculoActivo",
+    required: false,
+    example: "true",
+    target: "personCompanyLink.isActive",
+    parser: "boolean",
+    aliases: ["company_active", "vinculo_activo", "empresa_activa"]
+  }),
+  col({
     key: "company_keys",
-    headerDisplay: "EmpresasVinculadas",
+    headerDisplay: "EmpresasVinculadas (DEPRECATED)",
     required: false,
     example: "NIT:1234567-8;CODE:E001",
     target: "personCompanyLink.companyClientId[]",
     parser: "list",
-    aliases: ["company_keys", "empresas_vinculadas", "empresa_keys", "companies"]
+    aliases: ["company_keys", "empresas_vinculadas", "empresa_keys", "companies", "EmpresasVinculadas"]
   }),
   col({
     key: "company_roles",
-    headerDisplay: "RolesEmpresa",
+    headerDisplay: "RolesEmpresa (DEPRECATED)",
     required: false,
     example: "Colaborador;Supervisor",
     target: "personCompanyLink.relationType[]",
     parser: "list",
-    aliases: ["company_roles", "roles_empresa", "empresa_roles"]
+    aliases: ["company_roles", "roles_empresa", "empresa_roles", "RolesEmpresa"]
   }),
   col({ key: "notes", headerDisplay: "Notas", required: false, example: "Cliente con expediente previo.", target: "clientNote/admin", parser: "string", aliases: ["notes", "nota", "observaciones"] })
 ];

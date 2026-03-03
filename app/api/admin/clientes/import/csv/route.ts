@@ -67,6 +67,15 @@ type ProcessResult = {
   duplicatesCsv: string;
   duplicatesPreview: DuplicateConflict[];
   personClientIds: string[];
+  companyResolutionPreview: CompanyResolutionPreview[];
+};
+
+type CompanyResolutionPreview = {
+  row: number;
+  source: "strict_columns" | "legacy_columns";
+  query: string;
+  companyId: string;
+  companyLabel: string;
 };
 
 type DuplicateConflict = {
@@ -296,6 +305,178 @@ function parseCompanyLinkToken(raw: string) {
   return { mode: "AUTO" as const, value: normalized };
 }
 
+function normalizeCompanyCodeValue(raw: string | null | undefined) {
+  const normalized = normalizeOptional(raw);
+  return normalized ? normalized.toUpperCase() : null;
+}
+
+function buildCompanyLookupQueryLabel(input: { nit: string | null; code: string | null; name: string | null }) {
+  const parts: string[] = [];
+  if (input.nit) parts.push(`NIT:${input.nit}`);
+  if (input.code) parts.push(`CODE:${input.code}`);
+  if (input.name) parts.push(`NAME:${input.name}`);
+  return parts.join(" | ");
+}
+
+async function resolveCompanyByName(input: {
+  tenantId: string;
+  name: string;
+  cache: Map<string, ResolvedCompanyLookup | null>;
+}) {
+  const cacheKey = `${input.tenantId}:NAME:${input.name}`.toLowerCase();
+  if (input.cache.has(cacheKey)) return input.cache.get(cacheKey) ?? null;
+
+  const matches = await prisma.clientProfile.findMany({
+    where: {
+      tenantId: input.tenantId,
+      type: ClientProfileType.COMPANY,
+      deletedAt: null,
+      OR: [
+        { companyName: { equals: input.name, mode: "insensitive" } },
+        { tradeName: { equals: input.name, mode: "insensitive" } }
+      ]
+    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    take: 2,
+    select: {
+      id: true,
+      companyName: true,
+      tradeName: true,
+      clientCode: true,
+      nit: true
+    }
+  });
+
+  if (!matches.length) {
+    input.cache.set(cacheKey, null);
+    return null;
+  }
+
+  if (matches.length > 1) {
+    throw new Error(`EmpresaNombre ambiguo (${input.name}). Usa EmpresaNIT o EmpresaCodigo.`);
+  }
+
+  const selected = matches[0]!;
+  const found: ResolvedCompanyLookup = {
+    id: selected.id,
+    label: selected.companyName || selected.tradeName || selected.clientCode || selected.nit || input.name,
+    created: false
+  };
+  input.cache.set(cacheKey, found);
+  return found;
+}
+
+async function resolveCompanyFromStructuredColumns(input: {
+  tenantId: string;
+  nit: string | null;
+  code: string | null;
+  name: string | null;
+  cache: Map<string, ResolvedCompanyLookup | null>;
+  allowAutocreate: boolean;
+  allowNameFallback: boolean;
+  defaultStatusId: string | null;
+}) {
+  const queryLabel = buildCompanyLookupQueryLabel({
+    nit: input.nit,
+    code: input.code,
+    name: input.name
+  });
+
+  if (!queryLabel) return null;
+
+  if (input.nit && input.code) {
+    const [byNit, byCode] = await Promise.all([
+      resolveCompanyForLink({
+        tenantId: input.tenantId,
+        tokenRaw: `NIT:${input.nit}`,
+        cache: input.cache,
+        allowAutocreate: false,
+        defaultStatusId: input.defaultStatusId
+      }),
+      resolveCompanyForLink({
+        tenantId: input.tenantId,
+        tokenRaw: `CODE:${input.code}`,
+        cache: input.cache,
+        allowAutocreate: false,
+        defaultStatusId: input.defaultStatusId
+      })
+    ]);
+
+    if (!byNit || !byCode) {
+      throw new Error(`EmpresaNIT y EmpresaCodigo deben existir y apuntar a la misma empresa (${queryLabel}).`);
+    }
+
+    if (byNit.id !== byCode.id) {
+      throw new Error(`EmpresaNIT y EmpresaCodigo no coinciden en la misma empresa (${queryLabel}).`);
+    }
+
+    return {
+      resolved: byNit,
+      queryLabel
+    };
+  }
+
+  if (input.nit) {
+    const byNit = await resolveCompanyForLink({
+      tenantId: input.tenantId,
+      tokenRaw: `NIT:${input.nit}`,
+      cache: input.cache,
+      allowAutocreate: input.allowAutocreate,
+      defaultStatusId: input.defaultStatusId
+    });
+    if (!byNit) throw new Error(`Empresa no encontrada por EmpresaNIT (${input.nit}).`);
+    return {
+      resolved: byNit,
+      queryLabel
+    };
+  }
+
+  if (input.code) {
+    const byCode = await resolveCompanyForLink({
+      tenantId: input.tenantId,
+      tokenRaw: `CODE:${input.code}`,
+      cache: input.cache,
+      allowAutocreate: input.allowAutocreate,
+      defaultStatusId: input.defaultStatusId
+    });
+    if (!byCode) throw new Error(`Empresa no encontrada por EmpresaCodigo (${input.code}).`);
+    return {
+      resolved: byCode,
+      queryLabel
+    };
+  }
+
+  if (!input.allowNameFallback) {
+    throw new Error("EmpresaNombre requiere modo laxo habilitado por administrador.");
+  }
+
+  const nameValue = input.name!;
+  const byName =
+    (await resolveCompanyByName({
+      tenantId: input.tenantId,
+      name: nameValue,
+      cache: input.cache
+    })) ??
+    (input.allowAutocreate
+      ? await resolveCompanyForLink({
+          tenantId: input.tenantId,
+          tokenRaw: nameValue,
+          cache: input.cache,
+          allowAutocreate: true,
+          defaultStatusId: input.defaultStatusId
+        })
+      : null);
+
+  if (!byName) {
+    throw new Error(`Empresa no encontrada por EmpresaNombre (${nameValue}).`);
+  }
+
+  return {
+    resolved: byName,
+    queryLabel
+  };
+}
+
 async function ensureCompanyCoreForAutoCreate(input: {
   tenantId: string;
   clientProfileId: string;
@@ -465,6 +646,89 @@ function normalizeCompanyLinkPrimary(links: CompanyLinkDraft[]) {
     ...row,
     isPrimary: row.isActive ? index === keepPrimary : false
   }));
+}
+
+async function buildStructuredCompanyLinkDrafts(input: {
+  rowNumber: number;
+  tenantId: string;
+  values: Record<string, string>;
+  cache: Map<string, ResolvedCompanyLookup | null>;
+  allowAutocreate: boolean;
+  allowNameFallback: boolean;
+  defaultStatusId: string | null;
+}) {
+  const nitTokens = splitBulkCsvList(input.values.company_nit);
+  const codeTokens = splitBulkCsvList(input.values.company_code).map((token) => normalizeCompanyCodeValue(token) || "");
+  const nameTokens = splitBulkCsvList(input.values.company_name);
+  const roleTokens = splitBulkCsvList(input.values.company_role);
+  const primaryTokens = splitBulkCsvList(input.values.company_primary);
+  const activeTokens = splitBulkCsvList(input.values.company_active);
+
+  const maxLength = Math.max(
+    nitTokens.length,
+    codeTokens.length,
+    nameTokens.length,
+    roleTokens.length,
+    primaryTokens.length,
+    activeTokens.length
+  );
+
+  if (!maxLength) {
+    return {
+      links: [] as CompanyLinkDraft[],
+      preview: [] as CompanyResolutionPreview[]
+    };
+  }
+
+  const links: CompanyLinkDraft[] = [];
+  const preview: CompanyResolutionPreview[] = [];
+  const seenCompanyIds = new Set<string>();
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const nit = normalizeOptional(nitTokens[index] ?? null);
+    const code = normalizeCompanyCodeValue(codeTokens[index] ?? null);
+    const name = normalizeOptional(nameTokens[index] ?? null);
+    const role = normalizeOptional(roleTokens[index] ?? null);
+    const primary = parseBulkCsvBoolean(primaryTokens[index] ?? "") ?? index === 0;
+    const active = parseBulkCsvBoolean(activeTokens[index] ?? "") ?? true;
+
+    if (!nit && !code && !name) continue;
+
+    const resolved = await resolveCompanyFromStructuredColumns({
+      tenantId: input.tenantId,
+      nit,
+      code,
+      name,
+      cache: input.cache,
+      allowAutocreate: input.allowAutocreate,
+      allowNameFallback: input.allowNameFallback,
+      defaultStatusId: input.defaultStatusId
+    });
+
+    if (!resolved?.resolved) {
+      throw new Error(`No se pudo resolver empresa para la fila ${input.rowNumber}.`);
+    }
+
+    if (seenCompanyIds.has(resolved.resolved.id)) continue;
+    seenCompanyIds.add(resolved.resolved.id);
+
+    links.push({
+      companyId: resolved.resolved.id,
+      relationType: role,
+      isPrimary: active ? primary : false,
+      isActive: active
+    });
+
+    preview.push({
+      row: input.rowNumber,
+      source: "strict_columns",
+      query: resolved.queryLabel,
+      companyId: resolved.resolved.id,
+      companyLabel: resolved.resolved.label
+    });
+  }
+
+  return { links, preview };
 }
 
 async function upsertPersonCompanyLinksAndAffiliations(input: {
@@ -1118,8 +1382,9 @@ async function processRows(params: {
   mapping: Record<string, string>;
   dedupeMode: "skip" | "update";
   allowCompanyAutocreate: boolean;
+  allowCompanyNameFallback: boolean;
 }): Promise<ProcessResult> {
-  const { tenantId, type, rows, mapping, dedupeMode, allowCompanyAutocreate } = params;
+  const { tenantId, type, rows, mapping, dedupeMode, allowCompanyAutocreate, allowCompanyNameFallback } = params;
   const defaultStatusId = await getDefaultStatusId();
 
   let processedRows = 0;
@@ -1130,6 +1395,7 @@ async function processRows(params: {
   const errors: Array<{ row: number; message: string }> = [];
   const duplicates: DuplicateConflict[] = [];
   const personClientIds: string[] = [];
+  const companyResolutionPreview: CompanyResolutionPreview[] = [];
 
   const catalogCache = new Map<string, string>();
   const acquisitionSourceCache = new Map<string, string>();
@@ -1283,38 +1549,63 @@ async function processRows(params: {
 
         await upsertImportNote(clientId, notes);
 
+        const links: CompanyLinkDraft[] = [];
+        const seenCompanyIds = new Set<string>();
+
+        const structuredLinks = await buildStructuredCompanyLinkDrafts({
+          rowNumber: row.row,
+          tenantId,
+          values,
+          cache: companyLookupCache,
+          allowAutocreate: allowCompanyAutocreate,
+          allowNameFallback: allowCompanyNameFallback,
+          defaultStatusId
+        });
+
+        for (const item of structuredLinks.links) {
+          if (seenCompanyIds.has(item.companyId)) continue;
+          seenCompanyIds.add(item.companyId);
+          links.push(item);
+        }
+        companyResolutionPreview.push(...structuredLinks.preview);
+
         const companyKeyTokens = splitBulkCsvList(values.company_keys);
         const companyRoleTokens = splitBulkCsvList(values.company_roles);
-        if (companyKeyTokens.length > 0) {
-          const links: CompanyLinkDraft[] = [];
-          const seenCompanyIds = new Set<string>();
-
-          for (let index = 0; index < companyKeyTokens.length; index += 1) {
-            const keyToken = companyKeyTokens[index];
-            const roleToken = companyRoleTokens[index] ?? null;
-            const resolvedCompany = await resolveCompanyForLink({
-              tenantId,
-              tokenRaw: keyToken,
-              cache: companyLookupCache,
-              allowAutocreate: allowCompanyAutocreate,
-              defaultStatusId
-            });
-            if (!resolvedCompany) {
-              throw new Error(
-                `Empresa no encontrada para vínculo (${keyToken}). Verifica NIT/CODE o habilita autocreate como administrador.`
-              );
-            }
-            if (seenCompanyIds.has(resolvedCompany.id)) continue;
-            seenCompanyIds.add(resolvedCompany.id);
-
-            links.push({
-              companyId: resolvedCompany.id,
-              relationType: normalizeOptional(roleToken),
-              isPrimary: index === 0,
-              isActive: true
-            });
+        for (let index = 0; index < companyKeyTokens.length; index += 1) {
+          const keyToken = companyKeyTokens[index];
+          const roleToken = companyRoleTokens[index] ?? null;
+          const resolvedCompany = await resolveCompanyForLink({
+            tenantId,
+            tokenRaw: keyToken,
+            cache: companyLookupCache,
+            allowAutocreate: allowCompanyAutocreate,
+            defaultStatusId
+          });
+          if (!resolvedCompany) {
+            throw new Error(
+              `Empresa no encontrada para vínculo (${keyToken}). Verifica NIT/CODE o habilita autocreate como administrador.`
+            );
           }
+          if (seenCompanyIds.has(resolvedCompany.id)) continue;
+          seenCompanyIds.add(resolvedCompany.id);
 
+          links.push({
+            companyId: resolvedCompany.id,
+            relationType: normalizeOptional(roleToken),
+            isPrimary: index === 0 && !structuredLinks.links.some((item) => item.isPrimary),
+            isActive: true
+          });
+
+          companyResolutionPreview.push({
+            row: row.row,
+            source: "legacy_columns",
+            query: keyToken,
+            companyId: resolvedCompany.id,
+            companyLabel: resolvedCompany.label
+          });
+        }
+
+        if (links.length > 0) {
           linked += await upsertPersonCompanyLinksAndAffiliations({
             tenantId,
             personClientId: clientId,
@@ -1804,7 +2095,8 @@ async function processRows(params: {
     duplicates: duplicates.length,
     duplicatesCsv: buildDuplicatesCsv(duplicates),
     duplicatesPreview: duplicates.slice(0, 50),
-    personClientIds: Array.from(new Set(personClientIds))
+    personClientIds: Array.from(new Set(personClientIds)),
+    companyResolutionPreview: companyResolutionPreview.slice(0, 100)
   };
 }
 
@@ -1920,15 +2212,25 @@ export async function POST(req: NextRequest) {
   const allowUpdate = canProcessClientImportUpdate(auth.user) && dedupeModeRaw === "update";
   const dedupeMode: "skip" | "update" = allowUpdate ? "update" : "skip";
   const autocreateCompaniesRaw = String(formData.get("autocreateCompanies") || "").trim().toLowerCase();
+  const nameFallbackRaw = String(formData.get("allowCompanyNameFallback") || "").trim().toLowerCase();
   const autocreateCompaniesRequested =
     autocreateCompaniesRaw === "1" || autocreateCompaniesRaw === "true" || autocreateCompaniesRaw === "yes";
+  const nameFallbackRequested =
+    nameFallbackRaw === "1" || nameFallbackRaw === "true" || nameFallbackRaw === "yes";
   if (autocreateCompaniesRequested && !isAdmin(auth.user)) {
     return NextResponse.json(
       { ok: false, error: "No autorizado para autocrear empresas desde importación." },
       { status: 403 }
     );
   }
+  if (nameFallbackRequested && !isAdmin(auth.user)) {
+    return NextResponse.json(
+      { ok: false, error: "No autorizado para resolver empresa por nombre en modo laxo." },
+      { status: 403 }
+    );
+  }
   const allowCompanyAutocreate = autocreateCompaniesRequested && isAdmin(auth.user);
+  const allowCompanyNameFallback = nameFallbackRequested && isAdmin(auth.user);
 
   try {
     const result = await processRows({
@@ -1937,7 +2239,8 @@ export async function POST(req: NextRequest) {
       rows: parsed.rows,
       mapping,
       dedupeMode,
-      allowCompanyAutocreate
+      allowCompanyAutocreate,
+      allowCompanyNameFallback
     });
     return NextResponse.json({
       ok: true,
@@ -1956,6 +2259,7 @@ export async function POST(req: NextRequest) {
       duplicatesCsv: result.duplicatesCsv,
       duplicatesPreview: result.duplicatesPreview,
       personClientIds: result.personClientIds,
+      companyResolutionPreview: result.companyResolutionPreview,
       dedupeMode,
       ignoredColumns
     });

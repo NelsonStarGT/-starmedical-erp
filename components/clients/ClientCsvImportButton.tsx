@@ -56,6 +56,13 @@ type ProcessResponse = {
   dedupeMode: "skip" | "update";
   ignoredColumns: string[];
   personClientIds?: string[];
+  companyResolutionPreview?: Array<{
+    row: number;
+    source: "strict_columns" | "legacy_columns";
+    query: string;
+    companyId: string;
+    companyLabel: string;
+  }>;
 };
 
 type ApiErrorResponse = {
@@ -486,6 +493,36 @@ export default function ClientCsvImportButton({
                       ))}
                     </tbody>
                   </table>
+                </div>
+              ) : null}
+
+              {type === ClientProfileType.PERSON && (result.companyResolutionPreview?.length ?? 0) > 0 ? (
+                <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-sm font-semibold text-slate-900">Empresas resueltas (preview)</p>
+                  <div className="max-h-48 overflow-auto rounded-lg border border-slate-200">
+                    <table className="min-w-full divide-y divide-slate-200">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Fila</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Origen</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Lookup</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Empresa</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {result.companyResolutionPreview?.slice(0, 50).map((item, index) => (
+                          <tr key={`${item.row}-${item.companyId}-${index}`}>
+                            <td className="px-3 py-2 text-sm text-slate-700">{item.row}</td>
+                            <td className="px-3 py-2 text-sm text-slate-700">
+                              {item.source === "strict_columns" ? "Columnas nuevas" : "Legacy"}
+                            </td>
+                            <td className="px-3 py-2 text-sm text-slate-700">{item.query}</td>
+                            <td className="px-3 py-2 text-sm text-slate-700">{item.companyLabel}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : null}
             </div>

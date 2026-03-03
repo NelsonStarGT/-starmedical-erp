@@ -25,15 +25,20 @@ function buildToken(payload: { tenantId: string; permissions: string[]; roles?: 
 function buildImportRequest(payload: {
   tenantId: string;
   permissions: string[];
+  roles?: string[];
   mode: "analyze" | "process";
   dedupeMode?: "skip" | "update";
   csv: string;
+  allowCompanyNameFallback?: boolean;
 }) {
   const token = buildToken(payload);
   const form = new FormData();
   form.append("type", "PERSON");
   form.append("mode", payload.mode);
   form.append("dedupeMode", payload.dedupeMode || "skip");
+  if (payload.allowCompanyNameFallback) {
+    form.append("allowCompanyNameFallback", "true");
+  }
   form.append("file", new File([payload.csv], "personas.csv", { type: "text/csv" }));
 
   return new NextRequest("http://localhost/api/admin/clientes/import/csv", {
@@ -45,21 +50,19 @@ function buildImportRequest(payload: {
   });
 }
 
-test("bulk import PERSON vincula empresa existente por company_keys (NIT)", async () => {
-  const csv = [
-    "sep=;",
-    "PrimerNombre*;PrimerApellido*;NumeroDocumento*;TelefonoPrincipal*;EmpresasVinculadas",
-    "Ana;Torres;1234567890101;+50255550000;NIT:1234567-8"
-  ].join("\n");
+type CompanyStub = {
+  id: string;
+  companyName: string;
+  tradeName: string | null;
+  nit: string | null;
+  clientCode: string | null;
+};
 
-  const req = buildImportRequest({
-    tenantId: "tenant-alpha",
-    permissions: ["CLIENTS_IMPORT_ANALYZE", "CLIENTS_IMPORT_PROCESS", "CLIENTS_IMPORT_PROCESS_UPDATE"],
-    mode: "process",
-    dedupeMode: "update",
-    csv
-  });
-
+function setupBulkImportPrismaMocks(input: {
+  companyByNit?: Record<string, CompanyStub>;
+  companyByCode?: Record<string, CompanyStub>;
+  companyByName?: Record<string, CompanyStub[]>;
+}) {
   const clientCatalogItemDelegate = (prisma as any).clientCatalogItem;
   const clientProfileDelegate = (prisma as any).clientProfile;
   const personCompanyLinkDelegate = (prisma as any).personCompanyLink;
@@ -67,6 +70,7 @@ test("bulk import PERSON vincula empresa existente por company_keys (NIT)", asyn
 
   assert.ok(clientCatalogItemDelegate?.findFirst, "clientCatalogItem.findFirst delegate missing");
   assert.ok(clientProfileDelegate?.findFirst, "clientProfile.findFirst delegate missing");
+  assert.ok(clientProfileDelegate?.findMany, "clientProfile.findMany delegate missing");
   assert.ok(clientProfileDelegate?.update, "clientProfile.update delegate missing");
   assert.ok(personCompanyLinkDelegate?.upsert, "personCompanyLink.upsert delegate missing");
   assert.ok(clientAffiliationDelegate?.findFirst, "clientAffiliation.findFirst delegate missing");
@@ -74,6 +78,7 @@ test("bulk import PERSON vincula empresa existente por company_keys (NIT)", asyn
 
   const originalCatalogFindFirst = clientCatalogItemDelegate.findFirst;
   const originalClientProfileFindFirst = clientProfileDelegate.findFirst;
+  const originalClientProfileFindMany = clientProfileDelegate.findMany;
   const originalClientProfileUpdate = clientProfileDelegate.update;
   const originalPersonCompanyLinkUpsert = personCompanyLinkDelegate.upsert;
   const originalClientAffiliationFindFirst = clientAffiliationDelegate.findFirst;
@@ -100,14 +105,23 @@ test("bulk import PERSON vincula empresa existente por company_keys (NIT)", asyn
       };
     }
 
-    if (where?.type === "COMPANY" && where?.nit === "1234567-8") {
-      return {
-        id: "company-existing-1",
-        companyName: "Empresa Demo",
-        tradeName: "Demo",
-        nit: "1234567-8",
-        clientCode: "E001"
-      };
+    if (where?.type === "COMPANY") {
+      if (where?.nit && input.companyByNit?.[where.nit]) {
+        return input.companyByNit[where.nit];
+      }
+
+      if (where?.clientCode && input.companyByCode?.[String(where.clientCode).toUpperCase()]) {
+        return input.companyByCode[String(where.clientCode).toUpperCase()];
+      }
+
+      if (Array.isArray(where?.OR)) {
+        for (const clause of where.OR) {
+          if (clause?.nit && input.companyByNit?.[clause.nit]) return input.companyByNit[clause.nit];
+          if (clause?.clientCode && input.companyByCode?.[String(clause.clientCode).toUpperCase()]) {
+            return input.companyByCode[String(clause.clientCode).toUpperCase()];
+          }
+        }
+      }
     }
 
     if (where?.phone || where?.email) {
@@ -115,6 +129,15 @@ test("bulk import PERSON vincula empresa existente por company_keys (NIT)", asyn
     }
 
     return null;
+  };
+
+  clientProfileDelegate.findMany = async (args: any) => {
+    const where = args?.where || {};
+    const companyName = where?.OR?.find((item: any) => item?.companyName?.equals)?.companyName?.equals;
+    const tradeName = where?.OR?.find((item: any) => item?.tradeName?.equals)?.tradeName?.equals;
+    const lookup = String(companyName || tradeName || "").trim().toLowerCase();
+    if (!lookup) return [];
+    return input.companyByName?.[lookup] || [];
   };
 
   clientProfileDelegate.update = async () => ({ id: "person-existing-1" });
@@ -125,38 +148,260 @@ test("bulk import PERSON vincula empresa existente por company_keys (NIT)", asyn
   clientAffiliationDelegate.findFirst = async () => null;
   clientAffiliationDelegate.create = async () => ({ id: "aff-1" });
 
+  return {
+    upsertCalls,
+    restore: () => {
+      clientCatalogItemDelegate.findFirst = originalCatalogFindFirst;
+      clientProfileDelegate.findFirst = originalClientProfileFindFirst;
+      clientProfileDelegate.findMany = originalClientProfileFindMany;
+      clientProfileDelegate.update = originalClientProfileUpdate;
+      personCompanyLinkDelegate.upsert = originalPersonCompanyLinkUpsert;
+      clientAffiliationDelegate.findFirst = originalClientAffiliationFindFirst;
+      clientAffiliationDelegate.create = originalClientAffiliationCreate;
+    }
+  };
+}
+
+test("PERSON import: EmpresaNIT + EmpresaCodigo que coinciden vincula correctamente", async () => {
+  const csv = [
+    "sep=;",
+    "PrimerNombre*;PrimerApellido*;NumeroDocumento*;TelefonoPrincipal*;EmpresaNIT;EmpresaCodigo;RolEmpresa;EmpresaPrincipal;VinculoActivo",
+    "Ana;Torres;1234567890101;+50255550000;1234567-8;E001;Colaborador;true;true"
+  ].join("\n");
+
+  const req = buildImportRequest({
+    tenantId: "tenant-alpha",
+    permissions: ["CLIENTS_IMPORT_ANALYZE", "CLIENTS_IMPORT_PROCESS", "CLIENTS_IMPORT_PROCESS_UPDATE"],
+    mode: "process",
+    dedupeMode: "update",
+    csv
+  });
+
+  const company: CompanyStub = {
+    id: "company-existing-1",
+    companyName: "Empresa Demo",
+    tradeName: "Demo",
+    nit: "1234567-8",
+    clientCode: "E001"
+  };
+
+  const mock = setupBulkImportPrismaMocks({
+    companyByNit: { "1234567-8": company },
+    companyByCode: { E001: company }
+  });
+
   try {
     const res = await postImport(req);
     assert.equal(res.status, 200);
 
     const payload = (await res.json()) as {
       ok: boolean;
-      summary: {
-        updated: number;
-        linked: number;
-      };
-      personClientIds: string[];
+      summary: { updated: number; linked: number; errors: number };
+      companyResolutionPreview?: Array<{ source: string; query: string; companyLabel: string }>;
     };
 
     assert.equal(payload.ok, true);
     assert.equal(payload.summary.updated, 1);
     assert.equal(payload.summary.linked, 1);
-    assert.deepEqual(payload.personClientIds, ["person-existing-1"]);
-    assert.equal(upsertCalls.length, 1);
-    assert.equal(
-      upsertCalls[0]?.where?.personId_companyId?.personId,
-      "person-existing-1"
-    );
-    assert.equal(
-      upsertCalls[0]?.where?.personId_companyId?.companyId,
-      "company-existing-1"
-    );
+    assert.equal(payload.summary.errors, 0);
+    assert.equal(mock.upsertCalls.length, 1);
+    assert.equal(mock.upsertCalls[0]?.where?.personId_companyId?.companyId, "company-existing-1");
+    assert.equal(payload.companyResolutionPreview?.[0]?.source, "strict_columns");
+    assert.match(payload.companyResolutionPreview?.[0]?.query || "", /NIT:1234567-8/);
+    assert.equal(payload.companyResolutionPreview?.[0]?.companyLabel, "Empresa Demo");
   } finally {
-    clientCatalogItemDelegate.findFirst = originalCatalogFindFirst;
-    clientProfileDelegate.findFirst = originalClientProfileFindFirst;
-    clientProfileDelegate.update = originalClientProfileUpdate;
-    personCompanyLinkDelegate.upsert = originalPersonCompanyLinkUpsert;
-    clientAffiliationDelegate.findFirst = originalClientAffiliationFindFirst;
-    clientAffiliationDelegate.create = originalClientAffiliationCreate;
+    mock.restore();
+  }
+});
+
+test("PERSON import: columnas legacy EmpresasVinculadas siguen funcionando", async () => {
+  const csv = [
+    "sep=;",
+    "PrimerNombre*;PrimerApellido*;NumeroDocumento*;TelefonoPrincipal*;EmpresasVinculadas;RolesEmpresa",
+    "Ana;Torres;1234567890101;+50255550000;NIT:1234567-8;Colaborador"
+  ].join("\n");
+
+  const req = buildImportRequest({
+    tenantId: "tenant-alpha",
+    permissions: ["CLIENTS_IMPORT_ANALYZE", "CLIENTS_IMPORT_PROCESS", "CLIENTS_IMPORT_PROCESS_UPDATE"],
+    mode: "process",
+    dedupeMode: "update",
+    csv
+  });
+
+  const mock = setupBulkImportPrismaMocks({
+    companyByNit: {
+      "1234567-8": {
+        id: "company-existing-1",
+        companyName: "Empresa Demo",
+        tradeName: "Demo",
+        nit: "1234567-8",
+        clientCode: "E001"
+      }
+    }
+  });
+
+  try {
+    const res = await postImport(req);
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      ok: boolean;
+      summary: { linked: number; errors: number };
+      companyResolutionPreview?: Array<{ source: string }>;
+    };
+    assert.equal(payload.ok, true);
+    assert.equal(payload.summary.linked, 1);
+    assert.equal(payload.summary.errors, 0);
+    assert.equal(payload.companyResolutionPreview?.[0]?.source, "legacy_columns");
+    assert.equal(mock.upsertCalls.length, 1);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("PERSON import: EmpresaNIT + EmpresaCodigo mismatch produce error por fila", async () => {
+  const csv = [
+    "sep=;",
+    "PrimerNombre*;PrimerApellido*;NumeroDocumento*;TelefonoPrincipal*;EmpresaNIT;EmpresaCodigo",
+    "Ana;Torres;1234567890101;+50255550000;1234567-8;E009"
+  ].join("\n");
+
+  const req = buildImportRequest({
+    tenantId: "tenant-alpha",
+    permissions: ["CLIENTS_IMPORT_ANALYZE", "CLIENTS_IMPORT_PROCESS", "CLIENTS_IMPORT_PROCESS_UPDATE"],
+    mode: "process",
+    dedupeMode: "update",
+    csv
+  });
+
+  const mock = setupBulkImportPrismaMocks({
+    companyByNit: {
+      "1234567-8": {
+        id: "company-existing-1",
+        companyName: "Empresa Demo 1",
+        tradeName: "Demo 1",
+        nit: "1234567-8",
+        clientCode: "E001"
+      }
+    },
+    companyByCode: {
+      E009: {
+        id: "company-existing-9",
+        companyName: "Empresa Demo 9",
+        tradeName: "Demo 9",
+        nit: "9876543-1",
+        clientCode: "E009"
+      }
+    }
+  });
+
+  try {
+    const res = await postImport(req);
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      ok: boolean;
+      summary: { errors: number; linked: number };
+      errorsPreview: Array<{ row: number; message: string }>;
+    };
+    assert.equal(payload.ok, true);
+    assert.equal(payload.summary.linked, 0);
+    assert.equal(payload.summary.errors, 1);
+    assert.match(payload.errorsPreview[0]?.message || "", /no coinciden/i);
+    assert.equal(mock.upsertCalls.length, 0);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("PERSON import: solo EmpresaCodigo resuelve empresa y vincula", async () => {
+  const csv = [
+    "sep=;",
+    "PrimerNombre*;PrimerApellido*;NumeroDocumento*;TelefonoPrincipal*;EmpresaCodigo;RolEmpresa",
+    "Ana;Torres;1234567890101;+50255550000;E001;Supervisor"
+  ].join("\n");
+
+  const req = buildImportRequest({
+    tenantId: "tenant-alpha",
+    permissions: ["CLIENTS_IMPORT_ANALYZE", "CLIENTS_IMPORT_PROCESS", "CLIENTS_IMPORT_PROCESS_UPDATE"],
+    mode: "process",
+    dedupeMode: "update",
+    csv
+  });
+
+  const mock = setupBulkImportPrismaMocks({
+    companyByCode: {
+      E001: {
+        id: "company-existing-1",
+        companyName: "Empresa Demo",
+        tradeName: "Demo",
+        nit: "1234567-8",
+        clientCode: "E001"
+      }
+    }
+  });
+
+  try {
+    const res = await postImport(req);
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      ok: boolean;
+      summary: { linked: number; errors: number };
+      companyResolutionPreview?: Array<{ source: string; query: string }>;
+    };
+    assert.equal(payload.ok, true);
+    assert.equal(payload.summary.linked, 1);
+    assert.equal(payload.summary.errors, 0);
+    assert.equal(payload.companyResolutionPreview?.[0]?.source, "strict_columns");
+    assert.match(payload.companyResolutionPreview?.[0]?.query || "", /CODE:E001/);
+    assert.equal(mock.upsertCalls.length, 1);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("PERSON import: solo EmpresaNombre falla por defecto (modo laxo deshabilitado)", async () => {
+  const csv = [
+    "sep=;",
+    "PrimerNombre*;PrimerApellido*;NumeroDocumento*;TelefonoPrincipal*;EmpresaNombre",
+    "Ana;Torres;1234567890101;+50255550000;Empresa Demo"
+  ].join("\n");
+
+  const req = buildImportRequest({
+    tenantId: "tenant-alpha",
+    permissions: ["CLIENTS_IMPORT_ANALYZE", "CLIENTS_IMPORT_PROCESS", "CLIENTS_IMPORT_PROCESS_UPDATE"],
+    mode: "process",
+    dedupeMode: "update",
+    csv
+  });
+
+  const mock = setupBulkImportPrismaMocks({
+    companyByName: {
+      "empresa demo": [
+        {
+          id: "company-existing-1",
+          companyName: "Empresa Demo",
+          tradeName: "Demo",
+          nit: "1234567-8",
+          clientCode: "E001"
+        }
+      ]
+    }
+  });
+
+  try {
+    const res = await postImport(req);
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      ok: boolean;
+      summary: { linked: number; errors: number };
+      errorsPreview: Array<{ row: number; message: string }>;
+    };
+    assert.equal(payload.ok, true);
+    assert.equal(payload.summary.linked, 0);
+    assert.equal(payload.summary.errors, 1);
+    assert.match(payload.errorsPreview[0]?.message || "", /modo laxo/i);
+    assert.equal(mock.upsertCalls.length, 0);
+  } finally {
+    mock.restore();
   }
 });
