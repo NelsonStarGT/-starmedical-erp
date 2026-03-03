@@ -341,6 +341,18 @@ export default function SubscriptionsDashboardPage() {
         subtitle="Control diario de membresías y farmacia, con prioridades operativas por rango."
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <Link
+              href="/admin/suscripciones/membresias/afiliaciones/pacientes?enroll=1"
+              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
+            >
+              Afiliar
+            </Link>
+            <Link
+              href="/admin/suscripciones/membresias/planes/nuevo"
+              className="rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"
+            >
+              Crear producto
+            </Link>
             <NavPills items={rangeItems} ariaLabel="Seleccionar rango de análisis" />
             {range === "custom" ? (
               <input

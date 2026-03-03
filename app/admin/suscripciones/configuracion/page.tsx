@@ -179,7 +179,7 @@ export default function SubscriptionsConfigPage() {
     setMessage(null);
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(policies));
-      setMessage("Políticas guardadas (placeholder UI en tenant local).");
+      setMessage("Cambios guardados localmente (borrador).");
     } catch {
       setError("No se pudo guardar en almacenamiento local.");
     } finally {
@@ -191,11 +191,17 @@ export default function SubscriptionsConfigPage() {
     <form className="space-y-4" onSubmit={savePolicies}>
       <SectionCard
         title="Configuración tenant · Suscripciones"
-        subtitle="Políticas operativas por tenant para cobro, dunning y crédito. Guardado actual: placeholder UI."
+        subtitle="Políticas operativas por tenant para cobro, dunning y crédito."
+        actions={
+          <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">
+            Borrador (sin persistencia)
+          </span>
+        }
       >
         {loading ? <p className="text-xs text-slate-500">Cargando configuración...</p> : null}
         {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
         {message ? <p className="text-xs font-semibold text-emerald-700">{message}</p> : null}
+        <p className="text-xs text-slate-600">Cambios se guardan localmente por ahora.</p>
       </SectionCard>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -492,7 +498,7 @@ export default function SubscriptionsConfigPage() {
           disabled={saving}
           className="rounded-lg bg-[#4aa59c] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
         >
-          {saving ? "Guardando..." : "Guardar políticas tenant"}
+          {saving ? "Guardando..." : "Guardar (Borrador)"}
         </button>
       </div>
     </form>

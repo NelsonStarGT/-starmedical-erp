@@ -183,17 +183,27 @@ export default function MembershipCatalogPage() {
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            href="/admin/suscripciones/membresias/configuracion"
-            className="rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"
+            href="/admin/suscripciones/membresias/afiliaciones/pacientes?enroll=1"
+            className={`${canAdmin ? "border border-slate-300 bg-white text-slate-700 hover:border-[#4aadf5]" : "bg-[#4aa59c] text-white hover:bg-[#4aadf5]"} rounded-lg px-3 py-2 text-xs font-semibold transition`}
           >
-            Configurar base
+            Afiliar
           </Link>
-          <Link
-            href="/admin/suscripciones/membresias/planes/nuevo"
-            className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
-          >
-            Crear plan
-          </Link>
+          {canAdmin ? (
+            <>
+              <Link
+                href="/admin/suscripciones/membresias/configuracion"
+                className="rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"
+              >
+                Configurar base
+              </Link>
+              <Link
+                href="/admin/suscripciones/membresias/planes/nuevo"
+                className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
+              >
+                Crear producto
+              </Link>
+            </>
+          ) : null}
         </div>
       }
     >
@@ -207,7 +217,7 @@ export default function MembershipCatalogPage() {
           secondaryCtaHref="/admin/suscripciones/membresias/configuracion"
           secondaryCtaLabel="Configurar base"
           ctaHref="/admin/suscripciones/membresias/planes/nuevo"
-          ctaLabel="Crear primer plan"
+          ctaLabel="Crear primer producto"
         />
       ) : null}
 

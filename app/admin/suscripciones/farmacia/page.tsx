@@ -1,11 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
+import { NavPills } from "@/components/subscriptions/NavPills";
 
 type PharmacyConfig = {
   id: number;
@@ -76,8 +77,6 @@ type InventoryOption = {
 
 type TabId = "cola" | "medicamentos" | "descuento" | "config";
 type FulfillmentMode = "PICKUP" | "DELIVERY" | "THIRD_PARTY";
-
-const TAB_STYLE = "rounded-lg border px-3 py-2 text-xs font-semibold transition";
 
 function dateLabel(value?: string | null) {
   if (!value) return "-";
@@ -258,7 +257,7 @@ export default function SubscriptionsPharmacyPage() {
     return () => window.clearTimeout(timeout);
   }, [medicationSearch]);
 
-  function selectTab(nextTab: TabId) {
+  const selectTab = useCallback((nextTab: TabId) => {
     setActiveTab(nextTab);
     const next = new URLSearchParams(searchParams?.toString() || "");
     if (nextTab === "medicamentos") {
@@ -268,7 +267,39 @@ export default function SubscriptionsPharmacyPage() {
     }
     const qs = next.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }
+  }, [pathname, router, searchParams]);
+
+  const pharmacyTabItems = useMemo(
+    () => [
+      {
+        key: "cola",
+        label: "Cola operativa",
+        active: activeTab === "cola",
+        onClick: () => selectTab("cola")
+      },
+      {
+        key: "medicamentos",
+        label: "Suscripciones",
+        active: activeTab === "medicamentos",
+        onClick: () => selectTab("medicamentos")
+      },
+      {
+        key: "descuento",
+        label: "Descuento",
+        active: activeTab === "descuento",
+        disabled: true,
+        badge: "Próximamente",
+        onClick: () => selectTab("descuento")
+      },
+      {
+        key: "config",
+        label: "Configuración",
+        active: activeTab === "config",
+        onClick: () => selectTab("config")
+      }
+    ],
+    [activeTab, selectTab]
+  );
 
   async function createMedicationSubscription(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -453,53 +484,26 @@ export default function SubscriptionsPharmacyPage() {
     <MembershipsShell
       title="Suscripciones · Farmacia"
       description="Operación de tratamiento recurrente y preparación del programa de descuento. Cobranza y facturación se ejecutan en Facturación/Finanzas."
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => selectTab("cola")}
+            className="rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"
+          >
+            Ver cola
+          </button>
+          <button
+            type="button"
+            onClick={() => selectTab("medicamentos")}
+            className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
+          >
+            Crear suscripción
+          </button>
+        </div>
+      }
     >
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => selectTab("cola")}
-          className={`${TAB_STYLE} ${
-            activeTab === "cola"
-              ? "border-[#4aa59c] bg-[#4aa59c]/10 text-[#2e75ba]"
-              : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5]"
-          }`}
-        >
-          Cola operativa
-        </button>
-        <button
-          type="button"
-          onClick={() => selectTab("medicamentos")}
-          className={`${TAB_STYLE} ${
-            activeTab === "medicamentos"
-              ? "border-[#4aa59c] bg-[#4aa59c]/10 text-[#2e75ba]"
-              : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5]"
-          }`}
-        >
-          Suscripciones
-        </button>
-        <button
-          type="button"
-          onClick={() => selectTab("descuento")}
-          className={`${TAB_STYLE} ${
-            activeTab === "descuento"
-              ? "border-slate-300 bg-slate-100 text-slate-600"
-              : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300"
-          }`}
-        >
-          Descuento · Próximamente
-        </button>
-        <button
-          type="button"
-          onClick={() => selectTab("config")}
-          className={`${TAB_STYLE} ${
-            activeTab === "config"
-              ? "border-[#4aa59c] bg-[#4aa59c]/10 text-[#2e75ba]"
-              : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5]"
-          }`}
-        >
-          Configuración
-        </button>
-      </div>
+      <NavPills items={pharmacyTabItems} ariaLabel="Submenú de farmacia" />
 
       {loading ? <p className="text-xs text-slate-500">Cargando farmacia...</p> : null}
       {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
@@ -777,6 +781,12 @@ export default function SubscriptionsPharmacyPage() {
                 placeholder="Notas operativas para surtido y contacto"
                 className="rounded-lg border border-slate-200 px-2 py-2 text-xs xl:col-span-2"
               />
+
+              {newMedication.fulfillmentMode === "THIRD_PARTY" ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 md:col-span-2">
+                  Entrega por terceros: documenta nombre del autorizado, vínculo y teléfono de confirmación en notas.
+                </p>
+              ) : null}
 
               <button
                 type="submit"

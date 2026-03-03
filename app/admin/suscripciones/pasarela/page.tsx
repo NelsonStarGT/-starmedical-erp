@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { SectionCard } from "@/components/subscriptions/SectionCard";
-import { KPIStat } from "@/components/subscriptions/KPIStat";
+import { KPIStatCard } from "@/components/subscriptions/KPIStatCard";
 import { money } from "@/app/admin/suscripciones/membresias/_lib";
 
 type GatewayConfig = {
@@ -159,9 +159,9 @@ export default function SubscriptionsGatewayPage() {
 
         {!loading ? (
           <div className="grid gap-2 sm:grid-cols-3">
-            <KPIStat label="Provider" value={gateway.provider} />
-            <KPIStat label="Modo" value={gateway.mode.toUpperCase()} tone={gateway.mode === "test" ? "warning" : "default"} />
-            <KPIStat label="Webhook" value={webhookHealth} tone={webhookHealth === "OK" ? "success" : "warning"} hint={dateTimeLabel(gateway.lastWebhookAt)} />
+            <KPIStatCard label="Provider" value={gateway.provider} />
+            <KPIStatCard label="Modo" value={gateway.mode.toUpperCase()} tone={gateway.mode === "test" ? "warning" : "default"} />
+            <KPIStatCard label="Webhook" value={webhookHealth} tone={webhookHealth === "OK" ? "success" : "warning"} hint={dateTimeLabel(gateway.lastWebhookAt)} />
           </div>
         ) : null}
       </SectionCard>
