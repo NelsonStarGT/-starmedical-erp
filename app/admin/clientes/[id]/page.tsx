@@ -28,22 +28,28 @@ import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/EmptyState";
 import ClientBasicsEditor from "@/components/clients/portal/ClientBasicsEditor";
 import ClientAffiliationsPanel from "@/components/clients/portal/ClientAffiliationsPanel";
+import ClientDataHealthCard from "@/components/clients/portal/ClientDataHealthCard";
+import ClientMembershipsPanel from "@/components/clients/portal/ClientMembershipsPanel";
 import ClientDocumentsPanel from "@/components/clients/portal/ClientDocumentsPanel";
 import ClientLocationsPanel from "@/components/clients/portal/ClientLocationsPanel";
 import ClientContactsPanel from "@/components/clients/portal/ClientContactsPanel";
 import ClientNotesPanel from "@/components/clients/portal/ClientNotesPanel";
 import ClientActivityTimelinePanel from "@/components/clients/portal/ClientActivityTimelinePanel";
 import { ClientArchiveAction } from "@/components/clients/ClientArchiveAction";
+import ClientPosterExportModal from "@/components/clients/ClientPosterExportModal";
 import ClientIdentityCard from "@/components/clients/ClientIdentityCard";
+import { hasPermission, PERMISSIONS } from "@/lib/rbac";
 import { tenantIdFromUser } from "@/lib/tenant";
 import { isCompanySsoDocumentType, mapCompanyDocumentTypeLabel } from "@/lib/clients/companyDocumentTypes";
 import { normalizeAffiliationVerifyMonths, resolveAffiliationEffectiveStatus } from "@/lib/clients/affiliations";
+import { getClientDataIntegritySummary } from "@/lib/clients/dataIntegrity.service";
 import { recordTenantIsolationBlocked } from "@/lib/security/tenantContext.server";
 
-type SearchParams = { tab?: string | string[] };
+type SearchParams = { tab?: string | string[]; edit?: string | string[] };
 
 const TABS: Array<{ key: string; label: string; show?: (type: ClientProfileType) => boolean }> = [
   { key: "resumen", label: "Resumen" },
+  { key: "membresias", label: "Membresías" },
   { key: "afiliaciones", label: "Afiliaciones", show: (type) => type === ClientProfileType.PERSON },
   { key: "documentos", label: "Documentos" },
   { key: "ubicaciones", label: "Ubicaciones" },
@@ -87,9 +93,10 @@ function addDays(date: Date, days: number) {
   return d;
 }
 
-function tabHref(clientId: string, tabKey: string) {
+function tabHref(clientId: string, tabKey: string, options?: { edit?: boolean }) {
   const params = new URLSearchParams();
   params.set("tab", tabKey);
+  if (options?.edit) params.set("edit", "1");
   return `/admin/clientes/${clientId}?${params.toString()}`;
 }
 
@@ -287,8 +294,14 @@ export default async function ClientePortalPage({
   const tenantId = tenantIdFromUser(currentUser);
   const dateFormat = await getClientsDateFormat(tenantId);
   const docPermissions = getClientDocumentPermissions(currentUser);
+  const canExportClientPoster = hasPermission(currentUser, PERMISSIONS.CLIENTS_PROFILE_EXPORT);
+  const canExportClientPosterMasked = hasPermission(currentUser, PERMISSIONS.CLIENTS_PROFILE_EXPORT_MASKED);
+  const canExportClientPosterClinical = hasPermission(currentUser, PERMISSIONS.CLIENTS_PROFILE_EXPORT_CLINICAL);
+  const canViewMemberships = hasPermission(currentUser, PERMISSIONS.MEMBERSHIPS_READ);
+  const canManageMemberships = hasPermission(currentUser, PERMISSIONS.MEMBERSHIPS_WRITE);
   const clientRef = resolvedParams.id?.trim();
   const tab = firstValue(resolvedSearchParams?.tab) ?? "resumen";
+  const editRequested = firstValue(resolvedSearchParams?.edit) === "1";
 
   if (!clientRef) {
     notFound();
@@ -414,13 +427,92 @@ export default async function ClientePortalPage({
     }),
     prisma.clientLocation.findFirst({
       where: { clientId, isPrimary: true },
-      select: { country: true, city: true, department: true }
+      select: {
+        id: true,
+        type: true,
+        address: true,
+        postalCode: true,
+        city: true,
+        department: true,
+        country: true,
+        geoCountryId: true,
+        geoAdmin1Id: true,
+        geoAdmin2Id: true,
+        geoAdmin3Id: true,
+        freeState: true,
+        freeCity: true
+      }
     })
   ]);
 
   const documentTypeOptions =
     client.type === ClientProfileType.COMPANY ? buildCompanyDocumentTypeOptions(documentTypeCatalogRows) : documentTypeCatalogRows;
   const companyCountryLabel = primaryLocation?.country || client.country || "Sin país";
+
+  const personAffiliations =
+    client.type === ClientProfileType.PERSON && (tab === "resumen" || tab === "afiliaciones")
+      ? (await prisma.clientAffiliation.findMany({
+          where: { tenantId, personClientId: clientId, deletedAt: null },
+          orderBy: [{ isPrimaryPayer: "desc" }, { status: "asc" }, { createdAt: "desc" }],
+          select: {
+            id: true,
+            entityType: true,
+            role: true,
+            notes: true,
+            status: true,
+            lastVerifiedAt: true,
+            payerType: true,
+            payerClientId: true,
+            isPrimaryPayer: true,
+            entity: {
+              select: {
+                id: true,
+                type: true,
+                companyName: true,
+                tradeName: true,
+                nit: true,
+                firstName: true,
+                middleName: true,
+                lastName: true,
+                secondLastName: true,
+                dpi: true
+              }
+            },
+            payerClient: {
+              select: {
+                id: true,
+                type: true,
+                companyName: true,
+                tradeName: true,
+                nit: true,
+                firstName: true,
+                middleName: true,
+                lastName: true,
+                secondLastName: true,
+                dpi: true
+              }
+            }
+          }
+        })).map((aff) => ({
+          id: aff.id,
+          entityId: aff.entity.id,
+          entityType: aff.entityType,
+          entityLabel: getEntityLabel(aff.entity),
+          role: aff.role,
+          notes: aff.notes,
+          status: aff.status,
+          effectiveStatus: resolveAffiliationEffectiveStatus({
+            status: aff.status,
+            lastVerifiedAt: aff.lastVerifiedAt,
+            verifyAfterMonths: AFFILIATION_VERIFY_MONTHS
+          }),
+          lastVerifiedAt: aff.lastVerifiedAt ? aff.lastVerifiedAt.toISOString() : null,
+          payerType: aff.payerType,
+          payerClientId: aff.payerClientId,
+          payerLabel: aff.payerClient ? getEntityLabel(aff.payerClient) : null,
+          isPrimaryPayer: aff.isPrimaryPayer
+        }))
+      : [];
 
   const requiredDocTypeIds = requiredRulesRows.map((rule) => rule.documentTypeId);
   const requiredDocsRows = requiredDocTypeIds.length
@@ -586,6 +678,13 @@ export default async function ClientePortalPage({
     activeTab === "contactos" ? safeSupportsClientContactExtendedColumns("clients.detail") : Promise.resolve(false),
     activeTab === "notas" ? safeSupportsClientNoteExtendedColumns("clients.detail") : Promise.resolve(false)
   ]);
+  const dataIntegritySummary =
+    activeTab === "resumen"
+      ? await getClientDataIntegritySummary({
+          tenantId,
+          clientId
+        })
+      : null;
 
   const documentsData =
     activeTab === "documentos"
@@ -722,6 +821,41 @@ export default async function ClientePortalPage({
         actorRole: row.actorRole,
         actorLabel: row.actorUser?.name ?? row.actorUser?.email ?? "Sistema"
       }))).slice(0, 50);
+  const membershipsData =
+    activeTab === "membresias" && canViewMemberships
+      ? await prisma.membershipContract.findMany({
+          where: {
+            ownerId: clientId,
+            owner: {
+              is: {
+                tenantId,
+                deletedAt: null
+              }
+            }
+          },
+          orderBy: [{ nextRenewAt: "asc" }, { createdAt: "desc" }],
+          take: 30,
+          select: {
+            id: true,
+            code: true,
+            status: true,
+            startAt: true,
+            endAt: true,
+            nextRenewAt: true,
+            billingFrequency: true,
+            plan: {
+              select: {
+                name: true
+              }
+            },
+            _count: {
+              select: {
+                usages: true
+              }
+            }
+          }
+        })
+      : [];
 
   return (
     <div className="space-y-6">
@@ -838,7 +972,7 @@ export default async function ClientePortalPage({
                 Iniciar check-in
               </Link>
               <Link
-                href={tabHref(client.id, "resumen")}
+                href={tabHref(client.id, "resumen", { edit: true })}
                 className="inline-flex rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
               >
                 Editar
@@ -851,6 +985,13 @@ export default async function ClientePortalPage({
                   Documentos
                 </Link>
               ) : null}
+              <ClientPosterExportModal
+                clientId={client.id}
+                clientType={client.type}
+                canExport={canExportClientPoster}
+                canExportMasked={canExportClientPosterMasked}
+                canExportClinical={canExportClientPosterClinical}
+              />
               <ClientArchiveAction clientId={client.id} redirectAfterArchive />
             </div>
           </div>
@@ -914,10 +1055,30 @@ export default async function ClientePortalPage({
                   country: client.country,
                   photoUrl,
                   photoAssetId,
-                  statusId: client.statusId
+                  statusId: client.statusId,
+                  primaryLocation: primaryLocation
+                    ? {
+                        id: primaryLocation.id,
+                        type: primaryLocation.type,
+                        address: primaryLocation.address,
+                        city: primaryLocation.city,
+                        department: primaryLocation.department,
+                        country: primaryLocation.country,
+                        postalCode: primaryLocation.postalCode,
+                        geoCountryId: primaryLocation.geoCountryId,
+                        geoAdmin1Id: primaryLocation.geoAdmin1Id,
+                        geoAdmin2Id: primaryLocation.geoAdmin2Id,
+                        geoAdmin3Id: primaryLocation.geoAdmin3Id,
+                        geoFreeState: primaryLocation.freeState,
+                        geoFreeCity: primaryLocation.freeCity
+                      }
+                    : null
                 }}
                 statusOptions={statusOptions}
                 institutionTypeOptions={institutionTypeOptions}
+                personAffiliations={personAffiliations}
+                initialOpen={activeTab === "resumen" && editRequested}
+                closeHref={tabHref(client.id, "resumen")}
               />
             </div>
           </section>
@@ -1019,74 +1180,36 @@ export default async function ClientePortalPage({
                 </>
               )}
             </div>
+
+            {dataIntegritySummary ? <ClientDataHealthCard clientId={client.id} summary={dataIntegritySummary} /> : null}
           </section>
         </div>
+      )}
+
+      {activeTab === "membresias" && (
+        <ClientMembershipsPanel
+          clientId={client.id}
+          canViewMemberships={canViewMemberships}
+          canManageMemberships={canManageMemberships}
+          dateFormat={dateFormat}
+          memberships={membershipsData.map((contract) => ({
+            id: contract.id,
+            code: contract.code,
+            status: contract.status,
+            billingFrequency: contract.billingFrequency,
+            startAt: contract.startAt,
+            endAt: contract.endAt,
+            nextRenewAt: contract.nextRenewAt,
+            usageCount: contract._count.usages,
+            planName: contract.plan.name
+          }))}
+        />
       )}
 
       {activeTab === "afiliaciones" && (
         <ClientAffiliationsPanel
           clientId={client.id}
-          affiliations={(await prisma.clientAffiliation.findMany({
-            where: { tenantId, personClientId: clientId, deletedAt: null },
-            orderBy: [{ isPrimaryPayer: "desc" }, { status: "asc" }, { createdAt: "desc" }],
-            select: {
-              id: true,
-              entityType: true,
-              role: true,
-              notes: true,
-              status: true,
-              lastVerifiedAt: true,
-              payerType: true,
-              payerClientId: true,
-              isPrimaryPayer: true,
-              entity: {
-                select: {
-                  id: true,
-                  type: true,
-                  companyName: true,
-                  tradeName: true,
-                  nit: true,
-                  firstName: true,
-                  middleName: true,
-                  lastName: true,
-                  secondLastName: true,
-                  dpi: true
-                }
-              },
-              payerClient: {
-                select: {
-                  id: true,
-                  type: true,
-                  companyName: true,
-                  tradeName: true,
-                  nit: true,
-                  firstName: true,
-                  middleName: true,
-                  lastName: true,
-                  secondLastName: true,
-                  dpi: true
-                }
-              }
-            }
-          })).map((aff) => ({
-            id: aff.id,
-            entityId: aff.entity.id,
-            entityType: aff.entityType,
-            entityLabel: getEntityLabel(aff.entity),
-            role: aff.role,
-            notes: aff.notes,
-            status: aff.status,
-            effectiveStatus: resolveAffiliationEffectiveStatus({
-              status: aff.status,
-              lastVerifiedAt: aff.lastVerifiedAt,
-              verifyAfterMonths: AFFILIATION_VERIFY_MONTHS
-            }),
-            lastVerifiedAt: aff.lastVerifiedAt ? aff.lastVerifiedAt.toISOString() : null,
-            payerType: aff.payerType,
-            payerClientId: aff.payerClientId,
-            payerLabel: aff.payerClient ? getEntityLabel(aff.payerClient) : null,
-            isPrimaryPayer: aff.isPrimaryPayer
-          }))}
+          affiliations={personAffiliations}
         />
       )}
 

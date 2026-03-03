@@ -9167,6 +9167,196 @@ export async function actionUpdateClientProfilePhoto(input: {
   return { ok: true, id: clientId };
 }
 
+export async function actionUpdatePersonProfileSummary(input: {
+  clientId: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  secondLastName?: string;
+  dpi?: string;
+  phone?: string;
+  phoneCountryIso2?: string;
+  email?: string;
+  address?: string;
+  city?: string;
+  department?: string;
+  country?: string;
+  geoCountryId?: string;
+  geoAdmin1Id?: string;
+  geoAdmin2Id?: string;
+  geoAdmin3Id?: string;
+  geoPostalCode?: string;
+  geoFreeState?: string;
+  geoFreeCity?: string;
+  statusId?: string;
+}) {
+  const user = await requireAdminUser();
+  const tenantId = tenantIdFromUser(user);
+  const clientId = normalizeRequired(input.clientId, "Cliente inválido.");
+
+  const existing = await prisma.clientProfile.findFirst({
+    where: { id: clientId, tenantId, type: ClientProfileType.PERSON, deletedAt: null },
+    select: {
+      id: true,
+      type: true,
+      firstName: true,
+      middleName: true,
+      lastName: true,
+      secondLastName: true,
+      dpi: true,
+      phone: true,
+      phoneE164: true,
+      email: true,
+      address: true,
+      city: true,
+      department: true,
+      country: true,
+      statusId: true
+    }
+  });
+  if (!existing) throw new Error("Cliente persona no encontrado.");
+
+  const email = normalizeOptional(input.email);
+  if (email && !isValidEmail(email)) throw new Error("Correo inválido.");
+
+  const dpi = normalizeOptional(input.dpi);
+  if (dpi) {
+    const parsed = dpiSchema.safeParse(dpi);
+    if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "DPI inválido.");
+  }
+
+  const resolvedGeo = await resolveGeoSelection({
+    geoCountryId: input.geoCountryId,
+    geoAdmin1Id: input.geoAdmin1Id,
+    geoAdmin2Id: input.geoAdmin2Id,
+    geoAdmin3Id: input.geoAdmin3Id
+  });
+
+  const address = normalizeOptional(input.address);
+  const freeState = normalizeOptional(input.geoFreeState);
+  const freeCity = normalizeOptional(input.geoFreeCity);
+  const postalCode = normalizeOptional(input.geoPostalCode);
+
+  const resolvedCountry = resolvedGeo.countryName ?? normalizeOptional(input.country);
+  const resolvedDepartment = resolvedGeo.admin1Name ?? normalizeOptional(input.department) ?? freeState;
+  const resolvedCity = resolvedGeo.admin2Name ?? normalizeOptional(input.city) ?? freeCity;
+
+  const phone = normalizeOptional(input.phone);
+  const phoneE164 = phone && phone.startsWith("+") ? phone : null;
+  const statusId = normalizeOptional(input.statusId);
+
+  const shouldPersistPrimaryLocation = Boolean(
+    address ||
+      resolvedGeo.geoCountryId ||
+      resolvedGeo.geoAdmin1Id ||
+      resolvedGeo.geoAdmin2Id ||
+      resolvedGeo.geoAdmin3Id ||
+      resolvedCountry ||
+      resolvedDepartment ||
+      resolvedCity ||
+      postalCode ||
+      freeState ||
+      freeCity
+  );
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const nextProfile = await tx.clientProfile.update({
+      where: { id: clientId },
+      data: {
+        firstName: normalizeOptional(input.firstName),
+        middleName: normalizeOptional(input.middleName),
+        lastName: normalizeOptional(input.lastName),
+        secondLastName: normalizeOptional(input.secondLastName),
+        dpi,
+        phone,
+        phoneE164,
+        email,
+        address,
+        city: resolvedCity,
+        department: resolvedDepartment,
+        country: resolvedCountry,
+        statusId
+      },
+      select: { id: true }
+    });
+
+    if (shouldPersistPrimaryLocation) {
+      const existingPrimary = await tx.clientLocation.findFirst({
+        where: { clientId, isPrimary: true },
+        select: { id: true, type: true, address: true }
+      });
+
+      const locationAddress = address ?? existingPrimary?.address ?? existing.address ?? "Sin dirección especificada";
+      const locationData = {
+        address: locationAddress,
+        city: resolvedCity,
+        department: resolvedDepartment,
+        country: resolvedCountry,
+        geoCountryId: resolvedGeo.geoCountryId,
+        geoAdmin1Id: resolvedGeo.geoAdmin1Id,
+        geoAdmin2Id: resolvedGeo.geoAdmin2Id,
+        geoAdmin3Id: resolvedGeo.geoAdmin3Id,
+        postalCode,
+        freeState,
+        freeCity
+      };
+
+      if (existingPrimary) {
+        await tx.clientLocation.update({
+          where: { id: existingPrimary.id },
+          data: locationData
+        });
+      } else {
+        await tx.clientLocation.create({
+          data: {
+            clientId,
+            type: ClientLocationType.HOME,
+            isPrimary: true,
+            ...locationData
+          }
+        });
+      }
+    }
+
+    return nextProfile;
+  });
+
+  await logClientAudit({
+    actorUserId: user.id,
+    actorRole: user.roles?.[0] ?? null,
+    clientId,
+    action: "CLIENT_UPDATED",
+    before: existing as Prisma.JsonObject,
+    after: {
+      firstName: normalizeOptional(input.firstName),
+      middleName: normalizeOptional(input.middleName),
+      lastName: normalizeOptional(input.lastName),
+      secondLastName: normalizeOptional(input.secondLastName),
+      dpi,
+      phone,
+      phoneE164,
+      email,
+      address,
+      city: resolvedCity,
+      department: resolvedDepartment,
+      country: resolvedCountry,
+      geoCountryId: resolvedGeo.geoCountryId,
+      geoAdmin1Id: resolvedGeo.geoAdmin1Id,
+      geoAdmin2Id: resolvedGeo.geoAdmin2Id,
+      geoAdmin3Id: resolvedGeo.geoAdmin3Id,
+      postalCode,
+      freeState,
+      freeCity,
+      statusId
+    } as Prisma.JsonObject
+  });
+
+  revalidatePath("/admin/clientes");
+  revalidatePath("/admin/clientes/personas");
+  revalidatePath(`/admin/clientes/${clientId}`);
+  return { ok: true, id: updated.id };
+}
+
 export async function actionUpdateClientBasics(input: {
   clientId: string;
   type: ClientProfileType;
