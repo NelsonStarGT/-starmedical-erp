@@ -4,6 +4,11 @@ import { useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ModuleNavItem } from "@/components/nav/moduleNavRegistry";
+import { SubscriptionsHeader } from "@/components/subscriptions/SubscriptionsHeader";
+import {
+  SubscriptionsPrimaryNav,
+  type SubscriptionsPrimaryNavItem
+} from "@/components/subscriptions/SubscriptionsPrimaryNav";
 
 type ModuleSubnavProps = {
   moduleKey: string;
@@ -231,48 +236,20 @@ export default function ModuleSubnav({
     const section = getSubscriptionsSection(pathname);
     const primaryCta = getSubscriptionsPrimaryCta(section, subscriptionsMode);
     const secondaryItems = section === "farmacia" ? getPharmacySecondaryItems(pathname, search, subscriptionsMode) : [];
+    const primaryNavItems: SubscriptionsPrimaryNavItem[] = items.map((item) => ({
+      key: item.key,
+      label: item.label,
+      href: resolveHref(item),
+      icon: item.icon,
+      active: isItemActive(item)
+    }));
 
     return (
       <div className={cn("w-full", sticky && "sticky z-30 [top:var(--admin-header-offset,72px)]")}>
         <div className="rounded-xl border border-slate-200 bg-[#FFFFFF] shadow-sm">
           <div className="space-y-3 px-4 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-[#2e75ba]">Suscripciones</h2>
-                <p className="mt-1 text-xs text-slate-600">
-                  Membresías y farmacia: operación, renovaciones y cobros recurrentes.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {items.map((item) => {
-                const Icon = item.icon;
-                const active = isItemActive(item);
-                return (
-                  <Link
-                    key={item.key}
-                    href={resolveHref(item)}
-                    className={cn(
-                      "group inline-flex items-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold transition-colors",
-                      active
-                        ? "border-[#4aa59c] bg-[#F8FAFC] text-[#2e75ba]"
-                        : "border-slate-200 bg-[#FFFFFF] text-slate-700 hover:border-[#4aadf5] hover:bg-[#F8FAFC]"
-                    )}
-                  >
-                    {Icon ? (
-                      <Icon
-                        className={cn(
-                          "h-4 w-4",
-                          active ? "text-[#4aa59c]" : "text-slate-500 group-hover:text-[#4aa59c]"
-                        )}
-                      />
-                    ) : null}
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
+            <SubscriptionsHeader />
+            <SubscriptionsPrimaryNav items={primaryNavItems} />
 
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2">
               <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
