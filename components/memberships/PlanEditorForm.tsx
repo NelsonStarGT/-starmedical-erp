@@ -48,6 +48,22 @@ type CatalogDefaults = {
   defaultModalityCode?: PlanModality["code"] | null;
 };
 
+type MembershipCurrency = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+type MembershipProductType = {
+  id: string;
+  code: "RECURRENTE" | "PREPAGO" | "GIFT_CARD";
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+};
+
 type PlanEditorFormProps = {
   mode: "create" | "edit";
   planId?: string;
@@ -70,7 +86,7 @@ type PlanEditorFormProps = {
   };
 };
 
-type ProductModel = "RECURRENTE" | "PREPAGO";
+type ProductModel = "RECURRENTE" | "PREPAGO" | "GIFT_CARD";
 type BenefitMode = "CUPO" | "ILIMITADO" | "DESCUENTO";
 type BenefitWindow = "MENSUAL" | "ANUAL" | "CUSTOM";
 type InventoryKind = "SERVICE" | "PRODUCT" | "COMBO";
@@ -97,7 +113,7 @@ type SelectedBenefit = {
   note: string;
 };
 
-const PRODUCT_META_REGEX = /^\[product:(RECURRENTE|PREPAGO)\]\s*/i;
+const PRODUCT_META_REGEX = /^\[product:(RECURRENTE|PREPAGO|GIFT_CARD)\]\s*/i;
 const MODALITY_META_REGEX = /^\[modality:([A-Z_]+)\]\s*/i;
 const BENEFIT_META_REGEX = /^\[meta:([^\]]+)\]\s*/i;
 
@@ -166,6 +182,17 @@ const DEFAULT_CATALOG_DEFAULTS: CatalogDefaults = {
   defaultModalityCode: "INDIVIDUAL"
 };
 
+const DEFAULT_CURRENCIES: MembershipCurrency[] = [
+  { id: "cur-gtq", code: "GTQ", name: "Quetzal", isActive: true, sortOrder: 10 },
+  { id: "cur-usd", code: "USD", name: "US Dollar", isActive: true, sortOrder: 20 }
+];
+
+const DEFAULT_PRODUCT_TYPES: MembershipProductType[] = [
+  { id: "ptype-recurrente", code: "RECURRENTE", name: "Recurrente (Membresía)", isActive: true, sortOrder: 10 },
+  { id: "ptype-prepago", code: "PREPAGO", name: "Prepago (Plan)", isActive: true, sortOrder: 20 },
+  { id: "ptype-gift-card", code: "GIFT_CARD", name: "Gift card", isActive: true, sortOrder: 30 }
+];
+
 function parseProductMeta(description: string | null | undefined) {
   const original = String(description || "").trim();
   let cursor = original;
@@ -178,7 +205,10 @@ function parseProductMeta(description: string | null | undefined) {
 
     const productMatch = cursor.match(PRODUCT_META_REGEX);
     if (productMatch) {
-      productModel = productMatch[1]?.toUpperCase() === "PREPAGO" ? "PREPAGO" : "RECURRENTE";
+      const raw = String(productMatch[1] || "").toUpperCase();
+      if (raw === "PREPAGO") productModel = "PREPAGO";
+      else if (raw === "GIFT_CARD") productModel = "GIFT_CARD";
+      else productModel = "RECURRENTE";
       cursor = cursor.slice(productMatch[0].length).trimStart();
       keepParsing = true;
     }
@@ -319,7 +349,23 @@ function toInventoryItem(raw: unknown, kind: InventoryKind): InventoryItem | nul
 }
 
 function toProductTypeDescription(model: ProductModel) {
-  return model === "PREPAGO" ? "Prepago" : "Recurrente";
+  if (model === "PREPAGO") return "Prepago";
+  if (model === "GIFT_CARD") return "Gift card";
+  return "Recurrente";
+}
+
+function mapInventoryKindToServiceType(kind: InventoryKind | "") {
+  if (kind === "PRODUCT") return "FARMACIA";
+  if (kind === "COMBO") return "OTRO";
+  return "CONSULTA";
+}
+
+function buildInventoryBenefitKey(item: InventoryItem) {
+  return `inv:${item.kind}:${item.id}`;
+}
+
+function isTemporaryBenefitId(value: string) {
+  return value.startsWith("inv:");
 }
 
 export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProps) {
@@ -329,9 +375,12 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
 
   const [categories, setCategories] = useState<PlanCategory[]>([]);
   const [modalities, setModalities] = useState<PlanModality[]>(DEFAULT_MODALITIES);
+  const [currencies, setCurrencies] = useState<MembershipCurrency[]>(DEFAULT_CURRENCIES);
+  const [productTypes, setProductTypes] = useState<MembershipProductType[]>(DEFAULT_PRODUCT_TYPES);
   const [catalogDefaults, setCatalogDefaults] = useState<CatalogDefaults>(DEFAULT_CATALOG_DEFAULTS);
   const [benefits, setBenefits] = useState<BenefitCatalog[]>([]);
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [inventoryRows, setInventoryRows] = useState<InventoryItem[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryWarning, setInventoryWarning] = useState<string | null>(null);
   const [catalogWarning, setCatalogWarning] = useState<string | null>(null);
   const [loadingCatalogs, setLoadingCatalogs] = useState(true);
@@ -342,7 +391,6 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
   const [hidePricesForOperators, setHidePricesForOperators] = useState(true);
   const [selectedModalityCode, setSelectedModalityCode] = useState<PlanModality["code"]>(initialModalityCode);
 
-  const [benefitSearch, setBenefitSearch] = useState("");
   const [inventorySearch, setInventorySearch] = useState("");
   const [inventoryKindFilter, setInventoryKindFilter] = useState<"" | InventoryKind>("");
   const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState("");
@@ -396,7 +444,9 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
           fetch("/api/subscriptions/memberships/config/benefits?includeInactive=true", { cache: "no-store" }),
           fetch("/api/subscriptions/memberships/config", { cache: "no-store" }),
           fetch("/api/subscriptions/memberships/config/modalities", { cache: "no-store" }),
-          fetch("/api/subscriptions/memberships/config/defaults", { cache: "no-store" })
+          fetch("/api/subscriptions/memberships/config/defaults", { cache: "no-store" }),
+          fetch("/api/subscriptions/memberships/config/currencies", { cache: "no-store" }),
+          fetch("/api/subscriptions/memberships/config/product-types", { cache: "no-store" })
         ]);
 
         if (!mounted) return;
@@ -476,6 +526,36 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
           setCatalogDefaults(DEFAULT_CATALOG_DEFAULTS);
         }
 
+        const currenciesResult = requests[5];
+        if (currenciesResult.status === "fulfilled") {
+          const currenciesJson = await currenciesResult.value.json().catch(() => ({}));
+          if (currenciesResult.value.ok && Array.isArray((currenciesJson as { data?: MembershipCurrency[] })?.data)) {
+            const rows = (currenciesJson as { data?: MembershipCurrency[] }).data || [];
+            setCurrencies(rows.length > 0 ? rows : DEFAULT_CURRENCIES);
+          } else {
+            setCurrencies(DEFAULT_CURRENCIES);
+            warnings.push("No se pudieron cargar monedas configuradas. Se usa GTQ/USD por default.");
+          }
+        } else {
+          setCurrencies(DEFAULT_CURRENCIES);
+          warnings.push("No se pudieron cargar monedas configuradas. Se usa GTQ/USD por default.");
+        }
+
+        const productTypesResult = requests[6];
+        if (productTypesResult.status === "fulfilled") {
+          const productTypesJson = await productTypesResult.value.json().catch(() => ({}));
+          if (productTypesResult.value.ok && Array.isArray((productTypesJson as { data?: MembershipProductType[] })?.data)) {
+            const rows = (productTypesJson as { data?: MembershipProductType[] }).data || [];
+            setProductTypes(rows.length > 0 ? rows : DEFAULT_PRODUCT_TYPES);
+          } else {
+            setProductTypes(DEFAULT_PRODUCT_TYPES);
+            warnings.push("No se pudieron cargar tipos de producto. Se usa catálogo base.");
+          }
+        } else {
+          setProductTypes(DEFAULT_PRODUCT_TYPES);
+          warnings.push("No se pudieron cargar tipos de producto. Se usa catálogo base.");
+        }
+
         if (warnings.length > 0) {
           setCatalogWarning(warnings.join(" "));
         }
@@ -493,50 +573,70 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
 
   useEffect(() => {
     let mounted = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(async () => {
+      try {
+        setInventoryLoading(true);
+        const query = inventorySearch.trim();
+        const params = new URLSearchParams();
+        if (query) params.set("q", query);
+        if (inventoryKindFilter) params.set("type", inventoryKindFilter);
+        params.set("limit", "120");
 
-    (async () => {
-      const headers = { "x-role": "Administrador" };
-      const requests: Array<{ kind: InventoryKind; url: string }> = [
-        { kind: "SERVICE", url: "/api/inventario/servicios" },
-        { kind: "PRODUCT", url: "/api/inventario/productos" },
-        { kind: "COMBO", url: "/api/inventario/combos" }
-      ];
+        const response = await fetch(`/api/inventory/search?${params.toString()}`, {
+          cache: "no-store",
+          headers: { "x-role": "Administrador" },
+          signal: controller.signal
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!mounted) return;
 
-      const results = await Promise.allSettled(
-        requests.map(async ({ kind, url }) => {
-          const response = await fetch(url, { cache: "no-store", headers });
-          const json = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            return { kind, ok: false as const, rows: [] as InventoryItem[] };
-          }
-          const rows = Array.isArray((json as { data?: unknown[] })?.data)
-            ? ((json as { data?: unknown[] }).data || []).map((row) => toInventoryItem(row, kind)).filter(Boolean) as InventoryItem[]
-            : [];
-
-          return { kind, ok: true as const, rows };
-        })
-      );
-
-      if (!mounted) return;
-
-      const items: InventoryItem[] = [];
-      let successCount = 0;
-      for (const result of results) {
-        if (result.status !== "fulfilled") continue;
-        if (result.value.ok) {
-          successCount += 1;
-          items.push(...result.value.rows);
+        if (!response.ok) {
+          setInventoryRows([]);
+          setInventoryWarning("No se pudo consultar Inventario en este momento.");
+          return;
         }
-      }
 
-      setInventoryItems(items);
-      setInventoryWarning(successCount === 0 ? "No se pudo conectar con Inventario. Puedes continuar con beneficios del catálogo." : null);
-    })();
+        const rows = Array.isArray((json as { data?: unknown[] })?.data)
+          ? ((json as { data?: unknown[] }).data || [])
+              .map((row) => {
+                if (!row || typeof row !== "object") return null;
+                const item = row as Record<string, unknown>;
+                const typeRaw = String(item.type || "").toUpperCase();
+                const kind: InventoryKind = typeRaw === "PRODUCT" ? "PRODUCT" : typeRaw === "COMBO" ? "COMBO" : "SERVICE";
+                return toInventoryItem(
+                  {
+                    id: item.id,
+                    name: item.name,
+                    code: item.code,
+                    categoryId: item.categoryId,
+                    categoryName: item.categoryName
+                  },
+                  kind
+                );
+              })
+              .filter(Boolean) as InventoryItem[]
+          : [];
+
+        setInventoryRows(rows);
+        const warning = String((json as { meta?: { warning?: string } })?.meta?.warning || "").trim();
+        setInventoryWarning(warning || null);
+      } catch (err: any) {
+        if (!mounted) return;
+        if (err?.name === "AbortError") return;
+        setInventoryRows([]);
+        setInventoryWarning("No se pudo consultar Inventario. Puedes guardar y completar beneficios después.");
+      } finally {
+        if (mounted) setInventoryLoading(false);
+      }
+    }, 280);
 
     return () => {
       mounted = false;
+      controller.abort();
+      clearTimeout(timeout);
     };
-  }, []);
+  }, [inventorySearch, inventoryKindFilter]);
 
   const shouldHidePricing = hidePricesForOperators && !canViewPricing;
 
@@ -553,6 +653,16 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
     return DEFAULT_MODALITIES.filter((modality) => modality.segment === form.segment);
   }, [modalities, form.segment]);
 
+  const availableCurrencies = useMemo(() => {
+    const rows = currencies.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+    return rows.length > 0 ? rows : DEFAULT_CURRENCIES;
+  }, [currencies]);
+
+  const availableProductTypes = useMemo(() => {
+    const rows = productTypes.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+    return rows.length > 0 ? rows : DEFAULT_PRODUCT_TYPES;
+  }, [productTypes]);
+
   const selectedModality = useMemo(
     () => availableModalities.find((item) => item.code === selectedModalityCode) || availableModalities[0] || null,
     [availableModalities, selectedModalityCode]
@@ -568,24 +678,31 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
     }
   }, [availableModalities, selectedModality, form.maxDependents]);
 
-  const filteredBenefits = useMemo(() => {
-    const term = benefitSearch.trim().toLowerCase();
-    return benefits.filter((benefit) => {
-      if (!benefit.isActive) return false;
-      if (!term) return true;
-      return (
-        benefit.title.toLowerCase().includes(term) ||
-        benefit.serviceType.toLowerCase().includes(term) ||
-        (benefit.iconKey || "").toLowerCase().includes(term)
-      );
-    });
-  }, [benefits, benefitSearch]);
+  useEffect(() => {
+    if (!availableCurrencies.some((item) => item.code === form.currency)) {
+      setForm((prev) => ({ ...prev, currency: availableCurrencies[0]?.code || DEFAULT_CATALOG_DEFAULTS.currencyDefault }));
+    }
+  }, [availableCurrencies, form.currency]);
 
-  const selectedBenefitIds = useMemo(() => new Set(selectedBenefits.map((benefit) => benefit.benefitId)), [selectedBenefits]);
+  useEffect(() => {
+    if (!availableProductTypes.some((item) => item.code === productModel)) {
+      setProductModel(availableProductTypes[0]?.code || "RECURRENTE");
+    }
+  }, [availableProductTypes, productModel]);
+
+  const selectedBenefitByInventoryKey = useMemo(() => {
+    const map = new Set<string>();
+    for (const benefit of selectedBenefits) {
+      if (benefit.inventoryKind && benefit.inventoryId) {
+        map.add(`${benefit.inventoryKind}:${benefit.inventoryId}`);
+      }
+    }
+    return map;
+  }, [selectedBenefits]);
 
   const inventoryCategories = useMemo(() => {
     const map = new Map<string, string>();
-    for (const item of inventoryItems) {
+    for (const item of inventoryRows) {
       if (!map.has(item.categoryId)) {
         map.set(item.categoryId, item.categoryLabel);
       }
@@ -593,38 +710,38 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
     return Array.from(map.entries())
       .map(([id, label]) => ({ id, label }))
       .sort((a, b) => a.label.localeCompare(b.label, "es", { sensitivity: "base" }));
-  }, [inventoryItems]);
+  }, [inventoryRows]);
 
   const filteredInventoryItems = useMemo(() => {
-    const term = inventorySearch.trim().toLowerCase();
-    return inventoryItems.filter((item) => {
-      if (inventoryKindFilter && item.kind !== inventoryKindFilter) return false;
+    return inventoryRows.filter((item) => {
       if (inventoryCategoryFilter && item.categoryId !== inventoryCategoryFilter) return false;
-      if (!term) return true;
-      return (
-        item.label.toLowerCase().includes(term) ||
-        String(item.code || "").toLowerCase().includes(term) ||
-        item.categoryLabel.toLowerCase().includes(term)
-      );
+      return true;
     });
-  }, [inventoryItems, inventorySearch, inventoryKindFilter, inventoryCategoryFilter]);
+  }, [inventoryRows, inventoryCategoryFilter]);
 
-  function toggleBenefitSelection(benefitId: string) {
+  function toggleInventoryBenefitSelection(item: InventoryItem) {
     setSelectedBenefits((prev) => {
-      const exists = prev.some((item) => item.benefitId === benefitId);
-      if (exists) return prev.filter((item) => item.benefitId !== benefitId);
+      const key = `${item.kind}:${item.id}`;
+      const exists = prev.some((benefit) => `${benefit.inventoryKind}:${benefit.inventoryId}` === key);
+      if (exists) return prev.filter((benefit) => `${benefit.inventoryKind}:${benefit.inventoryId}` !== key);
+
+      const serviceType = mapInventoryKindToServiceType(item.kind);
+      const existingCatalog = benefits.find(
+        (benefit) => benefit.isActive && benefit.serviceType === serviceType && benefit.title.trim().toLowerCase() === item.label.trim().toLowerCase()
+      );
+
       return [
         ...prev,
         {
-          benefitId,
+          benefitId: existingCatalog?.id || buildInventoryBenefitKey(item),
           mode: "CUPO",
           quantity: "1",
           discountPercent: "",
           window: catalogDefaults.benefitWindowDefault,
           windowCustomDays: "",
-          inventoryKind: "",
-          inventoryId: "",
-          inventoryLabel: "",
+          inventoryKind: item.kind,
+          inventoryId: item.id,
+          inventoryLabel: item.label,
           note: ""
         }
       ];
@@ -641,13 +758,6 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       quantity: mode === "CUPO" ? "1" : "",
       discountPercent: mode === "DESCUENTO" ? "10" : ""
     });
-  }
-
-  function parseInventorySelection(value: string) {
-    const [kind, id] = value.split(":");
-    if (!kind || !id) return { kind: "" as InventoryKind | "", id: "" };
-    if (kind !== "SERVICE" && kind !== "PRODUCT" && kind !== "COMBO") return { kind: "" as InventoryKind | "", id: "" };
-    return { kind, id } as { kind: InventoryKind; id: string };
   }
 
   function validateBenefitsBeforeSubmit() {
@@ -680,6 +790,49 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
     return true;
   }
 
+  async function resolveBenefitCatalogId(benefit: SelectedBenefit): Promise<string> {
+    if (!isTemporaryBenefitId(benefit.benefitId)) {
+      return benefit.benefitId;
+    }
+
+    const title =
+      benefit.inventoryLabel.trim() ||
+      filteredInventoryItems.find((item) => item.id === benefit.inventoryId && item.kind === benefit.inventoryKind)?.label ||
+      benefit.benefitId;
+    const serviceType = mapInventoryKindToServiceType(benefit.inventoryKind);
+
+    const existing = benefits.find(
+      (item) => item.serviceType === serviceType && item.title.trim().toLowerCase() === title.trim().toLowerCase()
+    );
+    if (existing) return existing.id;
+
+    const response = await fetch("/api/subscriptions/memberships/config/benefits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: title.slice(0, 160),
+        serviceType,
+        iconKey: benefit.inventoryKind || null,
+        sortOrder: 0,
+        isActive: true
+      })
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((json as { error?: string })?.error || `No se pudo registrar beneficio para ${title}`);
+    }
+
+    const created = (json as { data?: BenefitCatalog })?.data;
+    if (!created?.id) throw new Error(`No se pudo registrar beneficio para ${title}`);
+
+    setBenefits((prev) => {
+      if (prev.some((row) => row.id === created.id)) return prev;
+      return [...prev, created];
+    });
+
+    return created.id;
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -701,6 +854,15 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
           ? Number(selectedModality.maxDependentsDefault || 0)
           : null;
 
+    const resolvedBenefits = await Promise.all(
+      selectedBenefits.map(async (benefit) => ({
+        benefitId: await resolveBenefitCatalogId(benefit),
+        quantity: benefit.mode === "CUPO" ? Number(benefit.quantity || 0) : null,
+        isUnlimited: benefit.mode === "ILIMITADO",
+        notes: buildBenefitNotes(benefit)
+      }))
+    );
+
     const payload: Record<string, unknown> = {
       slug: form.slug || undefined,
       name: form.name,
@@ -712,12 +874,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       active: form.active,
       currency: form.currency,
       maxDependents: resolvedMaxDependents,
-      benefits: selectedBenefits.map((benefit) => ({
-        benefitId: benefit.benefitId,
-        quantity: benefit.mode === "CUPO" ? Number(benefit.quantity || 0) : null,
-        isUnlimited: benefit.mode === "ILIMITADO",
-        notes: buildBenefitNotes(benefit)
-      }))
+      benefits: resolvedBenefits
     };
 
     if (!shouldHidePricing || mode === "create") {
@@ -817,8 +974,11 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
               onChange={(event) => setProductModel(event.target.value as ProductModel)}
               disabled={!canAdmin}
             >
-              <option value="RECURRENTE">Recurrente (Membresía)</option>
-              <option value="PREPAGO">Prepago (Plan/Gift)</option>
+              {availableProductTypes.map((productType) => (
+                <option key={`product-type-${productType.id}`} value={productType.code}>
+                  {productType.name}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -955,9 +1115,11 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
                 onChange={(event) => setForm((prev) => ({ ...prev, currency: event.target.value }))}
                 disabled={!canAdmin}
               >
-                <option value="GTQ">GTQ</option>
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
+                {availableCurrencies.map((currency) => (
+                  <option key={`currency-${currency.id}`} value={currency.code}>
+                    {currency.code} · {currency.name}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -967,67 +1129,61 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="text-sm font-semibold text-[#2e75ba]">C) Beneficios (vinculados a inventario)</h3>
         <p className="text-xs text-slate-600">
-          Selecciona beneficios del catálogo y vincula un ítem de Inventario (servicios/productos/combos) para operación y control.
+          Busca beneficios reales en Inventario (servicios/productos/combos). El sistema crea o reutiliza el catálogo interno automáticamente al guardar.
         </p>
 
-        <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Beneficios disponibles</p>
-            <input
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              value={benefitSearch}
-              onChange={(event) => setBenefitSearch(event.target.value)}
-              placeholder="Buscar por título o tipo"
-            />
-            <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white">
-              {filteredBenefits.map((benefit) => {
-                const checked = selectedBenefitIds.has(benefit.id);
-                return (
-                  <label key={benefit.id} className="flex items-center gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0">
-                    <input type="checkbox" checked={checked} onChange={() => toggleBenefitSelection(benefit.id)} />
-                    <span className="font-medium text-slate-800">{benefit.title}</span>
-                    <span className="text-slate-500">{benefit.serviceType}</span>
-                  </label>
-                );
-              })}
-              {filteredBenefits.length === 0 ? <p className="px-3 py-2 text-xs text-slate-500">Sin resultados.</p> : null}
-            </div>
-          </div>
-
-          <div className="space-y-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Inventario</p>
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Buscar en inventario</p>
+          <div className="grid gap-2 md:grid-cols-[1fr_180px_220px]">
             <input
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
               value={inventorySearch}
               onChange={(event) => setInventorySearch(event.target.value)}
-              placeholder="Buscar por nombre o código"
+              placeholder="Nombre o código del servicio/producto/combo"
             />
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                value={inventoryKindFilter}
-                onChange={(event) => setInventoryKindFilter(event.target.value as "" | InventoryKind)}
-              >
-                <option value="">Todos los tipos</option>
-                <option value="SERVICE">Servicios</option>
-                <option value="PRODUCT">Productos</option>
-                <option value="COMBO">Combos</option>
-              </select>
-              <select
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                value={inventoryCategoryFilter}
-                onChange={(event) => setInventoryCategoryFilter(event.target.value)}
-              >
-                <option value="">Todas las categorías</option>
-                {inventoryCategories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <p className="text-[11px] text-slate-500">Items cargados: {filteredInventoryItems.length} (se usan para vinculación operativa por beneficio).</p>
-            {inventoryWarning ? <p className="text-[11px] font-medium text-amber-700">{inventoryWarning}</p> : null}
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              value={inventoryKindFilter}
+              onChange={(event) => setInventoryKindFilter(event.target.value as "" | InventoryKind)}
+            >
+              <option value="">Todos los tipos</option>
+              <option value="SERVICE">Servicios</option>
+              <option value="PRODUCT">Productos</option>
+              <option value="COMBO">Combos</option>
+            </select>
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              value={inventoryCategoryFilter}
+              onChange={(event) => setInventoryCategoryFilter(event.target.value)}
+            >
+              <option value="">Todas las categorías</option>
+              {inventoryCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Resultados: {filteredInventoryItems.length} {inventoryLoading ? "· buscando..." : ""}
+          </p>
+          {inventoryWarning ? <p className="text-[11px] font-medium text-amber-700">{inventoryWarning}</p> : null}
+
+          <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white">
+            {filteredInventoryItems.map((item) => {
+              const key = `${item.kind}:${item.id}`;
+              const checked = selectedBenefitByInventoryKey.has(key);
+              return (
+                <label key={key} className="flex items-center gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0">
+                  <input type="checkbox" checked={checked} onChange={() => toggleInventoryBenefitSelection(item)} />
+                  <span className="font-medium text-slate-800">{item.label}</span>
+                  <span className="text-slate-500">{item.kind}</span>
+                  {item.code ? <span className="text-slate-500">· {item.code}</span> : null}
+                  <span className="ml-auto text-[11px] text-slate-500">{item.categoryLabel}</span>
+                </label>
+              );
+            })}
+            {filteredInventoryItems.length === 0 ? <p className="px-3 py-2 text-xs text-slate-500">Sin resultados.</p> : null}
           </div>
         </div>
 
@@ -1035,17 +1191,30 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
           <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2">
             {selectedBenefits.map((benefit) => {
               const detail = benefits.find((item) => item.id === benefit.benefitId);
-              const linkedInventoryValue = benefit.inventoryKind && benefit.inventoryId ? `${benefit.inventoryKind}:${benefit.inventoryId}` : "";
+              const title = benefit.inventoryLabel || detail?.title || benefit.benefitId;
+              const typeLabel = benefit.inventoryKind || detail?.serviceType || "OTRO";
               return (
                 <div key={benefit.benefitId} className="space-y-2 rounded-lg border border-slate-200 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">{detail?.title || benefit.benefitId}</p>
-                      <p className="text-[11px] text-slate-500">{detail?.serviceType || "OTRO"}</p>
+                      <p className="text-sm font-semibold text-slate-900">{title}</p>
+                      <p className="text-[11px] text-slate-500">
+                        {typeLabel}
+                        {benefit.inventoryId ? ` · ${benefit.inventoryId}` : ""}
+                      </p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setSelectedBenefits((prev) => prev.filter((item) => item.benefitId !== benefit.benefitId))}
+                      onClick={() => {
+                        setSelectedBenefits((prev) =>
+                          prev.filter((item) => {
+                            if (benefit.inventoryKind && benefit.inventoryId) {
+                              return !(item.inventoryKind === benefit.inventoryKind && item.inventoryId === benefit.inventoryId);
+                            }
+                            return item.benefitId !== benefit.benefitId;
+                          })
+                        );
+                      }}
                       className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
                     >
                       Quitar
@@ -1127,43 +1296,15 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
                     </label>
                   </div>
 
-                  <div className="grid gap-2 md:grid-cols-[1.2fr_1fr]">
-                    <label className="space-y-1 text-xs text-slate-700">
-                      <span className="font-medium">Vincular ítem de Inventario</span>
-                      <select
-                        className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
-                        value={linkedInventoryValue}
-                        onChange={(event) => {
-                          const parsed = parseInventorySelection(event.target.value);
-                          const selectedItem = filteredInventoryItems.find(
-                            (item) => item.id === parsed.id && item.kind === parsed.kind
-                          );
-                          patchBenefit(benefit.benefitId, {
-                            inventoryKind: parsed.kind,
-                            inventoryId: parsed.id,
-                            inventoryLabel: selectedItem?.label || ""
-                          });
-                        }}
-                      >
-                        <option value="">Sin vínculo</option>
-                        {filteredInventoryItems.slice(0, 250).map((item) => (
-                          <option key={`${item.kind}:${item.id}`} value={`${item.kind}:${item.id}`}>
-                            {item.kind} · {item.label} {item.code ? `(${item.code})` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="space-y-1 text-xs text-slate-700">
-                      <span className="font-medium">Notas</span>
-                      <input
-                        value={benefit.note}
-                        onChange={(event) => patchBenefit(benefit.benefitId, { note: event.target.value })}
-                        className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
-                        placeholder="Notas operativas"
-                      />
-                    </label>
-                  </div>
+                  <label className="space-y-1 text-xs text-slate-700">
+                    <span className="font-medium">Notas</span>
+                    <input
+                      value={benefit.note}
+                      onChange={(event) => patchBenefit(benefit.benefitId, { note: event.target.value })}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      placeholder="Notas operativas"
+                    />
+                  </label>
                 </div>
               );
             })}
