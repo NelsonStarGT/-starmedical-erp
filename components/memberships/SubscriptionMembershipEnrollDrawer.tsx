@@ -65,7 +65,7 @@ type Props = {
 
 const WIZARD_STEPS = [
   { id: 1, label: "Titular" },
-  { id: 2, label: "Plan" },
+  { id: 2, label: "Producto" },
   { id: 3, label: "Pago" }
 ] as const;
 
@@ -471,7 +471,7 @@ export function SubscriptionMembershipEnrollDrawer({
 
             {step === 2 ? (
               <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h3 className="text-sm font-semibold text-[#2e75ba]">Paso 2 · Plan</h3>
+                <h3 className="text-sm font-semibold text-[#2e75ba]">Paso 2 · Producto</h3>
                 <label className="block space-y-1">
                   <span className="text-xs font-semibold text-slate-700">Plan B2C</span>
                   <select
@@ -556,12 +556,14 @@ export function SubscriptionMembershipEnrollDrawer({
 
                 {paymentMethod === "MANUAL" ? (
                   <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
-                    <p className="text-xs text-slate-600">El cobro se gestiona en Facturación/Finanzas.</p>
+                    <p className="text-xs text-slate-600">
+                      El cobro se gestiona en Facturación/Finanzas y se procesa el siguiente día hábil.
+                    </p>
                     <Link
                       href={buildBillingLink(createdContract?.id)}
                       className="mt-2 inline-flex rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"
                     >
-                      Generar cobro en Facturación
+                      Generar borrador en Facturación
                     </Link>
                   </div>
                 ) : (
