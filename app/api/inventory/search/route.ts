@@ -13,8 +13,10 @@ type SearchRow = {
   type: InventoryType;
   name: string;
   code: string | null;
-  categoryId: string | null;
-  categoryName: string | null;
+  category: string | null;
+  active: boolean;
+  categoryId: string | null; // compat
+  categoryName: string | null; // compat
 };
 
 function parseType(value: string | null): InventoryType | "ALL" {
@@ -59,6 +61,7 @@ export async function GET(req: NextRequest) {
               id: true,
               name: true,
               code: true,
+              status: true,
               categoryId: true,
               category: { select: { name: true } }
             },
@@ -77,6 +80,7 @@ export async function GET(req: NextRequest) {
               id: true,
               name: true,
               code: true,
+              status: true,
               categoryId: true,
               category: { select: { name: true } }
             },
@@ -94,7 +98,8 @@ export async function GET(req: NextRequest) {
             select: {
               id: true,
               name: true,
-              description: true
+              description: true,
+              status: true
             },
             take: limit,
             orderBy: [{ name: "asc" }]
@@ -108,6 +113,8 @@ export async function GET(req: NextRequest) {
         type: "SERVICE" as const,
         name: item.name,
         code: item.code,
+        category: item.category?.name || null,
+        active: String(item.status || "").toLowerCase() !== "inactivo",
         categoryId: item.categoryId,
         categoryName: item.category?.name || null
       })),
@@ -116,6 +123,8 @@ export async function GET(req: NextRequest) {
         type: "PRODUCT" as const,
         name: item.name,
         code: item.code,
+        category: item.category?.name || null,
+        active: String(item.status || "").toLowerCase() !== "inactivo",
         categoryId: item.categoryId,
         categoryName: item.category?.name || null
       })),
@@ -124,6 +133,8 @@ export async function GET(req: NextRequest) {
         type: "COMBO" as const,
         name: item.name,
         code: null,
+        category: "Combos",
+        active: String(item.status || "").toLowerCase() !== "inactivo",
         categoryId: "combo",
         categoryName: "Combos"
       }))
