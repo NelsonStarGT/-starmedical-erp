@@ -1064,13 +1064,7 @@ export default async function ClientePortalPage({
                         city: primaryLocation.city,
                         department: primaryLocation.department,
                         country: primaryLocation.country,
-                        postalCode: primaryLocation.postalCode,
-                        geoCountryId: primaryLocation.geoCountryId,
-                        geoAdmin1Id: primaryLocation.geoAdmin1Id,
-                        geoAdmin2Id: primaryLocation.geoAdmin2Id,
-                        geoAdmin3Id: primaryLocation.geoAdmin3Id,
-                        geoFreeState: primaryLocation.freeState,
-                        geoFreeCity: primaryLocation.freeCity
+                        postalCode: primaryLocation.postalCode
                       }
                     : null
                 }}

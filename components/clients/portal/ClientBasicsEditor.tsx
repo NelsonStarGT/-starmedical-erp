@@ -11,7 +11,6 @@ import {
   actionUpdateClientProfilePhoto,
   actionUpdatePersonProfileSummary
 } from "@/app/admin/clientes/actions";
-import GeoCascadeFieldset, { type GeoCascadeErrors, type GeoCascadeValue } from "@/components/clients/GeoCascadeFieldset";
 import ClientAffiliationsPanel, { type ClientAffiliationRow } from "@/components/clients/portal/ClientAffiliationsPanel";
 import PhoneInput from "@/components/ui/PhoneInput";
 import { ToastContainer } from "@/components/ui/Toast";
@@ -29,12 +28,6 @@ type ClientPrimaryLocation = {
   department: string | null;
   country: string | null;
   postalCode: string | null;
-  geoCountryId: string | null;
-  geoAdmin1Id: string | null;
-  geoAdmin2Id: string | null;
-  geoAdmin3Id: string | null;
-  geoFreeState: string | null;
-  geoFreeCity: string | null;
 };
 
 export type ClientBasics = {
@@ -95,8 +88,6 @@ export default function ClientBasicsEditor({
   const [error, setError] = useState<string | null>(null);
   const [newInstitutionType, setNewInstitutionType] = useState("");
   const [isDrawerOpen, setIsDrawerOpen] = useState(client.type === ClientProfileType.PERSON && initialOpen);
-  const [hasDivisionCatalog, setHasDivisionCatalog] = useState(true);
-  const [geoErrors, setGeoErrors] = useState<GeoCascadeErrors>({});
   const drawerRef = useRef<HTMLElement | null>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
   const { toasts, showToast, dismiss } = useToast();
@@ -118,13 +109,6 @@ export default function ClientBasicsEditor({
     city: client.primaryLocation?.city ?? client.city ?? "",
     department: client.primaryLocation?.department ?? client.department ?? "",
     country: client.primaryLocation?.country ?? client.country ?? "",
-    geoCountryId: client.primaryLocation?.geoCountryId ?? "",
-    geoAdmin1Id: client.primaryLocation?.geoAdmin1Id ?? "",
-    geoAdmin2Id: client.primaryLocation?.geoAdmin2Id ?? "",
-    geoAdmin3Id: client.primaryLocation?.geoAdmin3Id ?? "",
-    geoPostalCode: client.primaryLocation?.postalCode ?? "",
-    geoFreeState: client.primaryLocation?.geoFreeState ?? "",
-    geoFreeCity: client.primaryLocation?.geoFreeCity ?? "",
     photoUrl: client.photoUrl ?? "",
     photoAssetId: client.photoAssetId ?? "",
     photoOriginalName: "",
@@ -140,7 +124,6 @@ export default function ClientBasicsEditor({
     if (isPending) return;
     setIsDrawerOpen(false);
     setError(null);
-    setGeoErrors({});
     if (closeHref) {
       router.replace(closeHref, { scroll: false });
     }
@@ -203,19 +186,33 @@ export default function ClientBasicsEditor({
     return letters || "CL";
   }, [client.type, form.companyName, form.firstName, form.lastName, form.tradeName]);
 
-  const geoValue: GeoCascadeValue = {
-    geoCountryId: form.geoCountryId,
-    geoAdmin1Id: form.geoAdmin1Id,
-    geoAdmin2Id: form.geoAdmin2Id,
-    geoAdmin3Id: form.geoAdmin3Id,
-    geoPostalCode: form.geoPostalCode,
-    geoFreeState: form.geoFreeState,
-    geoFreeCity: form.geoFreeCity
-  };
+  const primaryLocationSummary = useMemo(
+    () => ({
+      address: client.primaryLocation?.address ?? client.address ?? null,
+      country: client.primaryLocation?.country ?? client.country ?? null,
+      admin1: client.primaryLocation?.department ?? client.department ?? null,
+      admin2: client.primaryLocation?.city ?? client.city ?? null
+    }),
+    [
+      client.address,
+      client.city,
+      client.country,
+      client.department,
+      client.primaryLocation?.address,
+      client.primaryLocation?.city,
+      client.primaryLocation?.country,
+      client.primaryLocation?.department
+    ]
+  );
 
   function handleOpenDrawer() {
     if (client.type !== ClientProfileType.PERSON) return;
     setIsDrawerOpen(true);
+  }
+
+  function goToLocationsTab() {
+    setIsDrawerOpen(false);
+    router.push(`/admin/clientes/${client.id}?tab=ubicaciones`);
   }
 
   const createInstitutionType = () => {
@@ -255,17 +252,6 @@ export default function ClientBasicsEditor({
             phone: form.phone,
             phoneCountryIso2: form.phoneCountryIso2 || undefined,
             email: form.email,
-            address: form.address,
-            city: form.city,
-            department: form.department,
-            country: form.country,
-            geoCountryId: form.geoCountryId || undefined,
-            geoAdmin1Id: form.geoAdmin1Id || undefined,
-            geoAdmin2Id: form.geoAdmin2Id || undefined,
-            geoAdmin3Id: form.geoAdmin3Id || undefined,
-            geoPostalCode: form.geoPostalCode || undefined,
-            geoFreeState: form.geoFreeState || undefined,
-            geoFreeCity: form.geoFreeCity || undefined,
             statusId: form.statusId || undefined
           });
         } else {
@@ -293,7 +279,6 @@ export default function ClientBasicsEditor({
         }
 
         setError(null);
-        setGeoErrors({});
         dismiss(savingToastId);
         showToast({
           tone: "success",
@@ -317,17 +302,6 @@ export default function ClientBasicsEditor({
           message,
           durationMs: 4000
         });
-
-        const normalized = message.toLowerCase();
-        if (normalized.includes("país")) {
-          setGeoErrors((prev) => ({ ...prev, geoCountryId: message }));
-        }
-        if (normalized.includes("departamento") || normalized.includes("región")) {
-          setGeoErrors((prev) => ({ ...prev, geoAdmin1Id: message }));
-        }
-        if (normalized.includes("municipio") || normalized.includes("ciudad")) {
-          setGeoErrors((prev) => ({ ...prev, geoAdmin2Id: message }));
-        }
       }
     });
   };
@@ -380,7 +354,7 @@ export default function ClientBasicsEditor({
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-[#f8fafc] px-4 py-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2e75ba]">Edición de perfil</p>
-            <p className="text-sm text-slate-600">Edita identidad, contacto, ubicación GEO y vinculación empresarial en un solo flujo.</p>
+            <p className="text-sm text-slate-600">Edita identidad y contacto. La ubicación se gestiona en el tab Ubicaciones.</p>
           </div>
           <button
             type="button"
@@ -390,6 +364,33 @@ export default function ClientBasicsEditor({
             Editar cliente
           </button>
         </div>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1 text-sm text-slate-700">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2e75ba]">Ubicación principal</p>
+              <p>
+                <span className="font-semibold">Dirección:</span> {primaryLocationSummary.address || "No registrada"}
+              </p>
+              <p>
+                <span className="font-semibold">País:</span> {primaryLocationSummary.country || "No registrado"}
+              </p>
+              <p>
+                <span className="font-semibold">Admin1 / Departamento:</span> {primaryLocationSummary.admin1 || "No registrado"}
+              </p>
+              <p>
+                <span className="font-semibold">Admin2 / Ciudad:</span> {primaryLocationSummary.admin2 || "No registrado"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={goToLocationsTab}
+              className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+            >
+              Editar ubicaciones
+            </button>
+          </div>
+        </section>
 
         {isDrawerOpen ? (
           <div className="fixed inset-0 z-[90]">
@@ -411,7 +412,7 @@ export default function ClientBasicsEditor({
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2e75ba]">Cliente · Persona</p>
                   <h3 className="text-base font-semibold text-slate-900">Editar cliente</h3>
-                  <p className="text-xs text-slate-500">Los cambios se aplican al perfil y a la ubicación principal.</p>
+                  <p className="text-xs text-slate-500">La ubicación principal se administra desde el tab Ubicaciones.</p>
                 </div>
                 <button
                   type="button"
@@ -512,7 +513,7 @@ export default function ClientBasicsEditor({
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <PhoneInput
                       value={form.phone}
-                      preferredCountryText={form.country}
+                      preferredCountryText={primaryLocationSummary.country ?? form.country}
                       label="Teléfono"
                       autoComplete="section-company tel"
                       onChange={(phone, meta) =>
@@ -540,60 +541,24 @@ export default function ClientBasicsEditor({
 
                 <section className="rounded-xl border border-[#dce7f5] bg-white p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2e75ba]">Ubicación principal</p>
-                  <p className="mt-1 text-xs text-slate-500">País, departamento y municipio con el mismo selector GEO del formulario de creación.</p>
-                  <div className="mt-3 grid gap-3">
-                    <input
-                      value={form.address}
-                      onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
-                      placeholder="Dirección"
-                      className={inputClass}
-                    />
-
-                    <GeoCascadeFieldset
-                      idPrefix="client-person-profile-edit"
-                      value={geoValue}
-                      onChange={(next) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          geoCountryId: next.geoCountryId,
-                          geoAdmin1Id: next.geoAdmin1Id,
-                          geoAdmin2Id: next.geoAdmin2Id,
-                          geoAdmin3Id: next.geoAdmin3Id,
-                          geoPostalCode: next.geoPostalCode,
-                          geoFreeState: next.geoFreeState ?? "",
-                          geoFreeCity: next.geoFreeCity ?? "",
-                          department: next.geoFreeState ?? prev.department,
-                          city: next.geoFreeCity ?? prev.city
-                        }))
-                      }
-                      errors={geoErrors}
-                      onHasDivisionCatalogChange={setHasDivisionCatalog}
-                      subtitle="Selecciona país, departamento y municipio"
-                      autofillSection="company"
-                      autofillFieldNames={{
-                        country: "country",
-                        department: "department",
-                        city: "city"
-                      }}
-                    />
-
-                    {!hasDivisionCatalog ? (
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <input
-                          value={form.department}
-                          onChange={(e) => setForm((prev) => ({ ...prev, department: e.target.value }))}
-                          placeholder="Departamento (manual)"
-                          className={inputClass}
-                        />
-                        <input
-                          value={form.city}
-                          onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
-                          placeholder="Municipio / ciudad (manual)"
-                          className={inputClass}
-                        />
-                      </div>
-                    ) : null}
-
+                  <p className="mt-1 text-xs text-slate-500">
+                    La fuente de verdad de ubicaciones vive en el tab Ubicaciones (Vivienda/Trabajo y principal).
+                  </p>
+                  <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-[#f8fafc] p-3 text-sm text-slate-700">
+                    <p>
+                      <span className="font-semibold">Dirección:</span> {primaryLocationSummary.address || "No registrada"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">País:</span> {primaryLocationSummary.country || "No registrado"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Admin1 / Departamento:</span> {primaryLocationSummary.admin1 || "No registrado"}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Admin2 / Ciudad:</span> {primaryLocationSummary.admin2 || "No registrado"}
+                    </p>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     {statusOptions.length > 0 ? (
                       <label className="space-y-1">
                         <span className="text-xs font-semibold text-slate-500">Estado</span>
@@ -610,7 +575,16 @@ export default function ClientBasicsEditor({
                           ))}
                         </select>
                       </label>
-                    ) : null}
+                    ) : (
+                      <span />
+                    )}
+                    <button
+                      type="button"
+                      onClick={goToLocationsTab}
+                      className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+                    >
+                      Editar ubicaciones
+                    </button>
                   </div>
                 </section>
 
