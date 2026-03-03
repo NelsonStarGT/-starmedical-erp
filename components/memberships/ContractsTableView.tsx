@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { MoreHorizontal } from "lucide-react";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { FiltersBar } from "@/components/memberships/FiltersBar";
@@ -56,11 +57,26 @@ type ContractRow = {
   ownerId: string | null;
   paymentMethod?: "MANUAL" | "RECURRENT";
   branchId?: string | null;
+  plan?: {
+    id: string;
+    name: string;
+    segment: "B2C" | "B2B";
+  } | null;
+  owner?: {
+    id: string;
+    type: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    companyName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    nit?: string | null;
+  } | null;
   MembershipPlan?: {
     id: string;
     name: string;
     segment: "B2C" | "B2B";
-  };
+  } | null;
   ClientProfile?: {
     id: string;
     type: string;
@@ -84,6 +100,7 @@ type ContractsTableViewProps = {
 };
 
 const STATUS_OPTIONS = ["ACTIVO", "PENDIENTE", "PENDIENTE_PAGO", "SUSPENDIDO", "VENCIDO", "CANCELADO"] as const;
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
 export function ContractsTableView({ ownerType, title, description }: ContractsTableViewProps) {
   const searchParams = useSearchParams();
@@ -91,16 +108,20 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   const [plans, setPlans] = useState<PlanOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
   const [renewBusyId, setRenewBusyId] = useState<string | null>(null);
   const [recurrentBusyId, setRecurrentBusyId] = useState<string | null>(null);
+  const [rowMenuOpenId, setRowMenuOpenId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [planFilter, setPlanFilter] = useState("");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<"" | "MANUAL" | "RECURRENT">("");
   const [renewWindowFilter, setRenewWindowFilter] = useState<"" | "7" | "15" | "30">("");
   const [branchFilter, setBranchFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [canViewPricing, setCanViewPricing] = useState(false);
@@ -116,7 +137,15 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
     return plans.filter((plan) => (ownerType === "PERSON" ? plan.segment === "B2C" : plan.segment === "B2B"));
   }, [plans, ownerType]);
 
-  async function loadData() {
+  const totalRows = contracts.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageStartIndex = (safePage - 1) * pageSize;
+  const pagedContracts = contracts.slice(pageStartIndex, pageStartIndex + pageSize);
+
+  async function loadData(options?: { targetPage?: number; targetPageSize?: number }) {
+    const targetPage = options?.targetPage ?? safePage;
+    const targetPageSize = options?.targetPageSize ?? pageSize;
     setLoading(true);
     setError(null);
 
@@ -128,6 +157,9 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
     if (paymentMethodFilter) params.set("paymentMethod", paymentMethodFilter);
     if (renewWindowFilter) params.set("renewWindowDays", renewWindowFilter);
     if (branchFilter) params.set("branchId", branchFilter);
+    params.set("page", String(targetPage));
+    // Fallback sin paginación server-side: cargamos un bloque amplio para paginar en UI.
+    params.set("take", String(Math.min(200, Math.max(100, targetPage * targetPageSize))));
 
     try {
       const [contractsRes, plansRes, configRes] = await Promise.all([
@@ -148,6 +180,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       setPlans(Array.isArray(plansJson.data) ? plansJson.data : []);
       setCanViewPricing(Boolean(configJson?.meta?.canViewPricing));
       setHidePricesForOperators(Boolean(configJson?.data?.hidePricesForOperators));
+      if (options?.targetPage) setPage(options.targetPage);
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "Error cargando afiliaciones"));
     } finally {
@@ -156,7 +189,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   }
 
   useEffect(() => {
-    loadData();
+    loadData({ targetPage: 1, targetPageSize: pageSize });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -164,6 +197,40 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
     const openByQuery = searchParams?.get("enroll");
     if (openByQuery === "1" && ownerType === "PERSON") setEnrollOpen(true);
   }, [ownerType, searchParams]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    if (!rowMenuOpenId) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest("[data-row-actions-menu]")) {
+        setRowMenuOpenId(null);
+      }
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRowMenuOpenId(null);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [rowMenuOpenId]);
+
+  function handleApplyFilters() {
+    setPage(1);
+    setRowMenuOpenId(null);
+    setInfoMessage(null);
+    void loadData({ targetPage: 1, targetPageSize: pageSize });
+  }
 
   async function submitCreateCompanyQuick(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -193,7 +260,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
 
       setCreateForm((prev) => ({ ...prev, ownerId: "" }));
       setShowCreate(false);
-      await loadData();
+      await loadData({ targetPage: 1, targetPageSize: pageSize });
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo afiliar titular"));
     } finally {
@@ -211,7 +278,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
-      await loadData();
+      await loadData({ targetPage: safePage, targetPageSize: pageSize });
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
     } finally {
@@ -229,7 +296,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "No se pudo renovar afiliación");
-      await loadData();
+      await loadData({ targetPage: safePage, targetPageSize: pageSize });
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo renovar afiliación"));
     } finally {
@@ -255,7 +322,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
         window.location.assign(checkoutUrl);
         return;
       }
-      await loadData();
+      await loadData({ targetPage: safePage, targetPageSize: pageSize });
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo iniciar checkout recurrente"));
     } finally {
@@ -366,13 +433,38 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
         <div className="flex items-end">
           <button
             type="button"
-            onClick={() => loadData()}
+            onClick={handleApplyFilters}
             className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs font-semibold text-slate-700"
           >
             Aplicar filtros
           </button>
         </div>
       </FiltersBar>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <p className="text-xs text-slate-600">
+          Total: <span className="font-semibold text-slate-900">{totalRows}</span>
+        </p>
+        <div className="flex items-center gap-2 text-xs text-slate-600">
+          <span className="font-semibold">Tamaño de página</span>
+          <select
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+            value={pageSize}
+            onChange={(event) => {
+              const nextSize = Number(event.target.value) as (typeof PAGE_SIZE_OPTIONS)[number];
+              setPageSize(nextSize);
+              setPage(1);
+              void loadData({ targetPage: 1, targetPageSize: nextSize });
+            }}
+          >
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {ownerType === "COMPANY" && showCreate ? (
         <form onSubmit={submitCreateCompanyQuick} className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
@@ -449,6 +541,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
 
       {loading ? <p className="text-xs text-slate-500">Cargando afiliaciones...</p> : null}
       {error ? <p className="text-xs font-medium text-rose-600">{error}</p> : null}
+      {infoMessage ? <p className="text-xs font-medium text-emerald-700">{infoMessage}</p> : null}
 
       {!loading && contracts.length === 0 ? (
         <EmptyState
@@ -460,116 +553,180 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       ) : null}
 
       {contracts.length > 0 ? (
-        <CompactTable columns={["Afiliación", "Titular", "Plan", "Próx. renovación", "Método", "Saldo", "Estado", "Acciones"]}>
-          {contracts.map((contract) => {
-            const ownerLabel = contract.ClientProfile
+        <CompactTable columns={["NO.", "Membresía/Plan", "Titular", "Pago", "Próxima renovación", "Estado", "Acciones"]}>
+          {pagedContracts.map((contract, index) => {
+            const ownerProfile = contract.owner || contract.ClientProfile || null;
+            const plan = contract.plan || contract.MembershipPlan || null;
+            const ownerLabel = ownerProfile
               ? contract.ownerType === "COMPANY"
-                ? contract.ClientProfile.companyName || "Empresa"
-                : `${contract.ClientProfile.firstName || ""} ${contract.ClientProfile.lastName || ""}`.trim() || "Paciente"
+                ? ownerProfile.companyName || "Empresa"
+                : `${ownerProfile.firstName || ""} ${ownerProfile.lastName || ""}`.trim() || "Paciente"
               : "Sin titular";
 
             return (
               <tr key={contract.id} className="border-b border-slate-100">
-                <td className="px-3 py-2">
-                  <p className="font-semibold text-slate-900">{contract.code}</p>
-                  <p className="text-[11px] text-slate-500">Inicio: {dateLabel(contract.startAt)}</p>
+                <td className="px-3 py-2 text-slate-700">{pageStartIndex + index + 1}</td>
+                <td className="px-3 py-2 text-slate-800">
+                  <p className="font-semibold text-slate-900">{plan?.name || "Plan sin nombre"}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {contract.code} · {(plan?.segment || (ownerType === "PERSON" ? "B2C" : "B2B")).toString()}
+                  </p>
                 </td>
                 <td className="px-3 py-2 text-slate-800">
                   <p>{ownerLabel}</p>
-                  <p className="text-[11px] text-slate-500">{contract.ClientProfile?.email || contract.ClientProfile?.phone || "-"}</p>
+                  <p className="text-[11px] text-slate-500">{ownerProfile?.email || ownerProfile?.phone || "-"}</p>
                 </td>
-                <td className="px-3 py-2 text-slate-800">{contract.MembershipPlan?.name || "-"}</td>
+                <td className="px-3 py-2 text-slate-700">
+                  <p>{contract.paymentMethod === "RECURRENT" ? "Recurrente" : "Manual"}</p>
+                  {canViewPricing || !hidePricesForOperators ? (
+                    <p className="text-[11px] text-slate-500">Saldo: {money(contract.balance)}</p>
+                  ) : (
+                    <p className="text-[11px] text-slate-500">Saldo: —</p>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-slate-700">{dateLabel(contract.nextRenewAt)}</td>
-                <td className="px-3 py-2 text-slate-700">{contract.paymentMethod || "MANUAL"}</td>
-                <td className="px-3 py-2 text-slate-900">{money(contract.balance)}</td>
                 <td className="px-3 py-2">
                   <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${contractStatusBadgeClass(contract.status)}`}>
                     {contract.status}
                   </span>
                 </td>
                 <td className="px-3 py-2">
-                  <div className="flex flex-wrap items-center gap-1">
-                    <Link
-                      href={`/admin/suscripciones/membresias/contratos/${contract.id}`}
-                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
-                    >
-                      Ver
-                    </Link>
+                  <div data-row-actions-menu className="relative flex justify-end">
                     <button
                       type="button"
-                      onClick={() => renewMembership(contract.id)}
-                      disabled={renewBusyId === contract.id}
-                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                      onClick={() => setRowMenuOpenId((prev) => (prev === contract.id ? null : contract.id))}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 transition hover:bg-slate-50"
+                      aria-label="Acciones de afiliación"
                     >
-                      Renovar
+                      <MoreHorizontal className="h-4 w-4" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => void changeStatus(contract.id, "SUSPENDIDO")}
-                      disabled={statusBusyId === contract.id}
-                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
-                    >
-                      Suspender
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const confirmed = window.confirm("¿Marcar afiliación como cancelada al corte?");
-                        if (confirmed) void changeStatus(contract.id, "CANCELADO");
-                      }}
-                      disabled={statusBusyId === contract.id}
-                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
-                    >
-                      Cancelar (corte)
-                    </button>
-                    <Link
-                      href={`/admin/suscripciones/membresias/contratos/${contract.id}`}
-                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
-                    >
-                      Gestionar cobro
-                    </Link>
-                    <Link
-                      href={buildMembershipInvoiceLink({ contractId: contract.id })}
-                      className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
-                    >
-                      Facturación
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => activateRecurrent(contract.id)}
-                      disabled={recurrentBusyId === contract.id}
-                      className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c] disabled:opacity-60"
-                    >
-                      {recurrentBusyId === contract.id
-                        ? "Iniciando..."
-                        : contract.paymentMethod === "RECURRENT"
-                          ? "Reconfigurar recurrente"
-                          : "Activar recurrente"}
-                    </button>
-                    <select
-                      className="rounded-md border border-slate-300 px-1 py-1 text-[11px]"
-                      defaultValue={contract.status}
-                      disabled={statusBusyId === contract.id}
-                      onChange={(event) => {
-                        const status = event.target.value;
-                        if (status && status !== contract.status) {
-                          void changeStatus(contract.id, status);
-                        }
-                      }}
-                    >
-                      <option value="ACTIVO">ACTIVO</option>
-                      <option value="PENDIENTE">PENDIENTE</option>
-                      <option value="PENDIENTE_PAGO">PENDIENTE_PAGO</option>
-                      <option value="SUSPENDIDO">SUSPENDIDO</option>
-                      <option value="VENCIDO">VENCIDO</option>
-                      <option value="CANCELADO">CANCELADO</option>
-                    </select>
+
+                    {rowMenuOpenId === contract.id ? (
+                      <div className="absolute right-0 top-9 z-20 w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-md">
+                        <Link
+                          href={`/admin/suscripciones/membresias/afiliaciones/${contract.id}`}
+                          className="block rounded-md px-2 py-1.5 text-xs text-slate-700 hover:bg-[#F8FAFC]"
+                          onClick={() => setRowMenuOpenId(null)}
+                        >
+                          Ver detalle
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRowMenuOpenId(null);
+                            void renewMembership(contract.id);
+                          }}
+                          disabled={renewBusyId === contract.id}
+                          className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-[#F8FAFC] disabled:opacity-60"
+                        >
+                          {renewBusyId === contract.id ? "Renovando..." : "Renovar"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRowMenuOpenId(null);
+                            void changeStatus(contract.id, "SUSPENDIDO");
+                          }}
+                          disabled={statusBusyId === contract.id}
+                          className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-[#F8FAFC] disabled:opacity-60"
+                        >
+                          Suspender
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRowMenuOpenId(null);
+                            const confirmed = window.confirm("¿Marcar afiliación como cancelada al corte?");
+                            if (confirmed) void changeStatus(contract.id, "CANCELADO");
+                          }}
+                          disabled={statusBusyId === contract.id}
+                          className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-[#F8FAFC] disabled:opacity-60"
+                        >
+                          Cancelar
+                        </button>
+                        <Link
+                          href={buildMembershipInvoiceLink({ contractId: contract.id })}
+                          className="block rounded-md px-2 py-1.5 text-xs text-slate-700 hover:bg-[#F8FAFC]"
+                          onClick={() => setRowMenuOpenId(null)}
+                        >
+                          Gestionar cobro
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRowMenuOpenId(null);
+                            setInfoMessage("Cambio de método de pago estará disponible pronto.");
+                          }}
+                          className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-[#F8FAFC]"
+                        >
+                          Cambiar método de pago
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRowMenuOpenId(null);
+                            setInfoMessage("Impresión de carnet estará disponible pronto.");
+                          }}
+                          className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-[#F8FAFC]"
+                        >
+                          Imprimir carnet
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRowMenuOpenId(null);
+                            void activateRecurrent(contract.id);
+                          }}
+                          disabled={recurrentBusyId === contract.id}
+                          className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-[#2e75ba] hover:bg-[#F8FAFC] disabled:opacity-60"
+                        >
+                          {recurrentBusyId === contract.id ? "Iniciando..." : "Activar recurrente"}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </td>
               </tr>
             );
           })}
         </CompactTable>
+      ) : null}
+
+      {contracts.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <button
+            type="button"
+            onClick={() => {
+              const prevPage = Math.max(1, safePage - 1);
+              setPage(prevPage);
+              if (prevPage !== safePage) {
+                void loadData({ targetPage: prevPage, targetPageSize: pageSize });
+              }
+            }}
+            disabled={safePage <= 1 || loading}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-50"
+          >
+            Anterior
+          </button>
+          <span className="text-xs text-slate-600">
+            Página <span className="font-semibold text-slate-900">{safePage}</span> de{" "}
+            <span className="font-semibold text-slate-900">{totalPages}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const nextPage = Math.min(totalPages, safePage + 1);
+              setPage(nextPage);
+              if (nextPage !== safePage) {
+                void loadData({ targetPage: nextPage, targetPageSize: pageSize });
+              }
+            }}
+            disabled={safePage >= totalPages || loading}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-50"
+          >
+            Siguiente
+          </button>
+        </div>
       ) : null}
 
       {ownerType === "PERSON" ? (
@@ -580,7 +737,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
           canViewPricing={canViewPricing}
           hidePricesForOperators={hidePricesForOperators}
           onCreated={async () => {
-            await loadData();
+            await loadData({ targetPage: 1, targetPageSize: pageSize });
           }}
         />
       ) : null}
