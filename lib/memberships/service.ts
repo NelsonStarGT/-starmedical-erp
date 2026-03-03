@@ -15,6 +15,7 @@ import {
   createBenefitCatalogSchema,
   createContractSchema,
   createDurationPresetSchema,
+  enrollMembershipSchema,
   createPlanCategorySchema,
   createPlanSchema,
   listBenefitsQuerySchema,
@@ -104,6 +105,7 @@ type CreateCategoryInput = z.infer<typeof createPlanCategorySchema>;
 type UpdateCategoryInput = z.infer<typeof updatePlanCategorySchema>;
 type ListContractsInput = z.infer<typeof listContractsQuerySchema>;
 type CreateContractInput = z.infer<typeof createContractSchema>;
+type EnrollMembershipInput = z.infer<typeof enrollMembershipSchema>;
 type UpdateContractInput = z.infer<typeof updateContractSchema>;
 type UpdateContractStatusInput = z.infer<typeof updateContractStatusSchema>;
 type RegisterPaymentInput = z.infer<typeof registerPaymentSchema>;
@@ -722,6 +724,9 @@ export async function setPlanStatus(id: string, active: boolean) {
 export async function listContracts(input: ListContractsInput, user: SessionUser | null) {
   const nowDate = now();
   const dbStatusSet = await getMembershipStatusDbSet();
+  const searchTerm = (input.q || input.search || "").trim();
+  const currentPage = Math.max(1, Number(input.page || 1));
+  const pageSize = Math.max(1, Number(input.take || 100));
   const where: Prisma.MembershipContractWhereInput = {
     ...planBranchWhere(user)
   };
@@ -771,8 +776,8 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
     };
   }
 
-  if (input.q) {
-    const term = input.q;
+  if (searchTerm) {
+    const term = searchTerm;
     where.OR = [
       { code: { contains: term, mode: "insensitive" } },
       { plan: { is: { name: { contains: term, mode: "insensitive" } } } },
@@ -781,6 +786,7 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
       { owner: { is: { companyName: { contains: term, mode: "insensitive" } } } },
       { owner: { is: { email: { contains: term, mode: "insensitive" } } } },
       { owner: { is: { phone: { contains: term, mode: "insensitive" } } } },
+      { owner: { is: { dpi: { contains: term, mode: "insensitive" } } } },
       { owner: { is: { nit: { contains: term, mode: "insensitive" } } } }
     ];
   }
@@ -817,7 +823,8 @@ export async function listContracts(input: ListContractsInput, user: SessionUser
       }
     },
     orderBy: [{ nextRenewAt: "asc" }, { createdAt: "desc" }],
-    take: input.take
+    skip: (currentPage - 1) * pageSize,
+    take: pageSize
   });
 
   return contracts.map((contract) => ({
@@ -923,6 +930,165 @@ export async function createContract(input: CreateContractInput, user: SessionUs
     .catch(() => null);
 
   return serializeContract(created);
+}
+
+export async function enrollMembership(input: EnrollMembershipInput, user: SessionUser | null) {
+  if (input.ownerType !== "PERSON") {
+    throw new MembershipError("Solo se permite afiliar titulares PERSON en este flujo", 400);
+  }
+
+  if (input.idempotencyKey) {
+    const existing = await prisma.membershipPublicSubscriptionRequest.findUnique({
+      where: { idempotencyKey: input.idempotencyKey }
+    });
+    if (existing?.channel === "ADMIN_ENROLL" && existing.responsePayload) {
+      return existing.responsePayload as {
+        contractId: string;
+        status: string;
+        draftInvoiceUrl?: string | null;
+        checkoutUrl?: string | null;
+      };
+    }
+    if (existing && existing.channel !== "ADMIN_ENROLL") {
+      throw new MembershipError("idempotencyKey ya utilizado en otro flujo", 409);
+    }
+  }
+
+  const plan = await prisma.membershipPlan.findUnique({
+    where: { id: input.productId },
+    include: {
+      category: true
+    }
+  });
+  if (!plan) throw new MembershipError("Producto no encontrado", 404);
+  if (!plan.active) throw new MembershipError("El producto seleccionado está inactivo", 400);
+  if (plan.segment !== "B2C") {
+    throw new MembershipError("Este flujo solo admite productos B2C", 400);
+  }
+
+  const startAt = input.startAt ?? now();
+  const paymentMethod = input.paymentMethod;
+  const billingFrequency = input.billingFrequency ?? MembershipBillingFrequency.MONTHLY;
+
+  if (paymentMethod === "RECURRENT") {
+    const gatewayConfig = await ensureMembershipGatewayConfigRecord();
+    if (!gatewayConfig.isEnabled) throw new MembershipError("Pasarela recurrente deshabilitada", 409);
+    if (!gatewayConfig.apiKey) throw new MembershipError("Configura API key de pasarela antes de iniciar checkout", 400);
+  }
+
+  const created = await createContract(
+    {
+      ownerType: MembershipOwnerType.PERSON,
+      ownerId: input.patientId,
+      planId: input.productId,
+      status: paymentMethod === "MANUAL" ? MembershipStatus.PENDIENTE_PAGO : MembershipStatus.PENDIENTE,
+      startAt,
+      billingFrequency,
+      channel: paymentMethod === "MANUAL" ? "ADMIN_MANUAL" : "ADMIN_RECURRENTE",
+      assignedBranchId: user?.branchId ?? null,
+      allowDependents: true
+    },
+    user
+  );
+
+  let draftInvoiceUrl: string | null = null;
+  let checkoutUrl: string | null = null;
+  let draftInvoiceId: string | null = null;
+
+  if (paymentMethod === "MANUAL") {
+    const contract = await prisma.membershipContract.findUnique({
+      where: { id: created.id },
+      include: {
+        owner: true,
+        plan: true
+      }
+    });
+
+    if (!contract) throw new MembershipError("Contrato no encontrado", 404);
+
+    const amount = computeRenewalAmount(contract);
+    const ownerPartyId = contract.owner?.partyId || null;
+    if (ownerPartyId && amount > 0) {
+      const receivable = await createReceivableDraftForMembership({
+        contractId: contract.id,
+        contractCode: contract.code,
+        partyId: ownerPartyId,
+        amount: new Prisma.Decimal(amount)
+      });
+
+      if (receivable?.id) {
+        draftInvoiceId = receivable.id;
+        draftInvoiceUrl = `/admin/facturacion?draftId=${encodeURIComponent(receivable.id)}`;
+        await prisma.membershipContract.update({
+          where: { id: contract.id },
+          data: {
+            lastInvoiceId: receivable.id,
+            updatedAt: now()
+          }
+        });
+      }
+    }
+
+    if (!draftInvoiceUrl) {
+      draftInvoiceUrl = buildMembershipInvoiceLink({
+        contractId: created.id,
+        basePath: "/admin/facturacion",
+        source: "memberships"
+      });
+    }
+  } else {
+    const checkout = await initContractRecurrentCheckout(
+      created.id,
+      {
+        returnUrl: input.returnUrl ?? null,
+        cancelUrl: input.cancelUrl ?? null
+      },
+      user
+    );
+    checkoutUrl = checkout.checkoutUrl;
+  }
+
+  const responsePayload = {
+    contractId: created.id,
+    status: created.status,
+    draftInvoiceUrl,
+    checkoutUrl
+  };
+
+  if (input.idempotencyKey) {
+    try {
+      await prisma.membershipPublicSubscriptionRequest.create({
+        data: {
+          idempotencyKey: input.idempotencyKey,
+          channel: "ADMIN_ENROLL",
+          planId: plan.id,
+          segment: plan.segment,
+          categoryId: plan.categoryId ?? null,
+          clientProfileId: input.patientId,
+          contractId: created.id,
+          invoiceId: draftInvoiceId,
+          status: "CREATED",
+          requestPayload: input as Prisma.InputJsonValue,
+          responsePayload: responsePayload as Prisma.InputJsonValue
+        }
+      });
+    } catch (error: any) {
+      if (error?.code !== "P2002") throw error;
+      const cached = await prisma.membershipPublicSubscriptionRequest.findUnique({
+        where: { idempotencyKey: input.idempotencyKey }
+      });
+      if (cached?.channel === "ADMIN_ENROLL" && cached.responsePayload) {
+        return cached.responsePayload as {
+          contractId: string;
+          status: string;
+          draftInvoiceUrl?: string | null;
+          checkoutUrl?: string | null;
+        };
+      }
+    }
+  }
+
+  return responsePayload;
 }
 
 export async function updateContract(id: string, input: UpdateContractInput, user: SessionUser | null) {

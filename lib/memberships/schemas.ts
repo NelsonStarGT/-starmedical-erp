@@ -109,9 +109,11 @@ export const listContractsQuerySchema = z.object({
   paymentMethod: membershipContractPaymentMethodSchema.optional(),
   segment: membershipPlanSegmentSchema.optional(),
   q: z.string().trim().min(1).max(120).optional(),
+  search: z.string().trim().min(1).max(120).optional(),
   renewWindowDays: z.coerce.number().int().min(1).max(90).optional(),
   renewFrom: z.coerce.date().optional(),
   renewTo: z.coerce.date().optional(),
+  page: z.coerce.number().int().min(1).default(1),
   take: z.coerce.number().int().min(1).max(200).default(100)
 });
 
@@ -130,6 +132,19 @@ export const createContractSchema = z.object({
   assignedBranchId: z.string().trim().min(1).optional().nullable(),
   allowDependents: z.boolean().optional(),
   lastInvoiceId: z.string().trim().min(1).optional().nullable()
+});
+
+export const enrollMembershipSchema = z.object({
+  idempotencyKey: z.string().trim().min(8).max(120).optional(),
+  ownerType: z.literal("PERSON"),
+  patientId: z.string().trim().min(1),
+  productId: z.string().trim().min(1),
+  paymentMethod: membershipContractPaymentMethodSchema,
+  startAt: z.coerce.date().optional(),
+  billingFrequency: membershipBillingFrequencySchema.optional(),
+  note: z.string().trim().max(500).optional().nullable(),
+  returnUrl: z.string().trim().url().optional().nullable(),
+  cancelUrl: z.string().trim().url().optional().nullable()
 });
 
 export const updateContractSchema = z

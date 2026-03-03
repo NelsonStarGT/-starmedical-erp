@@ -7,11 +7,9 @@ import { handleMembershipApiError } from "@/app/api/memberships/_utils";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
-  const auth = ensureMembershipAccess(req, PERMISSIONS.MEMBERSHIPS_READ);
-  if (auth.errorResponse) return auth.errorResponse;
-
-  const parsed = listContractsQuerySchema.safeParse({
+export function parseContractsListQuery(req: NextRequest) {
+  const searchAlias = req.nextUrl.searchParams.get("search") || undefined;
+  return listContractsQuerySchema.safeParse({
     ownerType: req.nextUrl.searchParams.get("ownerType") || undefined,
     status: req.nextUrl.searchParams.get("status") || undefined,
     ownerId: req.nextUrl.searchParams.get("ownerId") || undefined,
@@ -19,12 +17,21 @@ export async function GET(req: NextRequest) {
     branchId: req.nextUrl.searchParams.get("branchId") || undefined,
     paymentMethod: req.nextUrl.searchParams.get("paymentMethod") || undefined,
     segment: req.nextUrl.searchParams.get("segment") || undefined,
-    q: req.nextUrl.searchParams.get("q") || undefined,
+    q: req.nextUrl.searchParams.get("q") || searchAlias,
+    search: searchAlias,
     renewWindowDays: req.nextUrl.searchParams.get("renewWindowDays") || undefined,
     renewFrom: req.nextUrl.searchParams.get("renewFrom") || undefined,
     renewTo: req.nextUrl.searchParams.get("renewTo") || undefined,
+    page: req.nextUrl.searchParams.get("page") || undefined,
     take: req.nextUrl.searchParams.get("take") || undefined
   });
+}
+
+export async function GET(req: NextRequest) {
+  const auth = ensureMembershipAccess(req, PERMISSIONS.MEMBERSHIPS_READ);
+  if (auth.errorResponse) return auth.errorResponse;
+
+  const parsed = parseContractsListQuery(req);
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Parámetros inválidos", details: parsed.error.flatten().fieldErrors }, { status: 400 });
