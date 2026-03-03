@@ -6,6 +6,7 @@ import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { money } from "@/app/admin/suscripciones/membresias/_lib";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type PlanRow = {
   id: string;
@@ -60,7 +61,7 @@ export default function MembershipPlansPage() {
       setCanViewPricing(Boolean(configJson?.meta?.canViewPricing));
       setHidePricesForOperators(Boolean(configJson?.data?.hidePricesForOperators));
     } catch (err: any) {
-      setError(err?.message || "No se pudo cargar planes");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar planes"));
     } finally {
       setLoading(false);
     }
@@ -82,7 +83,7 @@ export default function MembershipPlansPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
       await loadPlans();
     } catch (err: any) {
-      setError(err?.message || "No se pudo actualizar estado");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
     } finally {
       setBusyId(null);
     }
@@ -115,7 +116,7 @@ export default function MembershipPlansPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo duplicar plan");
       await loadPlans();
     } catch (err: any) {
-      setError(err?.message || "No se pudo duplicar plan");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo duplicar plan"));
     } finally {
       setBusyId(null);
     }

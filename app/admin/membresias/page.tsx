@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { SideDrawer } from "@/components/memberships/SideDrawer";
 import { money } from "@/app/admin/suscripciones/membresias/_lib";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type PlanRow = {
   id: string;
@@ -122,7 +123,7 @@ export default function MembershipCatalogPage() {
       setPlans(Array.isArray(plansJson?.data) ? plansJson.data : []);
       setCanAdmin(Boolean(configJson?.meta?.canAdmin));
     } catch (err: any) {
-      setError(err?.message || "No se pudo cargar catálogo");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar catálogo"));
     } finally {
       setLoading(false);
     }
@@ -166,7 +167,7 @@ export default function MembershipCatalogPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo duplicar plan");
       await loadPlans();
     } catch (err: any) {
-      setError(err?.message || "No se pudo duplicar plan");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo duplicar plan"));
     } finally {
       setBusyId(null);
     }

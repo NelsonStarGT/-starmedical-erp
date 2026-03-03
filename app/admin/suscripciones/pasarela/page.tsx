@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { SectionCard } from "@/components/subscriptions/SectionCard";
 import { KPIStatCard } from "@/components/subscriptions/KPIStatCard";
 import { money } from "@/app/admin/suscripciones/membresias/_lib";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type GatewayConfig = {
   provider: "RECURRENT" | "MANUAL";
@@ -80,7 +81,7 @@ export default function SubscriptionsGatewayPage() {
         setGateway(DEFAULT_GATEWAY);
       }
     } catch (err: any) {
-      setError(err?.message || "No se pudo cargar pasarela");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar pasarela"));
     } finally {
       setLoading(false);
     }
@@ -115,7 +116,7 @@ export default function SubscriptionsGatewayPage() {
       setWebhookSecret("");
       await loadData();
     } catch (err: any) {
-      setError(err?.message || "No se pudo guardar configuración");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo guardar configuración"));
     } finally {
       setBusy(false);
     }
@@ -132,7 +133,7 @@ export default function SubscriptionsGatewayPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo probar conexión");
       setMessage(json?.data?.message || "Prueba ejecutada.");
     } catch (err: any) {
-      setError(err?.message || "No se pudo probar conexión");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo probar conexión"));
     } finally {
       setTesting(false);
     }

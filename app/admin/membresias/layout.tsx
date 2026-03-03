@@ -1,9 +1,6 @@
-import { MembershipsInnerSubnav } from "@/components/memberships/MembershipsInnerSubnav";
-
 export default function MembershipsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="space-y-4 rounded-xl bg-[#F8FAFC] p-3">
-      <MembershipsInnerSubnav />
       <div className="space-y-4">{children}</div>
     </div>
   );

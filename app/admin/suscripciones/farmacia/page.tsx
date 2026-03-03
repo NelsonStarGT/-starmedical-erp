@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
-import { NavPills } from "@/components/subscriptions/NavPills";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type PharmacyConfig = {
   id: number;
@@ -201,7 +201,7 @@ export default function SubscriptionsPharmacyPage() {
       setDiscountPlans(Array.isArray(plansJson?.data) ? plansJson.data : []);
       setDiscountSubscriptions(Array.isArray(discountSubsJson?.data) ? discountSubsJson.data : []);
     } catch (err: any) {
-      setError(err?.message || "No se pudo cargar farmacia");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar farmacia"));
     } finally {
       setLoading(false);
     }
@@ -269,38 +269,6 @@ export default function SubscriptionsPharmacyPage() {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [pathname, router, searchParams]);
 
-  const pharmacyTabItems = useMemo(
-    () => [
-      {
-        key: "cola",
-        label: "Cola operativa",
-        active: activeTab === "cola",
-        onClick: () => selectTab("cola")
-      },
-      {
-        key: "medicamentos",
-        label: "Suscripciones",
-        active: activeTab === "medicamentos",
-        onClick: () => selectTab("medicamentos")
-      },
-      {
-        key: "descuento",
-        label: "Descuento",
-        active: activeTab === "descuento",
-        disabled: true,
-        badge: "Próximamente",
-        onClick: () => selectTab("descuento")
-      },
-      {
-        key: "config",
-        label: "Configuración",
-        active: activeTab === "config",
-        onClick: () => selectTab("config")
-      }
-    ],
-    [activeTab, selectTab]
-  );
-
   async function createMedicationSubscription(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -355,7 +323,7 @@ export default function SubscriptionsPharmacyPage() {
       setMessage("Suscripción por medicamento creada");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo crear suscripción");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo crear suscripción"));
     } finally {
       setBusyId(null);
     }
@@ -373,7 +341,7 @@ export default function SubscriptionsPharmacyPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo actualizar estado");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
     } finally {
       setBusyId(null);
     }
@@ -391,7 +359,7 @@ export default function SubscriptionsPharmacyPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo registrar evento");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo registrar evento");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo registrar evento"));
     } finally {
       setBusyId(null);
     }
@@ -419,7 +387,7 @@ export default function SubscriptionsPharmacyPage() {
       setMessage("Plan de descuento creado");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo crear plan de descuento");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo crear plan de descuento"));
     } finally {
       setBusyId(null);
     }
@@ -447,7 +415,7 @@ export default function SubscriptionsPharmacyPage() {
       setMessage("Suscripción de descuento creada");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo crear suscripción de descuento");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo crear suscripción de descuento"));
     } finally {
       setBusyId(null);
     }
@@ -474,7 +442,7 @@ export default function SubscriptionsPharmacyPage() {
       setMessage("Configuración de farmacia guardada");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo guardar configuración");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo guardar configuración"));
     } finally {
       setBusyId(null);
     }
@@ -503,8 +471,6 @@ export default function SubscriptionsPharmacyPage() {
         </div>
       }
     >
-      <NavPills items={pharmacyTabItems} ariaLabel="Submenú de farmacia" />
-
       {loading ? <p className="text-xs text-slate-500">Cargando farmacia...</p> : null}
       {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
       {message ? <p className="text-xs font-semibold text-emerald-700">{message}</p> : null}

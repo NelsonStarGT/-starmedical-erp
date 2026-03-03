@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { dateLabel } from "@/app/admin/suscripciones/membresias/_lib";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type ContractCardRow = {
   id: string;
@@ -69,7 +70,7 @@ export default function MembershipPrintPage() {
         setQueue(normalized);
         setSelectedId(normalized[0]?.contract.id || null);
       } catch (err: any) {
-        if (mounted) setError(err?.message || "No se pudo cargar impresión");
+        if (mounted) setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar impresión"));
       } finally {
         if (mounted) setLoading(false);
       }

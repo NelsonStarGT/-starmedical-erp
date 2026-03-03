@@ -7,6 +7,7 @@ import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { dateLabel, money, contractStatusBadgeClass } from "@/app/admin/suscripciones/membresias/_lib";
 import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type ContractDetail = {
   id: string;
@@ -76,7 +77,7 @@ export default function MembershipContractDetailPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo cargar contrato");
       setContract(json.data);
     } catch (err: any) {
-      setError(err?.message || "Error cargando contrato");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "Error cargando contrato"));
     } finally {
       setLoading(false);
     }
@@ -121,7 +122,7 @@ export default function MembershipContractDetailPage() {
       setPaymentForm((prev) => ({ ...prev, amount: "", refNo: "", notes: "" }));
       await load();
     } catch (err: any) {
-      setError(err?.message || "No se pudo registrar pago");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo registrar pago"));
     } finally {
       setBusyPayment(false);
     }
@@ -145,7 +146,7 @@ export default function MembershipContractDetailPage() {
         window.location.assign(json.data.checkoutUrl);
       }
     } catch (err: any) {
-      setError(err?.message || "No se pudo iniciar checkout recurrente");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo iniciar checkout recurrente"));
     } finally {
       setBusyRecurrent(false);
     }

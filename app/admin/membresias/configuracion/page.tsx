@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type MembershipConfig = {
   reminderDays: number;
@@ -194,7 +195,7 @@ export default function MembershipConfigPage() {
         }, {})
       );
     } catch (err: any) {
-      setError(err?.message || "No se pudo cargar configuración");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar configuración"));
     } finally {
       setLoading(false);
     }
@@ -225,7 +226,7 @@ export default function MembershipConfigPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo guardar configuración");
       setMessage("Configuración guardada");
     } catch (err: any) {
-      setError(err?.message || "No se pudo guardar configuración");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo guardar configuración"));
     } finally {
       setSavingConfig(false);
     }
@@ -254,7 +255,7 @@ export default function MembershipConfigPage() {
       setMessage("Categoría creada");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo crear categoría");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo crear categoría"));
     } finally {
       setSavingId(null);
     }
@@ -279,7 +280,7 @@ export default function MembershipConfigPage() {
       setMessage("Categoría actualizada");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo actualizar categoría");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar categoría"));
     } finally {
       setSavingId(null);
     }
@@ -297,7 +298,7 @@ export default function MembershipConfigPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo actualizar estado");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
     } finally {
       setSavingId(null);
     }
@@ -326,7 +327,7 @@ export default function MembershipConfigPage() {
       setMessage("Preset creado");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo crear preset");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo crear preset"));
     } finally {
       setSavingId(null);
     }
@@ -344,7 +345,7 @@ export default function MembershipConfigPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo actualizar estado");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
     } finally {
       setSavingId(null);
     }
@@ -375,7 +376,7 @@ export default function MembershipConfigPage() {
       setMessage("Servicio incluido creado");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo crear servicio incluido");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo crear servicio incluido"));
     } finally {
       setSavingId(null);
     }
@@ -393,7 +394,7 @@ export default function MembershipConfigPage() {
       if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo actualizar estado");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
     } finally {
       setSavingId(null);
     }
@@ -428,7 +429,7 @@ export default function MembershipConfigPage() {
       setGatewayWebhookSecret("");
       setMessage("Pasarela actualizada");
     } catch (err: any) {
-      setError(err?.message || "No se pudo guardar configuración de pasarela");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo guardar configuración de pasarela"));
     } finally {
       setSavingId(null);
     }
@@ -447,7 +448,7 @@ export default function MembershipConfigPage() {
       setGatewayTestMessage(json?.data?.message || "Prueba completada");
       await loadAll();
     } catch (err: any) {
-      setError(err?.message || "No se pudo probar conexión");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo probar conexión"));
     } finally {
       setTestingGateway(false);
     }

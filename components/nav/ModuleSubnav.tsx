@@ -2,13 +2,14 @@
 
 import { useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { ModuleNavItem } from "@/components/nav/moduleNavRegistry";
 import { SubscriptionsHeader } from "@/components/subscriptions/SubscriptionsHeader";
 import {
   SubscriptionsPrimaryNav,
   type SubscriptionsPrimaryNavItem
 } from "@/components/subscriptions/SubscriptionsPrimaryNav";
+import { NavPills, type NavPillItem } from "@/components/subscriptions/NavPills";
 
 type ModuleSubnavProps = {
   moduleKey: string;
@@ -18,10 +19,7 @@ type ModuleSubnavProps = {
 };
 
 type GuardStore = Map<string, string>;
-type SubscriptionsMode = "operacion" | "catalogos";
 type SubscriptionsSection = "dashboard" | "membresias" | "farmacia" | "pasarela" | "configuracion";
-
-const SUBSCRIPTIONS_MODE_STORAGE_KEY = "__STAR_SUBSCRIPTIONS_MODE__";
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -46,14 +44,6 @@ function getGuardStore() {
   return created;
 }
 
-function normalizeSubscriptionsMode(raw: string | null | undefined): SubscriptionsMode | null {
-  if (!raw) return null;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "operacion") return "operacion";
-  if (normalized === "catalogos") return "catalogos";
-  return null;
-}
-
 function getSubscriptionsSection(pathname: string): SubscriptionsSection {
   if (matchesPathPrefix(pathname, "/admin/suscripciones/membresias")) return "membresias";
   if (matchesPathPrefix(pathname, "/admin/suscripciones/farmacia")) return "farmacia";
@@ -69,7 +59,6 @@ export default function ModuleSubnav({
   sticky = true
 }: ModuleSubnavProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const search = useMemo(
     () => new URLSearchParams(searchParams?.toString() || ""),
@@ -78,7 +67,6 @@ export default function ModuleSubnav({
 
   const instanceId = useId();
   const [isDuplicate, setIsDuplicate] = useState(false);
-  const [subscriptionsMode, setSubscriptionsMode] = useState<SubscriptionsMode>("operacion");
 
   useEffect(() => {
     const store = getGuardStore();
@@ -109,23 +97,6 @@ export default function ModuleSubnav({
     };
   }, [instanceId, moduleKey]);
 
-  useEffect(() => {
-    if (moduleKey !== "suscripciones") return;
-    const queryMode = normalizeSubscriptionsMode(search.get("focus"));
-    if (queryMode) {
-      setSubscriptionsMode(queryMode);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(SUBSCRIPTIONS_MODE_STORAGE_KEY, queryMode);
-      }
-      return;
-    }
-
-    if (typeof window !== "undefined") {
-      const storedMode = normalizeSubscriptionsMode(window.localStorage.getItem(SUBSCRIPTIONS_MODE_STORAGE_KEY));
-      if (storedMode) setSubscriptionsMode(storedMode);
-    }
-  }, [moduleKey, search]);
-
   const isItemActive = (item: ModuleNavItem) => {
     if (item.isActive) return item.isActive({ pathname, search });
     const base = item.matchPrefix || item.href;
@@ -137,29 +108,17 @@ export default function ModuleSubnav({
     if (!keys.length) return item.href;
     const next = new URLSearchParams();
     keys.forEach((key) => {
-      const value = key === "focus" ? subscriptionsMode : search.get(key);
+      const value = search.get(key);
       if (value) next.set(key, value);
     });
     const qs = next.toString();
     return qs ? `${item.href}?${qs}` : item.href;
   };
 
-  const updateSubscriptionsMode = (mode: SubscriptionsMode) => {
-    setSubscriptionsMode(mode);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(SUBSCRIPTIONS_MODE_STORAGE_KEY, mode);
-    }
-    const next = new URLSearchParams(search.toString());
-    next.set("focus", mode);
-    const qs = next.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  };
-
   if (isDuplicate) return null;
 
   if (moduleKey === "suscripciones") {
     const section = getSubscriptionsSection(pathname);
-    const showFocusToggle = section === "dashboard" || section === "membresias" || section === "farmacia";
     const primaryNavItems: SubscriptionsPrimaryNavItem[] = items.map((item) => ({
       key: item.key,
       label: item.label,
@@ -167,6 +126,95 @@ export default function ModuleSubnav({
       icon: item.icon,
       active: isItemActive(item)
     }));
+    const preserveFocus = search.get("focus");
+    const withQuery = (href: string, entries?: Record<string, string | undefined>) => {
+      const params = new URLSearchParams();
+      if (preserveFocus) params.set("focus", preserveFocus);
+      Object.entries(entries || {}).forEach(([key, value]) => {
+        if (value) params.set(key, value);
+      });
+      const qs = params.toString();
+      return qs ? `${href}?${qs}` : href;
+    };
+
+    const secondaryNavItems: NavPillItem[] = (() => {
+      if (section === "membresias") {
+        return [
+          {
+            key: "catalogo",
+            label: "Catálogo",
+            href: withQuery("/admin/suscripciones/membresias"),
+            active: pathname === "/admin/suscripciones/membresias"
+          },
+          {
+            key: "afiliaciones",
+            label: "Afiliaciones",
+            href: withQuery("/admin/suscripciones/membresias/afiliaciones/pacientes"),
+            active:
+              matchesPathPrefix(pathname, "/admin/suscripciones/membresias/afiliaciones") ||
+              matchesPathPrefix(pathname, "/admin/suscripciones/membresias/contratos")
+          },
+          {
+            key: "planes",
+            label: "Planes",
+            href: withQuery("/admin/suscripciones/membresias/planes"),
+            active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/planes")
+          },
+          {
+            key: "renovaciones",
+            label: "Renovaciones",
+            href: withQuery("/admin/suscripciones/membresias/renovaciones"),
+            active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/renovaciones")
+          },
+          {
+            key: "impresion",
+            label: "Impresión",
+            href: withQuery("/admin/suscripciones/membresias/impresion"),
+            active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/impresion")
+          },
+          {
+            key: "configuracion",
+            label: "Configuración",
+            href: withQuery("/admin/suscripciones/membresias/configuracion"),
+            active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/configuracion")
+          }
+        ];
+      }
+
+      if (section === "farmacia") {
+        const tab = String(search.get("tab") || "").toLowerCase();
+        return [
+          {
+            key: "cola",
+            label: "Cola operativa",
+            href: withQuery("/admin/suscripciones/farmacia", { tab: "cola" }),
+            active: tab === "cola"
+          },
+          {
+            key: "suscripciones",
+            label: "Suscripciones",
+            href: withQuery("/admin/suscripciones/farmacia"),
+            active: !tab || tab === "medicamentos"
+          },
+          {
+            key: "descuento",
+            label: "Descuento",
+            href: withQuery("/admin/suscripciones/farmacia", { tab: "descuento" }),
+            active: tab === "descuento",
+            disabled: true,
+            badge: "Próximamente"
+          },
+          {
+            key: "configuracion",
+            label: "Configuración",
+            href: withQuery("/admin/suscripciones/farmacia", { tab: "config" }),
+            active: tab === "config"
+          }
+        ];
+      }
+
+      return [];
+    })();
 
     return (
       <div className={cn("w-full", sticky && "sticky z-30 [top:var(--admin-header-offset,72px)]")}>
@@ -174,34 +222,9 @@ export default function ModuleSubnav({
           <div className="space-y-3 px-4 py-4">
             <SubscriptionsHeader />
             <SubscriptionsPrimaryNav items={primaryNavItems} />
-            {showFocusToggle ? (
-              <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2">
-                <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
-                  <button
-                    type="button"
-                    onClick={() => updateSubscriptionsMode("operacion")}
-                    className={cn(
-                      "rounded-md px-3 py-1.5 text-xs font-semibold transition",
-                      subscriptionsMode === "operacion"
-                        ? "bg-[#4aa59c] text-white"
-                        : "text-slate-600 hover:bg-[#F8FAFC]"
-                    )}
-                  >
-                    Operación
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => updateSubscriptionsMode("catalogos")}
-                    className={cn(
-                      "rounded-md px-3 py-1.5 text-xs font-semibold transition",
-                      subscriptionsMode === "catalogos"
-                        ? "bg-[#4aa59c] text-white"
-                        : "text-slate-600 hover:bg-[#F8FAFC]"
-                    )}
-                  >
-                    Catálogos
-                  </button>
-                </div>
+            {secondaryNavItems.length ? (
+              <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-2">
+                <NavPills items={secondaryNavItems} ariaLabel="Subnavegación de Suscripciones" />
               </div>
             ) : null}
           </div>

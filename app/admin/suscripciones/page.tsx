@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, CalendarClock, Pill, RefreshCw, ShieldAlert } from "lucide-react";
 import { NavPills } from "@/components/subscriptions/NavPills";
 import { SectionCard } from "@/components/subscriptions/SectionCard";
@@ -11,6 +12,7 @@ import { AdminApprovalsCard } from "@/components/subscriptions/AdminApprovalsCar
 import { money } from "@/app/admin/suscripciones/membresias/_lib";
 
 type RangeKey = "today" | "7d" | "30d" | "custom";
+type FocusMode = "operacion" | "catalogos";
 
 type MembershipCards = {
   plansActive: number;
@@ -86,6 +88,19 @@ const RANGE_DAYS: Record<Exclude<RangeKey, "custom">, number> = {
   "30d": 30
 };
 
+function normalizeFocusMode(raw: string | null | undefined): FocusMode {
+  const value = String(raw || "").trim().toLowerCase();
+  return value === "catalogos" ? "catalogos" : "operacion";
+}
+
+function resolveUiError(message: string | null | undefined, fallback: string) {
+  const normalized = String(message || "").trim();
+  if (!normalized) return fallback;
+  if (/no autenticado|unauthenticated/i.test(normalized)) return "Sin datos disponibles";
+  if (/no autorizado|forbidden|permiso/i.test(normalized)) return "Permisos insuficientes";
+  return normalized;
+}
+
 function dateLabel(value?: string | null) {
   if (!value) return "-";
   const date = new Date(value);
@@ -112,8 +127,12 @@ async function fetchMaybe<T>(url: string, fallback: T): Promise<T> {
 }
 
 export default function SubscriptionsDashboardPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [range, setRange] = useState<RangeKey>("7d");
   const [customDays, setCustomDays] = useState("14");
+  const [focusMode, setFocusMode] = useState<FocusMode>(() => normalizeFocusMode(searchParams?.get("focus")));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardState>({
@@ -192,7 +211,7 @@ export default function SubscriptionsDashboardPage() {
         paused
       });
     } catch (err: any) {
-      setError(err?.message || "No se pudo cargar el dashboard de suscripciones");
+      setError(resolveUiError(err?.message, "No se pudo cargar el dashboard de suscripciones"));
     } finally {
       setLoading(false);
     }
@@ -201,6 +220,10 @@ export default function SubscriptionsDashboardPage() {
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    setFocusMode(normalizeFocusMode(searchParams?.get("focus")));
+  }, [searchParams]);
 
   const queueCounters = useMemo(() => {
     return data.queue.reduce(
@@ -310,6 +333,36 @@ export default function SubscriptionsDashboardPage() {
     [range]
   );
 
+  const focusItems = useMemo(
+    () => [
+      {
+        key: "operacion",
+        label: "Operación",
+        active: focusMode === "operacion",
+        onClick: () => {
+          const next = new URLSearchParams(searchParams?.toString() || "");
+          next.set("focus", "operacion");
+          const qs = next.toString();
+          setFocusMode("operacion");
+          router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+        }
+      },
+      {
+        key: "catalogos",
+        label: "Catálogos",
+        active: focusMode === "catalogos",
+        onClick: () => {
+          const next = new URLSearchParams(searchParams?.toString() || "");
+          next.set("focus", "catalogos");
+          const qs = next.toString();
+          setFocusMode("catalogos");
+          router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+        }
+      }
+    ],
+    [focusMode, pathname, router, searchParams]
+  );
+
   const approvalItems = useMemo(
     () => [
       {
@@ -334,25 +387,81 @@ export default function SubscriptionsDashboardPage() {
     [data.failedPayments.length, data.pendingPayments.length, queueCounters.today]
   );
 
+  const isCatalogFocus = focusMode === "catalogos";
+
   return (
     <div className="space-y-4">
+      {isCatalogFocus ? (
+        <SectionCard
+          title="Enfoque de Catálogos"
+          subtitle="Prioriza la preparación comercial antes de la operación diaria."
+        >
+          <div className="grid gap-3 md:grid-cols-2">
+            <article className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
+              <p className="text-xs font-semibold text-[#2e75ba]">Configurar base</p>
+              <p className="mt-1 text-xs text-slate-600">Ajusta categorías, duraciones y servicios incluidos.</p>
+              <Link
+                href="/admin/suscripciones/membresias/configuracion"
+                className="mt-3 inline-flex rounded-lg border border-[#4aa59c] px-3 py-1.5 text-xs font-semibold text-[#4aa59c]"
+              >
+                Configurar base
+              </Link>
+            </article>
+            <article className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
+              <p className="text-xs font-semibold text-[#2e75ba]">Crear producto</p>
+              <p className="mt-1 text-xs text-slate-600">Publica planes y deja listo el catálogo comercial.</p>
+              <Link
+                href="/admin/suscripciones/membresias/planes/nuevo"
+                className="mt-3 inline-flex rounded-lg bg-[#4aa59c] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#4aadf5]"
+              >
+                Crear producto
+              </Link>
+            </article>
+          </div>
+        </SectionCard>
+      ) : null}
+
       <SectionCard
         title="Dashboard"
-        subtitle="Control diario de membresías y farmacia, con prioridades operativas por rango."
+        subtitle={
+          isCatalogFocus
+            ? "Modo Catálogos: prioriza configuración comercial y estructura base."
+            : "Control diario de membresías y farmacia, con prioridades operativas por rango."
+        }
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Link
-              href="/admin/suscripciones/membresias/afiliaciones/pacientes?enroll=1"
-              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
-            >
-              Afiliar
-            </Link>
-            <Link
-              href="/admin/suscripciones/membresias/planes/nuevo"
-              className="rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"
-            >
-              Crear producto
-            </Link>
+            {isCatalogFocus ? (
+              <>
+                <Link
+                  href="/admin/suscripciones/membresias/configuracion"
+                  className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
+                >
+                  Configurar base
+                </Link>
+                <Link
+                  href="/admin/suscripciones/membresias/planes/nuevo"
+                  className="rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"
+                >
+                  Crear producto
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/admin/suscripciones/membresias/afiliaciones/pacientes?enroll=1"
+                  className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
+                >
+                  Afiliar
+                </Link>
+                <Link
+                  href="/admin/suscripciones/farmacia?tab=cola"
+                  className="rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"
+                >
+                  Ver cola
+                </Link>
+              </>
+            )}
+            <NavPills items={focusItems} ariaLabel="Enfoque de dashboard" />
             <NavPills items={rangeItems} ariaLabel="Seleccionar rango de análisis" />
             {range === "custom" ? (
               <input
@@ -440,7 +549,7 @@ export default function SubscriptionsDashboardPage() {
         ) : null}
       </SectionCard>
 
-      {showSetupWizard ? (
+      {showSetupWizard && !isCatalogFocus ? (
         <SectionCard
           title="Configura la base inicial"
           subtitle="Completa estos pasos para habilitar operación comercial de Suscripciones."

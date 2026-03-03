@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { dateLabel, money, contractStatusBadgeClass } from "@/app/admin/suscripciones/membresias/_lib";
 import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type RenewalRow = {
   id: string;
@@ -49,7 +50,7 @@ export default function MembershipRenewalsPage() {
         if (!res.ok) throw new Error(json?.error || "No se pudo cargar renovaciones");
         if (mounted) setRows(Array.isArray(json.data) ? json.data : []);
       } catch (err: any) {
-        if (mounted) setError(err?.message || "No se pudo cargar renovaciones");
+        if (mounted) setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar renovaciones"));
       } finally {
         if (mounted) setLoading(false);
       }

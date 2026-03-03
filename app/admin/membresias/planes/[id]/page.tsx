@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { PlanEditorForm } from "@/components/memberships/PlanEditorForm";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type PlanDetail = {
   id: string;
@@ -51,7 +52,7 @@ export default function MembershipPlanEditPage() {
         if (!res.ok) throw new Error(json?.error || "No se pudo cargar plan");
         if (mounted) setPlan(json.data as PlanDetail);
       } catch (err: any) {
-        if (mounted) setError(err?.message || "No se pudo cargar plan");
+        if (mounted) setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar plan"));
       } finally {
         if (mounted) setLoading(false);
       }

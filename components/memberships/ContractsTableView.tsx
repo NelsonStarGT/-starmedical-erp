@@ -10,6 +10,7 @@ import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { SubscriptionMembershipEnrollDrawer } from "@/components/memberships/SubscriptionMembershipEnrollDrawer";
 import { contractStatusBadgeClass, dateLabel, money } from "@/app/admin/suscripciones/membresias/_lib";
 import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type OwnerType = "PERSON" | "COMPANY";
 
@@ -148,7 +149,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       setCanViewPricing(Boolean(configJson?.meta?.canViewPricing));
       setHidePricesForOperators(Boolean(configJson?.data?.hidePricesForOperators));
     } catch (err: any) {
-      setError(err?.message || "Error cargando afiliaciones");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "Error cargando afiliaciones"));
     } finally {
       setLoading(false);
     }
@@ -194,7 +195,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       setShowCreate(false);
       await loadData();
     } catch (err: any) {
-      setError(err?.message || "No se pudo afiliar titular");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo afiliar titular"));
     } finally {
       setBusy(false);
     }
@@ -212,7 +213,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
       await loadData();
     } catch (err: any) {
-      setError(err?.message || "No se pudo actualizar estado");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
     } finally {
       setStatusBusyId(null);
     }
@@ -230,7 +231,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       if (!res.ok) throw new Error(json?.error || "No se pudo renovar afiliación");
       await loadData();
     } catch (err: any) {
-      setError(err?.message || "No se pudo renovar afiliación");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo renovar afiliación"));
     } finally {
       setRenewBusyId(null);
     }
@@ -256,7 +257,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       }
       await loadData();
     } catch (err: any) {
-      setError(err?.message || "No se pudo iniciar checkout recurrente");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo iniciar checkout recurrente"));
     } finally {
       setRecurrentBusyId(null);
     }

@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { SectionCard } from "@/components/subscriptions/SectionCard";
 import { CompactTable } from "@/components/memberships/CompactTable";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type CompanyOption = {
   id: string;
@@ -118,7 +119,7 @@ export default function SubscriptionsConfigPage() {
         }
         setCompanyOptions(mapped.sort((a, b) => a.name.localeCompare(b.name)));
       } catch (err: any) {
-        if (mounted) setError(err?.message || "No se pudo cargar configuración");
+        if (mounted) setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar configuración"));
       } finally {
         if (mounted) setLoading(false);
       }

@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
 
 type PlanCategory = {
   id: string;
@@ -148,7 +149,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
         setCanViewPricing(Boolean(configJson?.meta?.canViewPricing));
         setHidePricesForOperators(Boolean(configJson?.data?.hidePricesForOperators));
       } catch (err: any) {
-        if (mounted) setError(err?.message || "Error cargando catálogos");
+        if (mounted) setError(normalizeSubscriptionsErrorMessage(err?.message, "Error cargando catálogos"));
       } finally {
         if (mounted) setLoadingCatalogs(false);
       }
@@ -247,7 +248,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       router.push("/admin/suscripciones/membresias/planes");
       router.refresh();
     } catch (err: any) {
-      setError(err?.message || "No se pudo guardar");
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo guardar"));
     } finally {
       setBusy(false);
     }
