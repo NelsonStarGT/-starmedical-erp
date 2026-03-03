@@ -18,6 +18,16 @@ type AffiliationRecord = {
   isPrimaryPayer: boolean;
 };
 
+type PersonCompanyLinkRecord = {
+  id: string;
+  personId: string;
+  companyId: string;
+  deletedAt: Date | null;
+  isActive: boolean;
+  isPrimary: boolean;
+  endAt: Date | null;
+};
+
 const actorUser = {
   id: "admin-1",
   email: "admin@starmedical.test",
@@ -26,9 +36,14 @@ const actorUser = {
   permissions: []
 };
 
-function setupPrismaMock(params: { clients: ClientRecord[]; affiliations?: AffiliationRecord[] }) {
+function setupPrismaMock(params: {
+  clients: ClientRecord[];
+  affiliations?: AffiliationRecord[];
+  personCompanyLinks?: PersonCompanyLinkRecord[];
+}) {
   const clients = params.clients.map((item) => ({ ...item }));
   const affiliations = (params.affiliations ?? []).map((item) => ({ ...item }));
+  const personCompanyLinks = (params.personCompanyLinks ?? []).map((item) => ({ ...item }));
   const audits: any[] = [];
   const timeline: any[] = [];
 
@@ -68,6 +83,20 @@ function setupPrismaMock(params: { clients: ClientRecord[]; affiliations?: Affil
         return { count };
       }
     },
+    personCompanyLink: {
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        personCompanyLinks.forEach((link) => {
+          const matchPerson = !where?.personId || link.personId === where.personId;
+          const matchDeletedAt =
+            !Object.prototype.hasOwnProperty.call(where ?? {}, "deletedAt") || link.deletedAt === where.deletedAt;
+          if (!matchPerson || !matchDeletedAt) return;
+          Object.assign(link, data);
+          count += 1;
+        });
+        return { count };
+      }
+    },
     auditLog: {
       create: async ({ data }: any) => {
         audits.push(data);
@@ -88,6 +117,7 @@ function setupPrismaMock(params: { clients: ClientRecord[]; affiliations?: Affil
   return {
     clients,
     affiliations,
+    personCompanyLinks,
     audits,
     timeline,
     restore: () => {
@@ -152,6 +182,17 @@ test("actionSoftDeleteClientProfile archiva afiliaciones cuando tipo PERSON", as
         status: ClientAffiliationStatus.ACTIVE,
         isPrimaryPayer: true
       }
+    ],
+    personCompanyLinks: [
+      {
+        id: "pcl-1",
+        personId: "c-person-3",
+        companyId: "c-company-3",
+        deletedAt: null,
+        isActive: true,
+        isPrimary: true,
+        endAt: null
+      }
     ]
   });
 
@@ -166,6 +207,11 @@ test("actionSoftDeleteClientProfile archiva afiliaciones cuando tipo PERSON", as
     assert.equal(mock.affiliations[0]?.isPrimaryPayer, false);
     assert.equal(mock.affiliations[0]?.deletedAt?.toISOString(), archivedAt.toISOString());
     assert.equal(mock.audits[0]?.metadata?.archivedAffiliations, 1);
+    assert.equal(mock.personCompanyLinks[0]?.isActive, false);
+    assert.equal(mock.personCompanyLinks[0]?.isPrimary, false);
+    assert.equal(mock.personCompanyLinks[0]?.deletedAt?.toISOString(), archivedAt.toISOString());
+    assert.equal(mock.personCompanyLinks[0]?.endAt?.toISOString(), archivedAt.toISOString());
+    assert.equal(mock.audits[0]?.metadata?.archivedCompanyLinks, 1);
   } finally {
     mock.restore();
   }

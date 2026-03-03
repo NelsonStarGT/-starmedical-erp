@@ -1164,6 +1164,8 @@ model ClientProfile {
   affiliationsAsPerson                ClientAffiliation[]                   @relation("ClientAffiliationPerson")
   affiliationsAsEntity                ClientAffiliation[]                   @relation("ClientAffiliationEntity")
   affiliationsAsPayer                 ClientAffiliation[]                   @relation("ClientAffiliationPayer")
+  companyLinksAsPerson                PersonCompanyLink[]                   @relation("PersonCompanyLinkPerson")
+  companyLinksAsCompany               PersonCompanyLink[]                   @relation("PersonCompanyLinkCompany")
   referralsMade                       ClientReferral[]                      @relation("ClientReferralReferrer")
   referralsReceived                   ClientReferral[]                      @relation("ClientReferralReferred")
   demographicData                     ClientDemographicData?                @relation("ClientDemographicProfile")
@@ -1308,6 +1310,28 @@ model ClientAffiliation {
   @@index([tenantId, entityType, entityClientId, deletedAt])
   @@index([payerClientId])
   @@index([isPrimaryPayer, deletedAt])
+}
+
+model PersonCompanyLink {
+  id           String        @id @default(cuid())
+  tenantId     String
+  personId     String
+  companyId    String
+  relationType String?
+  isPrimary    Boolean       @default(false)
+  isActive     Boolean       @default(true)
+  startAt      DateTime?
+  endAt        DateTime?
+  deletedAt    DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  person       ClientProfile @relation("PersonCompanyLinkPerson", fields: [personId], references: [id], onDelete: Cascade)
+  company      ClientProfile @relation("PersonCompanyLinkCompany", fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([personId, companyId])
+  @@index([tenantId, personId, isActive, deletedAt])
+  @@index([tenantId, companyId, isActive, deletedAt])
+  @@index([tenantId, isPrimary, isActive, deletedAt])
 }
 
 model ClientCatalogItem {

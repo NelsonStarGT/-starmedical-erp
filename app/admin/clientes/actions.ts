@@ -2034,6 +2034,128 @@ async function enforceSinglePrimaryPayer(tx: AffiliationTx, personClientId: stri
   });
 }
 
+type PersonCompanyLinkDraft = {
+  companyClientId: string;
+  relationType: string | null;
+  isPrimary: boolean;
+  isActive: boolean;
+  startAt: Date | null;
+  endAt: Date | null;
+};
+
+function normalizePersonCompanyLinkDraft(
+  input: {
+    companyClientId?: string;
+    relationType?: string | null;
+    isPrimary?: boolean;
+    isActive?: boolean;
+    startAt?: string | null;
+    endAt?: string | null;
+  },
+  fallback?: Partial<Omit<PersonCompanyLinkDraft, "companyClientId">>
+): PersonCompanyLinkDraft {
+  const companyClientId = normalizeRequired(input.companyClientId, "Empresa vinculada inválida.");
+  const relationType = normalizeOptional(input.relationType) ?? fallback?.relationType ?? null;
+  const isActive = input.isActive === undefined ? (fallback?.isActive ?? true) : Boolean(input.isActive);
+  const isPrimary = isActive && (input.isPrimary === undefined ? Boolean(fallback?.isPrimary) : Boolean(input.isPrimary));
+  const startAt = input.startAt !== undefined ? parseOptionalDate(input.startAt) : (fallback?.startAt ?? null);
+  const endAt = input.endAt !== undefined ? parseOptionalDate(input.endAt) : (fallback?.endAt ?? null);
+
+  return {
+    companyClientId,
+    relationType,
+    isPrimary,
+    isActive,
+    startAt,
+    endAt
+  };
+}
+
+function enforcePrimaryCompanyLinkDrafts(links: PersonCompanyLinkDraft[]) {
+  if (!links.length) return links;
+  const activeIndexes = links
+    .map((item, index) => ({ index, item }))
+    .filter(({ item }) => item.isActive);
+
+  if (!activeIndexes.length) {
+    return links.map((item) => ({ ...item, isPrimary: false }));
+  }
+
+  let keepPrimaryIndex = activeIndexes.find(({ item }) => item.isPrimary)?.index ?? activeIndexes[0]!.index;
+  if (keepPrimaryIndex < 0) keepPrimaryIndex = activeIndexes[0]!.index;
+
+  return links.map((item, index) => ({
+    ...item,
+    isPrimary: item.isActive ? index === keepPrimaryIndex : false
+  }));
+}
+
+async function upsertPersonCompanyLinksTx(
+  tx: AffiliationTx,
+  input: {
+    tenantId: string;
+    personClientId: string;
+    links: PersonCompanyLinkDraft[];
+  }
+) {
+  if (!input.links.length) return 0;
+
+  const seen = new Set<string>();
+  const validated: PersonCompanyLinkDraft[] = [];
+
+  for (const row of input.links) {
+    const company = await resolveAffiliationEntity(tx, row.companyClientId, input.tenantId, ClientProfileType.COMPANY);
+    const companyId = company.id;
+    if (seen.has(companyId)) continue;
+    seen.add(companyId);
+    validated.push({
+      ...row,
+      companyClientId: companyId
+    });
+  }
+
+  const normalized = enforcePrimaryCompanyLinkDrafts(validated);
+  const now = new Date();
+
+  for (const row of normalized) {
+    const effectiveStartAt = row.startAt ?? now;
+    const effectiveEndAt = row.isActive ? null : row.endAt ?? now;
+    const deletedAt = row.isActive ? null : now;
+
+    await tx.personCompanyLink.upsert({
+      where: {
+        personId_companyId: {
+          personId: input.personClientId,
+          companyId: row.companyClientId
+        }
+      },
+      update: {
+        tenantId: input.tenantId,
+        relationType: row.relationType,
+        isPrimary: row.isPrimary,
+        isActive: row.isActive,
+        startAt: effectiveStartAt,
+        endAt: effectiveEndAt,
+        deletedAt,
+        updatedAt: now
+      },
+      create: {
+        tenantId: input.tenantId,
+        personId: input.personClientId,
+        companyId: row.companyClientId,
+        relationType: row.relationType,
+        isPrimary: row.isPrimary,
+        isActive: row.isActive,
+        startAt: effectiveStartAt,
+        endAt: effectiveEndAt,
+        deletedAt
+      }
+    });
+  }
+
+  return normalized.length;
+}
+
 export async function actionCreatePersonClient(input: {
   firstName: string;
   middleName?: string;
@@ -2105,6 +2227,14 @@ export async function actionCreatePersonClient(input: {
     payerType?: ClientAffiliationPayerType;
     payerClientId?: string;
     isPrimaryPayer?: boolean;
+  }>;
+  companyLinks?: Array<{
+    companyClientId: string;
+    relationType?: string;
+    isPrimary?: boolean;
+    isActive?: boolean;
+    startAt?: string;
+    endAt?: string;
   }>;
 }) {
   const user = await requireClientCreatorUser();
@@ -2245,6 +2375,7 @@ export async function actionCreatePersonClient(input: {
     fallbackEmail: email
   });
   const affiliations = Array.isArray(input.affiliations) ? input.affiliations : [];
+  const explicitCompanyLinks = Array.isArray(input.companyLinks) ? input.companyLinks : [];
 
   const defaultStatusId = await resolveDefaultActiveStatusId();
 
@@ -2681,6 +2812,7 @@ export async function actionCreatePersonClient(input: {
       });
 
       let requestedPrimaryId: string | undefined = internalAffiliation.id;
+      const companyLinksFromAffiliations: PersonCompanyLinkDraft[] = [];
 
       if (affiliations.length) {
         const seen = new Set<string>();
@@ -2725,10 +2857,49 @@ export async function actionCreatePersonClient(input: {
           });
 
           if (isPrimaryPayer) requestedPrimaryId = createdAffiliation.id;
+
+          if (entity.type === ClientProfileType.COMPANY) {
+            companyLinksFromAffiliations.push(
+              normalizePersonCompanyLinkDraft(
+                {
+                  companyClientId: entityClientId,
+                  relationType: role ?? undefined,
+                  isPrimary: Boolean(item.isPrimaryPayer),
+                  isActive: status !== ClientAffiliationStatus.INACTIVE
+                },
+                {
+                  relationType: role ?? null,
+                  isPrimary: Boolean(item.isPrimaryPayer),
+                  isActive: status !== ClientAffiliationStatus.INACTIVE,
+                  startAt: null,
+                  endAt: null
+                }
+              )
+            );
+          }
         }
       }
 
       await enforceSinglePrimaryPayer(tx, created.id, requestedPrimaryId);
+
+      const mergedCompanyLinksMap = new Map<string, PersonCompanyLinkDraft>();
+      for (const item of companyLinksFromAffiliations) {
+        mergedCompanyLinksMap.set(item.companyClientId, item);
+      }
+      for (const item of explicitCompanyLinks) {
+        const normalized = normalizePersonCompanyLinkDraft(item);
+        const previous = mergedCompanyLinksMap.get(normalized.companyClientId);
+        mergedCompanyLinksMap.set(normalized.companyClientId, {
+          ...previous,
+          ...normalized
+        });
+      }
+
+      const companyLinksCount = await upsertPersonCompanyLinksTx(tx, {
+        tenantId,
+        personClientId: created.id,
+        links: Array.from(mergedCompanyLinksMap.values())
+      });
 
       await logClientAuditTx(tx, {
         actorUserId: user.id,
@@ -2739,6 +2910,7 @@ export async function actionCreatePersonClient(input: {
           type: "PERSON",
           clientCode: reservedClientCode.code,
           affiliationsCount: affiliations.length + 1,
+          companyLinksCount,
           defaultAffiliation: "INTERNAL",
           acquisitionSourceId: acquisition.sourceId,
           acquisitionSourceCode: acquisition.sourceCode,
@@ -5474,6 +5646,21 @@ export async function actionAddClientAffiliation(input: {
 
       await enforceSinglePrimaryPayer(tx, personClientId, isPrimaryPayer ? created.id : undefined);
 
+      if (entity.type === ClientProfileType.COMPANY) {
+        await upsertPersonCompanyLinksTx(tx, {
+          tenantId: person.tenantId,
+          personClientId,
+          links: [
+            normalizePersonCompanyLinkDraft({
+              companyClientId: entity.id,
+              relationType: role ?? undefined,
+              isPrimary: isPrimaryPayer,
+              isActive: status !== ClientAffiliationStatus.INACTIVE
+            })
+          ]
+        });
+      }
+
       return {
         createdId: created.id,
         tenantId: person.tenantId,
@@ -5613,6 +5800,21 @@ export async function actionUpdateClientAffiliation(input: {
         status === ClientAffiliationStatus.ACTIVE ? updated.id : undefined
       );
 
+      if (existing.entityType === ClientProfileType.COMPANY) {
+        await upsertPersonCompanyLinksTx(tx, {
+          tenantId: existing.tenantId,
+          personClientId,
+          links: [
+            normalizePersonCompanyLinkDraft({
+              companyClientId: existing.entityClientId,
+              relationType: role ?? undefined,
+              isPrimary: isPrimaryPayer,
+              isActive: status !== ClientAffiliationStatus.INACTIVE
+            })
+          ]
+        });
+      }
+
       return { updated, existing, update };
     });
 
@@ -5663,7 +5865,7 @@ export async function actionConfirmClientAffiliation(input: {
   const verifiedAt = new Date();
 
   const result = await prisma.$transaction(async (tx) => {
-    await resolveActivePersonProfile(tx, personClientId);
+    const person = await resolveActivePersonProfile(tx, personClientId);
 
     const existing = await tx.clientAffiliation.findFirst({
       where: { id: affiliationId, personClientId, deletedAt: null },
@@ -5690,6 +5892,21 @@ export async function actionConfirmClientAffiliation(input: {
     });
 
     await enforceSinglePrimaryPayer(tx, personClientId, existing.isPrimaryPayer ? existing.id : undefined);
+
+    if (existing.entityType === ClientProfileType.COMPANY) {
+      await upsertPersonCompanyLinksTx(tx, {
+        tenantId: person.tenantId,
+        personClientId,
+        links: [
+          normalizePersonCompanyLinkDraft({
+            companyClientId: existing.entityClientId,
+            relationType: null,
+            isPrimary: existing.isPrimaryPayer,
+            isActive: true
+          })
+        ]
+      });
+    }
 
     return {
       id: updated.id,
@@ -5720,13 +5937,58 @@ export async function actionConfirmClientAffiliation(input: {
   };
 }
 
+export async function actionMarkClientAffiliationsVerifiedToday(input: { personClientId: string }) {
+  const user = await requireAdminUser();
+  const personClientId = normalizeRequired(input.personClientId, "Persona inválida.");
+  const verifiedAt = new Date();
+
+  const result = await prisma.$transaction(async (tx) => {
+    const person = await resolveActivePersonProfile(tx, personClientId);
+
+    const updated = await tx.clientAffiliation.updateMany({
+      where: {
+        tenantId: person.tenantId,
+        personClientId,
+        deletedAt: null,
+        status: { not: ClientAffiliationStatus.INACTIVE }
+      },
+      data: {
+        status: ClientAffiliationStatus.ACTIVE,
+        lastVerifiedAt: verifiedAt
+      }
+    });
+
+    await enforceSinglePrimaryPayer(tx, personClientId);
+
+    return { updatedCount: updated.count };
+  });
+
+  await logClientAudit({
+    actorUserId: user.id,
+    actorRole: user.roles?.[0] ?? null,
+    clientId: personClientId,
+    action: "CLIENT_AFFILIATION_CONFIRMED_BULK",
+    metadata: {
+      verifiedAt: verifiedAt.toISOString(),
+      updatedCount: result.updatedCount
+    }
+  });
+
+  revalidatePath(`/admin/clientes/${personClientId}`);
+  return {
+    ok: true,
+    updatedCount: result.updatedCount,
+    verifiedAt: verifiedAt.toISOString()
+  };
+}
+
 export async function actionDeleteClientAffiliation(input: { affiliationId: string; personClientId: string }) {
   const user = await requireAdminUser();
   const affiliationId = normalizeRequired(input.affiliationId, "Afiliación inválida.");
   const personClientId = normalizeRequired(input.personClientId, "Persona inválida.");
 
   const existing = await prisma.$transaction(async (tx) => {
-    await resolveActivePersonProfile(tx, personClientId);
+    const person = await resolveActivePersonProfile(tx, personClientId);
 
     const current = await tx.clientAffiliation.findFirst({
       where: { id: affiliationId, personClientId, deletedAt: null },
@@ -5752,6 +6014,21 @@ export async function actionDeleteClientAffiliation(input: { affiliationId: stri
         isPrimaryPayer: false
       }
     });
+
+    if (current.entityType === ClientProfileType.COMPANY) {
+      await upsertPersonCompanyLinksTx(tx, {
+        tenantId: person.tenantId,
+        personClientId,
+        links: [
+          normalizePersonCompanyLinkDraft({
+            companyClientId: current.entityClientId,
+            relationType: current.role ?? undefined,
+            isPrimary: false,
+            isActive: false
+          })
+        ]
+      });
+    }
 
     await enforceSinglePrimaryPayer(tx, personClientId);
 
@@ -5788,6 +6065,7 @@ export async function actionSoftDeleteClientProfile(
     if (!existing) throw new Error("Cliente no encontrado o ya archivado.");
 
     let archivedAffiliations = 0;
+    let archivedCompanyLinks = 0;
     if (existing.type === ClientProfileType.PERSON) {
       const updatedAffiliations = await tx.clientAffiliation.updateMany({
         where: { personClientId: existing.id, deletedAt: null },
@@ -5798,6 +6076,17 @@ export async function actionSoftDeleteClientProfile(
         }
       });
       archivedAffiliations = updatedAffiliations.count;
+
+      const updatedCompanyLinks = await tx.personCompanyLink.updateMany({
+        where: { personId: existing.id, deletedAt: null },
+        data: {
+          isActive: false,
+          isPrimary: false,
+          endAt: archivedAt,
+          deletedAt: archivedAt
+        }
+      });
+      archivedCompanyLinks = updatedCompanyLinks.count;
     }
 
     const updated = await tx.clientProfile.update({
@@ -5810,6 +6099,7 @@ export async function actionSoftDeleteClientProfile(
       clientId: updated.id,
       clientType: updated.type,
       archivedAffiliations,
+      archivedCompanyLinks,
       ...(normalizedReason ? { reason: normalizedReason } : {})
     };
 
@@ -5957,6 +6247,16 @@ export async function actionApplyBulkClientMutation(formData: FormData) {
               deletedAt: archiveDate,
               status: ClientAffiliationStatus.INACTIVE,
               isPrimaryPayer: false
+            }
+          });
+
+          await tx.personCompanyLink.updateMany({
+            where: { personId: { in: personIds }, deletedAt: null },
+            data: {
+              isActive: false,
+              isPrimary: false,
+              endAt: archiveDate,
+              deletedAt: archiveDate
             }
           });
         }
