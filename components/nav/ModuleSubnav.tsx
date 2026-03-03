@@ -92,41 +92,6 @@ function getSubscriptionsPrimaryCta(section: SubscriptionsSection, mode: Subscri
   return { label: "Crear plan", href: "/admin/suscripciones/membresias/planes/nuevo" };
 }
 
-function getMembershipsSecondaryItems(pathname: string, mode: SubscriptionsMode): SecondaryNavItem[] {
-  const operational: SecondaryNavItem[] = [
-    {
-      key: "afiliaciones",
-      label: "Afiliaciones",
-      href: "/admin/suscripciones/membresias/afiliaciones/pacientes",
-      active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/afiliaciones")
-    },
-    {
-      key: "planes",
-      label: "Planes",
-      href: "/admin/suscripciones/membresias/planes",
-      active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/planes")
-    },
-    {
-      key: "renovaciones",
-      label: "Renovaciones",
-      href: "/admin/suscripciones/membresias/renovaciones",
-      active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/renovaciones")
-    },
-    {
-      key: "configuracion",
-      label: "Configuración",
-      href: "/admin/suscripciones/membresias/configuracion",
-      active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/configuracion")
-    }
-  ];
-
-  if (mode === "operacion") return operational;
-  const preferredOrder = ["planes", "configuracion", "afiliaciones", "renovaciones"];
-  return preferredOrder
-    .map((key) => operational.find((item) => item.key === key))
-    .filter((item): item is SecondaryNavItem => Boolean(item));
-}
-
 function getPharmacySecondaryItems(pathname: string, search: URLSearchParams, mode: SubscriptionsMode): SecondaryNavItem[] {
   const currentTab = (search.get("tab") || "medicamentos").trim().toLowerCase();
   const operational: SecondaryNavItem[] = [
@@ -265,12 +230,7 @@ export default function ModuleSubnav({
   if (moduleKey === "suscripciones") {
     const section = getSubscriptionsSection(pathname);
     const primaryCta = getSubscriptionsPrimaryCta(section, subscriptionsMode);
-    const secondaryItems =
-      section === "membresias"
-        ? getMembershipsSecondaryItems(pathname, subscriptionsMode)
-        : section === "farmacia"
-          ? getPharmacySecondaryItems(pathname, search, subscriptionsMode)
-          : [];
+    const secondaryItems = section === "farmacia" ? getPharmacySecondaryItems(pathname, search, subscriptionsMode) : [];
 
     return (
       <div className={cn("w-full", sticky && "sticky z-30 [top:var(--admin-header-offset,72px)]")}>

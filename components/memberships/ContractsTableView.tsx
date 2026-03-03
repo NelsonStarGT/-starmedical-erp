@@ -502,17 +502,36 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
                     >
                       Renovar
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => void changeStatus(contract.id, "SUSPENDIDO")}
+                      disabled={statusBusyId === contract.id}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                    >
+                      Suspender
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const confirmed = window.confirm("¿Marcar afiliación como cancelada al corte?");
+                        if (confirmed) void changeStatus(contract.id, "CANCELADO");
+                      }}
+                      disabled={statusBusyId === contract.id}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                    >
+                      Cancelar (corte)
+                    </button>
                     <Link
                       href={`/admin/suscripciones/membresias/contratos/${contract.id}`}
                       className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
                     >
-                      Registrar pago
+                      Gestionar cobro
                     </Link>
                     <Link
                       href={buildMembershipInvoiceLink({ contractId: contract.id })}
                       className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
                     >
-                      Ir a facturación
+                      Facturación
                     </Link>
                     <button
                       type="button"

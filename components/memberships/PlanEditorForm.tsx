@@ -72,9 +72,15 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
   const [loadingCatalogs, setLoadingCatalogs] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [canAdmin, setCanAdmin] = useState(false);
   const [canViewPricing, setCanViewPricing] = useState(false);
   const [hidePricesForOperators, setHidePricesForOperators] = useState(true);
   const [benefitSearch, setBenefitSearch] = useState("");
+  const [productModel, setProductModel] = useState<"RECURRENTE" | "PREPAGO">(
+    String(initialData?.description || "").toLowerCase().includes("prepago") ? "PREPAGO" : "RECURRENTE"
+  );
+  const [benefitWindowDays, setBenefitWindowDays] = useState("30");
+  const [benefitsAccumulative, setBenefitsAccumulative] = useState(false);
 
   const [form, setForm] = useState({
     slug: initialData?.slug ?? "",
@@ -138,6 +144,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
         setCategories(Array.isArray(categoriesJson?.data) ? categoriesJson.data : []);
         setDurationPresets(Array.isArray(presetsJson?.data) ? presetsJson.data : []);
         setBenefits(Array.isArray(benefitsJson?.data) ? benefitsJson.data : []);
+        setCanAdmin(Boolean(configJson?.meta?.canAdmin));
         setCanViewPricing(Boolean(configJson?.meta?.canViewPricing));
         setHidePricesForOperators(Boolean(configJson?.data?.hidePricesForOperators));
       } catch (err: any) {
@@ -195,8 +202,8 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
     event.preventDefault();
     setError(null);
 
-    if (mode === "create" && shouldHidePricing) {
-      setError("No tienes permiso para crear planes con precio visible. Solicita MEMBERSHIPS:PRICING:VIEW.");
+    if (!canAdmin) {
+      setError("Solo administradores pueden crear o editar planes.");
       return;
     }
 
@@ -249,6 +256,11 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
   return (
     <form className="space-y-4" onSubmit={handleSubmit}>
       {loadingCatalogs ? <p className="text-xs text-slate-500">Cargando catálogos...</p> : null}
+      {!canAdmin ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          Edición restringida: este formulario es solo para perfiles administradores.
+        </div>
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-1 text-xs text-slate-700">
@@ -327,11 +339,25 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
         </label>
 
         <label className="space-y-1 text-xs text-slate-700">
+          <span className="font-medium">Tipo de producto</span>
+          <select
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+            value={productModel}
+            onChange={(event) => setProductModel(event.target.value as "RECURRENTE" | "PREPAGO")}
+            disabled={!canAdmin}
+          >
+            <option value="RECURRENTE">Recurrente (Membresía)</option>
+            <option value="PREPAGO">Prepago (Gift card)</option>
+          </select>
+        </label>
+
+        <label className="space-y-1 text-xs text-slate-700">
           <span className="font-medium">Moneda</span>
           <select
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             value={form.currency}
             onChange={(event) => setForm((prev) => ({ ...prev, currency: event.target.value }))}
+            disabled={!canAdmin}
           >
             <option value="GTQ">GTQ</option>
             <option value="USD">USD</option>
@@ -387,6 +413,35 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
 
       <section className="space-y-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Beneficios incluidos</h3>
+        <div className="grid gap-2 md:grid-cols-2">
+          <label className="space-y-1 text-xs text-slate-700">
+            <span className="font-medium">Ventana de beneficios (días)</span>
+            <input
+              type="number"
+              min="1"
+              max="365"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              value={benefitWindowDays}
+              onChange={(event) => setBenefitWindowDays(event.target.value)}
+              disabled={!canAdmin}
+            />
+          </label>
+          <label className="inline-flex items-center gap-2 self-end rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+            <input
+              type="checkbox"
+              checked={benefitsAccumulative}
+              onChange={(event) => setBenefitsAccumulative(event.target.checked)}
+              disabled={!canAdmin}
+            />
+            Beneficios acumulables
+          </label>
+        </div>
+        <p className="text-[11px] text-slate-500">
+          Regla recomendada: no acumulables por default anual. Persistencia avanzada se habilitará en fase de reglas comerciales.
+        </p>
+        <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-[11px] text-slate-600">
+          Selector desde inventario: usa catálogo interno de beneficios por ahora. Integración directa con inventario queda preparada como siguiente paso.
+        </div>
         <input
           className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
           value={benefitSearch}
@@ -466,12 +521,13 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
         <label className="space-y-1 text-xs text-slate-700">
           <span className="font-medium">Foto del plan (URL)</span>
           <input
-            type="url"
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={form.imageUrl}
-            onChange={(event) => setForm((prev) => ({ ...prev, imageUrl: event.target.value }))}
-            placeholder="https://..."
-          />
+          type="url"
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+          value={form.imageUrl}
+          onChange={(event) => setForm((prev) => ({ ...prev, imageUrl: event.target.value }))}
+          placeholder="https://..."
+          disabled={!canAdmin}
+        />
           <span className="block text-[11px] text-slate-500">
             MVP actual: URL directa. TODO: uploader cuando exista infraestructura de archivos para este módulo.
           </span>
@@ -506,6 +562,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
               value={form.priceMonthly}
               onChange={(event) => setForm((prev) => ({ ...prev, priceMonthly: event.target.value }))}
               required={mode === "create"}
+              disabled={!canAdmin}
             />
           </label>
 
@@ -519,6 +576,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
               value={form.priceAnnual}
               onChange={(event) => setForm((prev) => ({ ...prev, priceAnnual: event.target.value }))}
               required={mode === "create"}
+              disabled={!canAdmin}
             />
           </label>
 
@@ -530,6 +588,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
               value={form.maxDependents}
               onChange={(event) => setForm((prev) => ({ ...prev, maxDependents: event.target.value }))}
+              disabled={!canAdmin}
             />
           </label>
         </div>
@@ -540,6 +599,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
           type="checkbox"
           checked={form.active}
           onChange={(event) => setForm((prev) => ({ ...prev, active: event.target.checked }))}
+          disabled={!canAdmin}
         />
         Plan activo
       </label>
@@ -558,7 +618,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
         <button
           type="submit"
           className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
-          disabled={busy || (mode === "create" && shouldHidePricing)}
+          disabled={busy || !canAdmin}
         >
           {busy ? "Guardando..." : mode === "create" ? "Crear plan" : "Guardar cambios"}
         </button>

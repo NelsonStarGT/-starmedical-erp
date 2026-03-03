@@ -81,7 +81,7 @@ export default function MembershipRenewalsPage() {
   return (
     <MembershipsShell
       title="Renovaciones · Cola operativa"
-      description="Operación de vencimientos. Cobranza se ejecuta fuera de este módulo."
+      description="Gestión diaria de vencimientos con salida a Facturación y enlace de pago."
     >
       <div className="grid gap-3 md:grid-cols-3">
         <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -136,13 +136,16 @@ export default function MembershipRenewalsPage() {
                       href={buildMembershipInvoiceLink({ contractId: row.id })}
                       className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
                     >
-                      Generar factura
+                      Acción A · Facturación
                     </Link>
                     <Link
-                      href={`/admin/suscripciones/membresias/contratos/${row.id}`}
+                      href={buildMembershipInvoiceLink({
+                        contractId: row.id,
+                        params: { action: "payment-link" }
+                      })}
                       className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
                     >
-                      Ver contrato
+                      Acción B · Link pago
                     </Link>
                   </div>
                 </td>
