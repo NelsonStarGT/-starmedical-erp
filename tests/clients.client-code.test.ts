@@ -95,4 +95,6 @@ test("reserva de correlativo castea clientType a enum ClientProfileType en SQL",
   const sqlText = (capturedSql as Prisma.Sql).strings.join(" ");
   assert.match(sqlText, /CAST\(/);
   assert.match(sqlText, /AS "ClientProfileType"\)/);
+  assert.match(sqlText, /"id",\s*"tenantId",\s*"clientType"/);
+  assert.match(sqlText, /gen_random_uuid\(\)::text/);
 });

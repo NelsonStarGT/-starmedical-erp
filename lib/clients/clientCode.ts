@@ -101,9 +101,9 @@ export async function reserveNextClientCodeTx(
 
   const rows = await tx.$queryRaw<Array<{ prefix: string; nextNumber: number | bigint | string }>>(Prisma.sql`
     INSERT INTO "ClientSequenceCounter"
-      ("tenantId", "clientType", "prefix", "nextNumber", "createdAt", "updatedAt")
+      ("id", "tenantId", "clientType", "prefix", "nextNumber", "createdAt", "updatedAt")
     VALUES
-      (${tenantId}, CAST(${input.clientType} AS "ClientProfileType"), ${prefix}, 2, NOW(), NOW())
+      (gen_random_uuid()::text, ${tenantId}, CAST(${input.clientType} AS "ClientProfileType"), ${prefix}, 2, NOW(), NOW())
     ON CONFLICT ("tenantId", "clientType")
     DO UPDATE SET
       "nextNumber" = "ClientSequenceCounter"."nextNumber" + 1,
