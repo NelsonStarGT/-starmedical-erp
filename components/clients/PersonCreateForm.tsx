@@ -1736,27 +1736,36 @@ export default function PersonCreateForm({
                 <p className="text-xs font-semibold text-slate-500">
                   Número de identificación{isIdentityOptional ? " (opcional)" : " *"}
                 </p>
-                <IconInput
-                  icon={<IdCard size={16} className="text-slate-400" />}
-                  value={form.identityDocumentValue}
-                  name="documentNumber"
-                  autoComplete="off"
-                  type="text"
-                  inputMode="numeric"
-                  onChange={(identityDocumentValue) => {
-                    setForm((prev) => ({ ...prev, identityDocumentValue }));
-                    setErrors((prev) => ({ ...prev, identityDocumentValue: undefined }));
-                    if (identityStatus.state !== "idle") {
-                      setIdentityStatus({ state: "idle" });
-                    }
-                  }}
-                  onBlur={() => {
-                    if (!form.identityDocumentValue.trim() && isIdentityOptional) return;
-                    void runIdentityCheck(form.identityDocumentValue);
-                  }}
-                  placeholder={selectedIdentityDocument?.name ? `${selectedIdentityDocument.name}${isIdentityOptional ? " (opcional)" : ""}` : "Documento"}
-                  error={errors.identityDocumentValue}
-                />
+                <div
+                  className={cn(
+                    "flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm focus-within:border-[#4aa59c] focus-within:outline-none focus-within:ring-2 focus-within:ring-[#4aa59c]/25",
+                    errors.identityDocumentValue && "border-rose-300 focus-within:border-rose-300 focus-within:ring-rose-200"
+                  )}
+                >
+                  <IdCard size={16} className="shrink-0 text-slate-400" />
+                  <input
+                    name="documentNumber"
+                    value={form.identityDocumentValue}
+                    autoComplete="off"
+                    type="text"
+                    inputMode="numeric"
+                    onChange={(event) => {
+                      const identityDocumentValue = event.target.value;
+                      setForm((prev) => ({ ...prev, identityDocumentValue }));
+                      setErrors((prev) => ({ ...prev, identityDocumentValue: undefined }));
+                      if (identityStatus.state !== "idle") {
+                        setIdentityStatus({ state: "idle" });
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!form.identityDocumentValue.trim() && isIdentityOptional) return;
+                      void runIdentityCheck(form.identityDocumentValue);
+                    }}
+                    placeholder={selectedIdentityDocument?.name ? `${selectedIdentityDocument.name}${isIdentityOptional ? " (opcional)" : ""}` : "Documento"}
+                    className="h-full w-full bg-transparent text-sm text-slate-700 outline-none"
+                  />
+                </div>
+                {errors.identityDocumentValue ? <p className="mt-1 text-xs text-rose-700">{errors.identityDocumentValue}</p> : null}
               </div>
             </div>
 
