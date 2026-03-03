@@ -148,7 +148,7 @@ export default function ModuleSubnav({
           },
           {
             key: "afiliaciones",
-            label: "Afiliaciones",
+            label: "Gestión",
             href: withQuery("/admin/suscripciones/membresias/afiliaciones/pacientes"),
             active:
               matchesPathPrefix(pathname, "/admin/suscripciones/membresias/afiliaciones") ||

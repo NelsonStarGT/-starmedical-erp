@@ -37,7 +37,7 @@ export function MembershipsInnerSubnav() {
       { key: "catalogo", label: "Catálogo", href: "/admin/suscripciones/membresias", active: isCatalog },
       {
         key: "afiliaciones",
-        label: "Afiliaciones",
+        label: "Gestión",
         href: "/admin/suscripciones/membresias/afiliaciones/pacientes",
         active: isAffiliations
       },

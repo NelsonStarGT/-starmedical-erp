@@ -19,6 +19,7 @@ type PlanOption = {
   id: string;
   name: string;
   segment: "B2C" | "B2B";
+  type?: string | null;
   active: boolean;
   priceMonthly: number;
   priceAnnual: number;
@@ -61,12 +62,15 @@ type ContractRow = {
     id: string;
     name: string;
     segment: "B2C" | "B2B";
+    type?: string | null;
   } | null;
   owner?: {
     id: string;
     type: string;
     firstName?: string | null;
     lastName?: string | null;
+    code?: string | null;
+    clientCode?: string | null;
     companyName?: string | null;
     email?: string | null;
     phone?: string | null;
@@ -76,12 +80,15 @@ type ContractRow = {
     id: string;
     name: string;
     segment: "B2C" | "B2B";
+    type?: string | null;
   } | null;
   ClientProfile?: {
     id: string;
     type: string;
     firstName?: string | null;
     lastName?: string | null;
+    code?: string | null;
+    clientCode?: string | null;
     companyName?: string | null;
     email?: string | null;
     phone?: string | null;
@@ -118,6 +125,26 @@ function statusBadgeTone(status: string) {
   if (status === "VENCIDO") return "border-slate-300 bg-slate-100 text-slate-700";
   if (status === "CANCELADO") return "border-slate-300 bg-slate-200 text-slate-700";
   return "border-slate-200 bg-slate-100 text-slate-700";
+}
+
+function normalizeSubscriptionType(rawType: string | null | undefined) {
+  const value = String(rawType || "")
+    .trim()
+    .toUpperCase();
+  if (!value) return null;
+  if (value.includes("PREPAGO") || value.includes("PREPAID") || value.includes("GIFT")) return "Prepago";
+  if (value.includes("RECURRENT") || value.includes("MEMBRES")) return "Recurrente";
+  return null;
+}
+
+function getSubscriptionTypeLabel(contract: ContractRow, plan: ContractRow["plan"] | ContractRow["MembershipPlan"]) {
+  const fromPlanType = normalizeSubscriptionType(plan?.type);
+  if (fromPlanType) return fromPlanType;
+  return contract.paymentMethod === "RECURRENT" ? "Recurrente" : "Prepago";
+}
+
+function getOwnerClientCode(ownerProfile: ContractRow["owner"] | ContractRow["ClientProfile"] | null) {
+  return ownerProfile?.clientCode || ownerProfile?.code || "—";
 }
 
 export function ContractsTableView({ ownerType, title, description }: ContractsTableViewProps) {
@@ -288,6 +315,10 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
     } finally {
       setRenewBusyId(null);
     }
+  }
+
+  function showComingSoon(message: string) {
+    setInfoMessage(`Próximamente: ${message}`);
   }
 
   return (
@@ -480,20 +511,36 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       {contracts.length > 0 ? (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="max-h-[560px] overflow-auto">
-            <table className="min-w-[980px] w-full border-separate border-spacing-0 text-xs">
+            <table className={cn("w-full border-separate border-spacing-0 text-xs", ownerType === "PERSON" ? "min-w-[940px]" : "min-w-[980px]")}>
               <thead className="sticky top-0 z-20">
                 <tr className="bg-[#F8FAFC]">
                   <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">NO.</th>
-                  <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
-                    Membresía/Plan
-                  </th>
-                  <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
-                    Titular
-                  </th>
-                  <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">Pago</th>
-                  <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
-                    Próxima renovación
-                  </th>
+                  {ownerType === "PERSON" ? (
+                    <>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
+                        Titular
+                      </th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
+                        Código de cliente
+                      </th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
+                        Tipo de suscripción / Plan
+                      </th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
+                        Membresía/Plan
+                      </th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
+                        Titular
+                      </th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">Pago</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
+                        Próxima renovación
+                      </th>
+                    </>
+                  )}
                   <th className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">Estado</th>
                   <th className="sticky right-0 z-30 border-b border-l border-slate-200 bg-[#F8FAFC] px-2 py-2 text-right text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2e75ba]">
                     Acciones
@@ -510,35 +557,64 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
                       ? ownerProfile.companyName || "Empresa"
                       : `${ownerProfile.firstName || ""} ${ownerProfile.lastName || ""}`.trim() || "Paciente"
                     : "Sin titular";
+                  const ownerClientCode = getOwnerClientCode(ownerProfile);
+                  const subscriptionTypeLabel = getSubscriptionTypeLabel(contract, plan);
 
                   return (
                     <tr key={contract.id} className={cn("border-b border-slate-100", rowBg, "hover:bg-[#f3f8ff]")}>
                       <td className="px-3 py-2 align-top text-slate-700">{pageStartIndex + index + 1}</td>
-                      <td className="max-w-[260px] px-3 py-2 align-top">
-                        <p className="truncate font-semibold text-slate-900" title={plan?.name || "Plan sin nombre"}>
-                          {plan?.name || "Plan sin nombre"}
-                        </p>
-                        <p className="truncate text-[11px] text-slate-500" title={`${contract.code} · ${(plan?.segment || (ownerType === "PERSON" ? "B2C" : "B2B")).toString()}`}>
-                          {contract.code} · {(plan?.segment || (ownerType === "PERSON" ? "B2C" : "B2B")).toString()}
-                        </p>
-                      </td>
-                      <td className="max-w-[240px] px-3 py-2 align-top">
-                        <p className="truncate text-slate-800" title={ownerLabel}>
-                          {ownerLabel}
-                        </p>
-                        <p className="truncate text-[11px] text-slate-500" title={ownerProfile?.email || ownerProfile?.phone || "-"}>
-                          {ownerProfile?.email || ownerProfile?.phone || "-"}
-                        </p>
-                      </td>
-                      <td className="px-3 py-2 align-top text-slate-700">
-                        <p>{contract.paymentMethod === "RECURRENT" ? "Recurrente" : "Manual"}</p>
-                        {canViewPricing || !hidePricesForOperators ? (
-                          <p className="text-[11px] text-slate-500">Saldo: {money(contract.balance)}</p>
-                        ) : (
-                          <p className="text-[11px] text-slate-500">Saldo: —</p>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 align-top text-slate-700">{dateLabel(contract.nextRenewAt)}</td>
+                      {ownerType === "PERSON" ? (
+                        <>
+                          <td className="max-w-[260px] px-3 py-2 align-top">
+                            <p className="truncate text-slate-800" title={ownerLabel}>
+                              {ownerLabel}
+                            </p>
+                            <p className="truncate text-[11px] text-slate-500" title={ownerProfile?.email || ownerProfile?.phone || "-"}>
+                              {ownerProfile?.email || ownerProfile?.phone || "-"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2 align-top text-slate-700">{ownerClientCode}</td>
+                          <td className="max-w-[280px] px-3 py-2 align-top">
+                            <p className="truncate text-slate-800" title={subscriptionTypeLabel}>
+                              {subscriptionTypeLabel}
+                            </p>
+                            <p className="truncate text-[11px] text-slate-500" title={plan?.name || "Plan sin nombre"}>
+                              {plan?.name || "Plan sin nombre"}
+                            </p>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="max-w-[260px] px-3 py-2 align-top">
+                            <p className="truncate font-semibold text-slate-900" title={plan?.name || "Plan sin nombre"}>
+                              {plan?.name || "Plan sin nombre"}
+                            </p>
+                            <p
+                              className="truncate text-[11px] text-slate-500"
+                              title={`${contract.code} · ${(plan?.segment || "B2B").toString()}`}
+                            >
+                              {contract.code} · {(plan?.segment || "B2B").toString()}
+                            </p>
+                          </td>
+                          <td className="max-w-[240px] px-3 py-2 align-top">
+                            <p className="truncate text-slate-800" title={ownerLabel}>
+                              {ownerLabel}
+                            </p>
+                            <p className="truncate text-[11px] text-slate-500" title={ownerProfile?.email || ownerProfile?.phone || "-"}>
+                              {ownerProfile?.email || ownerProfile?.phone || "-"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2 align-top text-slate-700">
+                            <p>{contract.paymentMethod === "RECURRENT" ? "Recurrente" : "Manual"}</p>
+                            {canViewPricing || !hidePricesForOperators ? (
+                              <p className="text-[11px] text-slate-500">Saldo: {money(contract.balance)}</p>
+                            ) : (
+                              <p className="text-[11px] text-slate-500">Saldo: —</p>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 align-top text-slate-700">{dateLabel(contract.nextRenewAt)}</td>
+                        </>
+                      )}
                       <td className="px-3 py-2 align-top">
                         <span className={cn("inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold", statusBadgeTone(contract.status))}>
                           {contract.status}
@@ -564,6 +640,16 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
                               >
                                 Ver detalle
                               </Link>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRowMenuOpenId(null);
+                                  showComingSoon("Cambiar plan / Upgrade");
+                                }}
+                                className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-[#F8FAFC]"
+                              >
+                                Cambiar plan / Upgrade
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => {
@@ -609,7 +695,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
                                 type="button"
                                 onClick={() => {
                                   setRowMenuOpenId(null);
-                                  setInfoMessage("Cambio de método de pago estará disponible pronto.");
+                                  showComingSoon("Cambiar método de pago");
                                 }}
                                 className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-[#F8FAFC]"
                               >
@@ -619,7 +705,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
                                 type="button"
                                 onClick={() => {
                                   setRowMenuOpenId(null);
-                                  setInfoMessage("Impresión de carnet estará disponible pronto.");
+                                  showComingSoon("Imprimir carnet");
                                 }}
                                 className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-[#F8FAFC]"
                               >
