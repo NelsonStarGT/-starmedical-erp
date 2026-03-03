@@ -20,6 +20,8 @@ import {
   createPlanCategorySchema,
   createPlanSchema,
   membershipCatalogDefaultsSchema,
+  membershipCurrenciesPayloadSchema,
+  membershipProductTypesPayloadSchema,
   membershipPlanModalitiesPayloadSchema,
   listBenefitsQuerySchema,
   listContractsQuerySchema,
@@ -117,6 +119,8 @@ type RenewContractInput = z.infer<typeof renewContractSchema>;
 type MembershipConfigInput = z.infer<typeof membershipConfigSchema>;
 type MembershipPlanModalitiesPayloadInput = z.infer<typeof membershipPlanModalitiesPayloadSchema>;
 type MembershipCatalogDefaultsInput = z.infer<typeof membershipCatalogDefaultsSchema>;
+type MembershipCurrenciesPayloadInput = z.infer<typeof membershipCurrenciesPayloadSchema>;
+type MembershipProductTypesPayloadInput = z.infer<typeof membershipProductTypesPayloadSchema>;
 type MembershipGatewayConfigInput = z.infer<typeof membershipGatewayConfigSchema>;
 type ContractCheckoutInitInput = z.infer<typeof contractCheckoutInitSchema>;
 type PublicSubscribeInput = z.infer<typeof publicSubscribeSchema>;
@@ -209,6 +213,17 @@ const DEFAULT_MEMBERSHIP_CATALOG_DEFAULTS = {
   accumulableDefault: false,
   defaultModalityCode: "INDIVIDUAL"
 } as const;
+
+const DEFAULT_MEMBERSHIP_CURRENCIES = [
+  { id: "cur-gtq", code: "GTQ", name: "Quetzal", isActive: true, sortOrder: 10 },
+  { id: "cur-usd", code: "USD", name: "US Dollar", isActive: true, sortOrder: 20 }
+] as const;
+
+const DEFAULT_MEMBERSHIP_PRODUCT_TYPES = [
+  { id: "ptype-recurrente", code: "RECURRENTE", name: "Recurrente (Membresía)", isActive: true, sortOrder: 10 },
+  { id: "ptype-prepago", code: "PREPAGO", name: "Prepago (Plan)", isActive: true, sortOrder: 20 },
+  { id: "ptype-gift-card", code: "GIFT_CARD", name: "Gift card", isActive: true, sortOrder: 30 }
+] as const;
 
 async function ensureMembershipConfigRecord() {
   return prisma.membershipConfig.upsert({
@@ -501,6 +516,22 @@ export async function setPlanCategoryStatus(id: string, isActive: boolean) {
     if (error?.code === "P2025") throw new MembershipError("Categoría no encontrada", 404);
     throw error;
   }
+}
+
+export async function deletePlanCategory(id: string) {
+  const inUseCount = await prisma.membershipPlan.count({ where: { categoryId: id } });
+  if (inUseCount > 0) {
+    throw new MembershipError("La categoría está en uso por uno o más planes. Desactívala en lugar de eliminarla.", 409);
+  }
+
+  try {
+    await prisma.membershipPlanCategory.delete({ where: { id } });
+  } catch (error: any) {
+    if (error?.code === "P2025") throw new MembershipError("Categoría no encontrada", 404);
+    throw error;
+  }
+
+  return { id, deleted: true };
 }
 
 export async function listDurationPresets(input: ListDurationPresetsInput, user: SessionUser | null) {
@@ -1682,12 +1713,174 @@ export async function updateMembershipPlanModalities(rawInput: MembershipPlanMod
   return payload.items;
 }
 
+export async function deleteMembershipPlanModality(id: string) {
+  const config = await ensureMembershipConfigRecord();
+  const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
+  const storage = readMembershipCatalogStorage(retryPolicy);
+  const rawItems = Array.isArray(storage.modalities) ? storage.modalities : [];
+  const parsed = membershipPlanModalitiesPayloadSchema.safeParse({ items: rawItems });
+  const items = parsed.success ? parsed.data.items : [...DEFAULT_MEMBERSHIP_MODALITIES];
+  const target = items.find((item) => item.id === id);
+  if (!target) throw new MembershipError("Modalidad no encontrada", 404);
+
+  const tag = `[modality:${target.code}]`;
+  const [taggedUsageCount, legacyUsageCount] = await Promise.all([
+    prisma.membershipPlan.count({
+      where: {
+        description: {
+          contains: tag,
+          mode: "insensitive"
+        }
+      }
+    }),
+    prisma.membershipPlan.count({
+      where: {
+        segment: target.segment,
+        type: target.mappedPlanType,
+        OR: [{ description: null }, { NOT: { description: { contains: "[modality:", mode: "insensitive" } } }]
+      }
+    })
+  ]);
+
+  if (taggedUsageCount > 0 || legacyUsageCount > 0) {
+    throw new MembershipError("La modalidad está en uso por planes existentes. Archívala en lugar de eliminarla.", 409);
+  }
+
+  const nextItems = items.filter((item) => item.id !== id);
+  if (nextItems.length === 0) {
+    throw new MembershipError("Debe existir al menos una modalidad en el catálogo.", 409);
+  }
+
+  const defaultsParsed = membershipCatalogDefaultsSchema.safeParse(storage.catalogDefaults || {});
+  const defaults = defaultsParsed.success ? defaultsParsed.data : { ...DEFAULT_MEMBERSHIP_CATALOG_DEFAULTS };
+  if (defaults.defaultModalityCode === target.code) {
+    const fallback = nextItems.find((item) => item.isActive)?.code || null;
+    defaults.defaultModalityCode = fallback;
+  }
+
+  const nextRetryPolicy = {
+    ...retryPolicy,
+    membershipsCatalogV1: {
+      ...storage,
+      modalities: nextItems,
+      catalogDefaults: defaults
+    }
+  };
+
+  await prisma.membershipConfig.update({
+    where: { id: config.id },
+    data: {
+      retryPolicy: nextRetryPolicy as Prisma.InputJsonValue,
+      updatedAt: now()
+    }
+  });
+
+  return { id, deleted: true };
+}
+
+export async function getMembershipCurrencies() {
+  const config = await ensureMembershipConfigRecord();
+  const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
+  const storage = readMembershipCatalogStorage(retryPolicy);
+  const parsed = membershipCurrenciesPayloadSchema.safeParse({ items: Array.isArray(storage.currencies) ? storage.currencies : [] });
+  const items = parsed.success ? parsed.data.items : [...DEFAULT_MEMBERSHIP_CURRENCIES];
+  return [...items].sort((a, b) => (a.sortOrder === b.sortOrder ? a.code.localeCompare(b.code) : a.sortOrder - b.sortOrder));
+}
+
+export async function updateMembershipCurrencies(rawInput: MembershipCurrenciesPayloadInput | unknown) {
+  const payload = membershipCurrenciesPayloadSchema.parse(rawInput);
+  const seen = new Set<string>();
+  for (const item of payload.items) {
+    if (seen.has(item.code)) {
+      throw new MembershipError(`Moneda duplicada: ${item.code}`, 409);
+    }
+    seen.add(item.code);
+  }
+
+  const config = await ensureMembershipConfigRecord();
+  const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
+  const storage = readMembershipCatalogStorage(retryPolicy);
+  const defaultsParsed = membershipCatalogDefaultsSchema.safeParse(storage.catalogDefaults || {});
+  const defaults = defaultsParsed.success ? defaultsParsed.data : { ...DEFAULT_MEMBERSHIP_CATALOG_DEFAULTS };
+
+  const activeCodes = new Set(payload.items.filter((item) => item.isActive).map((item) => item.code));
+  if (!activeCodes.has(defaults.currencyDefault)) {
+    defaults.currencyDefault = payload.items.find((item) => item.isActive)?.code || payload.items[0]?.code || "GTQ";
+  }
+
+  const nextRetryPolicy = {
+    ...retryPolicy,
+    membershipsCatalogV1: {
+      ...storage,
+      currencies: payload.items,
+      catalogDefaults: defaults
+    }
+  };
+
+  await prisma.membershipConfig.update({
+    where: { id: config.id },
+    data: {
+      retryPolicy: nextRetryPolicy as Prisma.InputJsonValue,
+      updatedAt: now()
+    }
+  });
+
+  return payload.items;
+}
+
+export async function getMembershipProductTypes() {
+  const config = await ensureMembershipConfigRecord();
+  const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
+  const storage = readMembershipCatalogStorage(retryPolicy);
+  const parsed = membershipProductTypesPayloadSchema.safeParse({ items: Array.isArray(storage.productTypes) ? storage.productTypes : [] });
+  const items = parsed.success ? parsed.data.items : [...DEFAULT_MEMBERSHIP_PRODUCT_TYPES];
+  return [...items].sort((a, b) => (a.sortOrder === b.sortOrder ? a.code.localeCompare(b.code) : a.sortOrder - b.sortOrder));
+}
+
+export async function updateMembershipProductTypes(rawInput: MembershipProductTypesPayloadInput | unknown) {
+  const payload = membershipProductTypesPayloadSchema.parse(rawInput);
+  const seen = new Set<string>();
+  for (const item of payload.items) {
+    if (seen.has(item.code)) {
+      throw new MembershipError(`Tipo de producto duplicado: ${item.code}`, 409);
+    }
+    seen.add(item.code);
+  }
+
+  const config = await ensureMembershipConfigRecord();
+  const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
+  const storage = readMembershipCatalogStorage(retryPolicy);
+  const nextRetryPolicy = {
+    ...retryPolicy,
+    membershipsCatalogV1: {
+      ...storage,
+      productTypes: payload.items
+    }
+  };
+
+  await prisma.membershipConfig.update({
+    where: { id: config.id },
+    data: {
+      retryPolicy: nextRetryPolicy as Prisma.InputJsonValue,
+      updatedAt: now()
+    }
+  });
+
+  return payload.items;
+}
+
 export async function getMembershipCatalogDefaults() {
   const config = await ensureMembershipConfigRecord();
   const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
   const storage = readMembershipCatalogStorage(retryPolicy);
   const parsed = membershipCatalogDefaultsSchema.safeParse(storage.catalogDefaults || {});
-  return parsed.success ? parsed.data : { ...DEFAULT_MEMBERSHIP_CATALOG_DEFAULTS };
+  const defaults = parsed.success ? parsed.data : { ...DEFAULT_MEMBERSHIP_CATALOG_DEFAULTS };
+  const currencies = await getMembershipCurrencies();
+  const activeCurrencies = new Set(currencies.filter((item) => item.isActive).map((item) => item.code));
+  if (!activeCurrencies.has(defaults.currencyDefault)) {
+    defaults.currencyDefault = currencies.find((item) => item.isActive)?.code || defaults.currencyDefault;
+  }
+  return defaults;
 }
 
 export async function updateMembershipCatalogDefaults(rawInput: MembershipCatalogDefaultsInput | unknown) {
@@ -1695,6 +1888,20 @@ export async function updateMembershipCatalogDefaults(rawInput: MembershipCatalo
   const config = await ensureMembershipConfigRecord();
   const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
   const storage = readMembershipCatalogStorage(retryPolicy);
+
+  const modalities = await getMembershipPlanModalities();
+  if (payload.defaultModalityCode) {
+    const exists = modalities.some((item) => item.code === payload.defaultModalityCode && item.isActive);
+    if (!exists) {
+      throw new MembershipError("La modalidad default no existe o está inactiva.", 409);
+    }
+  }
+
+  const currencies = await getMembershipCurrencies();
+  const currencyExists = currencies.some((item) => item.code === payload.currencyDefault && item.isActive);
+  if (!currencyExists) {
+    throw new MembershipError("La moneda default debe existir en el catálogo y estar activa.", 409);
+  }
 
   const nextRetryPolicy = {
     ...retryPolicy,

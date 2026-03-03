@@ -46,6 +46,22 @@ type CatalogDefaults = {
   defaultModalityCode?: PlanModality["code"] | null;
 };
 
+type MembershipCurrency = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+type MembershipProductType = {
+  id: string;
+  code: "RECURRENTE" | "PREPAGO" | "GIFT_CARD";
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+};
+
 type ConfigResponse = {
   data: MembershipConfig;
   meta?: {
@@ -131,6 +147,17 @@ const DEFAULT_CATALOG_DEFAULTS: CatalogDefaults = {
   defaultModalityCode: "INDIVIDUAL"
 };
 
+const DEFAULT_CURRENCIES: MembershipCurrency[] = [
+  { id: "cur-gtq", code: "GTQ", name: "Quetzal", isActive: true, sortOrder: 10 },
+  { id: "cur-usd", code: "USD", name: "US Dollar", isActive: true, sortOrder: 20 }
+];
+
+const DEFAULT_PRODUCT_TYPES: MembershipProductType[] = [
+  { id: "ptype-recurrente", code: "RECURRENTE", name: "Recurrente (Membresía)", isActive: true, sortOrder: 10 },
+  { id: "ptype-prepago", code: "PREPAGO", name: "Prepago (Plan)", isActive: true, sortOrder: 20 },
+  { id: "ptype-gift-card", code: "GIFT_CARD", name: "Gift card", isActive: true, sortOrder: 30 }
+];
+
 const CATALOG_OPTIONS = [
   {
     id: "categories",
@@ -141,6 +168,16 @@ const CATALOG_OPTIONS = [
     id: "modalities",
     label: "Modalidades",
     description: "Estructura comercial del producto: Individual, Dúo, Familiar, Familiar Plus y Empresarial."
+  },
+  {
+    id: "currencies",
+    label: "Monedas permitidas",
+    description: "Monedas autorizadas para la venta de planes. Planes solo podrán usar monedas activas."
+  },
+  {
+    id: "productTypes",
+    label: "Tipos de producto",
+    description: "Tipos comerciales disponibles para el editor: Recurrente, Prepago y Gift card."
   },
   {
     id: "defaults",
@@ -170,6 +207,8 @@ export default function MembershipConfigPage() {
   const [config, setConfig] = useState<MembershipConfig>(DEFAULT_CONFIG);
   const [categories, setCategories] = useState<Category[]>([]);
   const [modalities, setModalities] = useState<PlanModality[]>(DEFAULT_MODALITIES);
+  const [currencies, setCurrencies] = useState<MembershipCurrency[]>(DEFAULT_CURRENCIES);
+  const [productTypes, setProductTypes] = useState<MembershipProductType[]>(DEFAULT_PRODUCT_TYPES);
   const [catalogDefaults, setCatalogDefaults] = useState<CatalogDefaults>(DEFAULT_CATALOG_DEFAULTS);
   const [segmentFilter, setSegmentFilter] = useState<"ALL" | "B2C" | "B2B">("ALL");
   const [loading, setLoading] = useState(true);
@@ -190,6 +229,18 @@ export default function MembershipConfigPage() {
     mappedPlanType: "INDIVIDUAL" as PlanModality["mappedPlanType"],
     maxDependentsDefault: "0",
     allowDependents: false,
+    sortOrder: "0"
+  });
+
+  const [newCurrency, setNewCurrency] = useState({
+    code: "",
+    name: "",
+    sortOrder: "0"
+  });
+
+  const [newProductType, setNewProductType] = useState({
+    code: "RECURRENTE" as MembershipProductType["code"],
+    name: "",
     sortOrder: "0"
   });
 
@@ -223,12 +274,22 @@ export default function MembershipConfigPage() {
         "/api/subscriptions/memberships/config/defaults",
         "No se pudo cargar defaults"
       );
+      const currenciesPromise = readJson<{ data?: MembershipCurrency[] }>(
+        "/api/subscriptions/memberships/config/currencies",
+        "No se pudieron cargar monedas"
+      );
+      const productTypesPromise = readJson<{ data?: MembershipProductType[] }>(
+        "/api/subscriptions/memberships/config/product-types",
+        "No se pudieron cargar tipos de producto"
+      );
 
-      const [configResult, categoriesResult, modalitiesResult, defaultsResult] = await Promise.allSettled([
+      const [configResult, categoriesResult, modalitiesResult, defaultsResult, currenciesResult, productTypesResult] = await Promise.allSettled([
         configPromise,
         categoriesPromise,
         modalitiesPromise,
-        defaultsPromise
+        defaultsPromise,
+        currenciesPromise,
+        productTypesPromise
       ]);
 
       if (configResult.status === "fulfilled") {
@@ -266,6 +327,22 @@ export default function MembershipConfigPage() {
       } else {
         setCatalogDefaults(DEFAULT_CATALOG_DEFAULTS);
         nextWarnings.push("No se pudieron cargar defaults; se aplican valores base (GTQ, ventana mensual, no acumulable).");
+      }
+
+      if (currenciesResult.status === "fulfilled") {
+        const rows = Array.isArray(currenciesResult.value.data) && currenciesResult.value.data.length > 0 ? currenciesResult.value.data : DEFAULT_CURRENCIES;
+        setCurrencies(rows);
+      } else {
+        setCurrencies(DEFAULT_CURRENCIES);
+        nextWarnings.push("No se pudieron cargar monedas permitidas. Se usan GTQ/USD por default.");
+      }
+
+      if (productTypesResult.status === "fulfilled") {
+        const rows = Array.isArray(productTypesResult.value.data) && productTypesResult.value.data.length > 0 ? productTypesResult.value.data : DEFAULT_PRODUCT_TYPES;
+        setProductTypes(rows);
+      } else {
+        setProductTypes(DEFAULT_PRODUCT_TYPES);
+        nextWarnings.push("No se pudieron cargar tipos de producto. Se usan Recurrente/Prepago/Gift card por default.");
       }
 
       setWarnings(nextWarnings);
@@ -375,6 +452,25 @@ export default function MembershipConfigPage() {
     }
   }
 
+  async function deleteCategory(category: Category) {
+    if (!window.confirm(`Eliminar categoría "${category.name}"? Esta acción no se puede deshacer.`)) return;
+
+    try {
+      setSavingId(`delete-${category.id}`);
+      const response = await fetch(`/api/subscriptions/memberships/plan-categories/${category.id}`, {
+        method: "DELETE"
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudo eliminar categoría");
+      setMessage("Categoría eliminada.");
+      await loadAll();
+    } catch (err: any) {
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo eliminar categoría"));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   function addModality(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!newModality.name.trim()) {
@@ -414,8 +510,44 @@ export default function MembershipConfigPage() {
     setModalities((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
-  function removeModality(id: string) {
-    setModalities((prev) => prev.filter((item) => item.id !== id));
+  async function archiveModality(modality: PlanModality) {
+    if (!window.confirm(`Archivar modalidad "${modality.name}"?`)) return;
+    const next = modalities.map((item) => (item.id === modality.id ? { ...item, isActive: false } : item));
+    try {
+      setSavingId(`archive-${modality.id}`);
+      const response = await fetch("/api/subscriptions/memberships/config/modalities", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: next })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudo archivar modalidad");
+      setMessage("Modalidad archivada.");
+      await loadAll();
+    } catch (err: any) {
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo archivar modalidad"));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function deleteModality(modality: PlanModality) {
+    if (!window.confirm(`Eliminar modalidad "${modality.name}"? Esta acción no se puede deshacer.`)) return;
+
+    try {
+      setSavingId(`delete-${modality.id}`);
+      const response = await fetch(`/api/subscriptions/memberships/config/modalities/${modality.id}`, {
+        method: "DELETE"
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudo eliminar modalidad");
+      setMessage("Modalidad eliminada.");
+      await loadAll();
+    } catch (err: any) {
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo eliminar modalidad"));
+    } finally {
+      setSavingId(null);
+    }
   }
 
   async function saveModalities() {
@@ -457,6 +589,117 @@ export default function MembershipConfigPage() {
       await loadAll();
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudieron guardar defaults"));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  function addCurrency(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const code = newCurrency.code.trim().toUpperCase();
+    const name = newCurrency.name.trim();
+    if (!code || !name) {
+      setError("Código y nombre de moneda son requeridos.");
+      return;
+    }
+    if (currencies.some((item) => item.code === code)) {
+      setError(`La moneda ${code} ya existe.`);
+      return;
+    }
+
+    setCurrencies((prev) => [
+      ...prev,
+      {
+        id: `cur-${code.toLowerCase()}-${Date.now()}`,
+        code,
+        name,
+        isActive: true,
+        sortOrder: Number(newCurrency.sortOrder || 0)
+      }
+    ]);
+    setNewCurrency({ code: "", name: "", sortOrder: "0" });
+    setMessage("Moneda agregada localmente. Guarda cambios para persistir.");
+  }
+
+  function patchCurrency(id: string, patch: Partial<MembershipCurrency>) {
+    setCurrencies((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
+  function removeCurrency(id: string) {
+    setCurrencies((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  async function saveCurrencies() {
+    setError(null);
+    setMessage(null);
+    try {
+      setSavingId("currencies");
+      const response = await fetch("/api/subscriptions/memberships/config/currencies", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: currencies })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudieron guardar monedas");
+      setMessage("Monedas guardadas.");
+      await loadAll();
+    } catch (err: any) {
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudieron guardar monedas"));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  function addProductType(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = newProductType.name.trim();
+    if (!name) {
+      setError("El nombre del tipo de producto es requerido.");
+      return;
+    }
+    if (productTypes.some((item) => item.code === newProductType.code)) {
+      setError(`El tipo ${newProductType.code} ya existe.`);
+      return;
+    }
+
+    setProductTypes((prev) => [
+      ...prev,
+      {
+        id: `ptype-${newProductType.code.toLowerCase()}-${Date.now()}`,
+        code: newProductType.code,
+        name,
+        isActive: true,
+        sortOrder: Number(newProductType.sortOrder || 0)
+      }
+    ]);
+    setNewProductType({ code: "RECURRENTE", name: "", sortOrder: "0" });
+    setMessage("Tipo de producto agregado localmente. Guarda cambios para persistir.");
+  }
+
+  function patchProductType(id: string, patch: Partial<MembershipProductType>) {
+    setProductTypes((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
+  function removeProductType(id: string) {
+    setProductTypes((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  async function saveProductTypes() {
+    setError(null);
+    setMessage(null);
+    try {
+      setSavingId("productTypes");
+      const response = await fetch("/api/subscriptions/memberships/config/product-types", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: productTypes })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudieron guardar tipos de producto");
+      setMessage("Tipos de producto guardados.");
+      await loadAll();
+    } catch (err: any) {
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudieron guardar tipos de producto"));
     } finally {
       setSavingId(null);
     }
@@ -633,7 +876,15 @@ export default function MembershipConfigPage() {
                       disabled={savingId === category.id || !canAdmin}
                       className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c] disabled:opacity-60"
                     >
-                      {category.isActive ? "Desactivar" : "Activar"}
+                      {category.isActive ? "Archivar" : "Activar"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteCategory(category)}
+                      disabled={savingId === `delete-${category.id}` || !canAdmin}
+                      className="rounded-md border border-rose-200 px-2 py-1 text-[11px] font-semibold text-rose-700 disabled:opacity-60"
+                    >
+                      Eliminar
                     </button>
                   </div>
                 </td>
@@ -830,13 +1081,232 @@ export default function MembershipConfigPage() {
                       />
                       <button
                         type="button"
-                        onClick={() => removeModality(modality.id)}
-                        className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
-                        disabled={!canAdmin}
+                        onClick={() => archiveModality(modality)}
+                        className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c] disabled:opacity-60"
+                        disabled={savingId === `archive-${modality.id}` || !canAdmin || !modality.isActive}
                       >
-                        Quitar
+                        Archivar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteModality(modality)}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                        disabled={savingId === `delete-${modality.id}` || !canAdmin}
+                      >
+                        Eliminar
                       </button>
                     </div>
+                  </td>
+                </tr>
+              ))}
+          </CompactTable>
+        </section>
+      ) : null}
+
+      {activeCatalog === "currencies" ? (
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-[#2e75ba]">Monedas permitidas</h2>
+            <button
+              type="button"
+              onClick={saveCurrencies}
+              disabled={savingId === "currencies" || !canAdmin}
+              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
+            >
+              {savingId === "currencies" ? "Guardando..." : "Guardar monedas"}
+            </button>
+          </div>
+
+          <form onSubmit={addCurrency} className="grid gap-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3 md:grid-cols-4">
+            <input
+              value={newCurrency.code}
+              onChange={(event) => setNewCurrency((prev) => ({ ...prev, code: event.target.value.toUpperCase() }))}
+              placeholder="Código (GTQ)"
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
+              required
+            />
+            <input
+              value={newCurrency.name}
+              onChange={(event) => setNewCurrency((prev) => ({ ...prev, name: event.target.value }))}
+              placeholder="Nombre"
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
+              required
+            />
+            <input
+              type="number"
+              min="0"
+              value={newCurrency.sortOrder}
+              onChange={(event) => setNewCurrency((prev) => ({ ...prev, sortOrder: event.target.value }))}
+              placeholder="Orden"
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
+            />
+            <button
+              type="submit"
+              className="rounded-lg border border-[#4aa59c] bg-white px-3 py-2 text-xs font-semibold text-[#4aa59c] hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:opacity-60"
+              disabled={!canAdmin}
+            >
+              Agregar
+            </button>
+          </form>
+
+          <CompactTable columns={["Código", "Nombre", "Orden", "Estado", "Acciones"]}>
+            {currencies
+              .slice()
+              .sort((a, b) => a.sortOrder - b.sortOrder)
+              .map((currency) => (
+                <tr key={currency.id}>
+                  <td className="px-3 py-2">
+                    <input
+                      value={currency.code}
+                      onChange={(event) => patchCurrency(currency.id, { code: event.target.value.toUpperCase().trim() })}
+                      className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      disabled={!canAdmin}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      value={currency.name}
+                      onChange={(event) => patchCurrency(currency.id, { name: event.target.value })}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      disabled={!canAdmin}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min="0"
+                      value={currency.sortOrder}
+                      onChange={(event) => patchCurrency(currency.id, { sortOrder: Number(event.target.value || 0) })}
+                      className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      disabled={!canAdmin}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <label className="inline-flex items-center gap-1 text-xs text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={currency.isActive}
+                        onChange={(event) => patchCurrency(currency.id, { isActive: event.target.checked })}
+                        disabled={!canAdmin}
+                      />
+                      Activa
+                    </label>
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => removeCurrency(currency.id)}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                      disabled={!canAdmin}
+                    >
+                      Eliminar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+          </CompactTable>
+        </section>
+      ) : null}
+
+      {activeCatalog === "productTypes" ? (
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-[#2e75ba]">Tipos de producto</h2>
+            <button
+              type="button"
+              onClick={saveProductTypes}
+              disabled={savingId === "productTypes" || !canAdmin}
+              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
+            >
+              {savingId === "productTypes" ? "Guardando..." : "Guardar tipos"}
+            </button>
+          </div>
+
+          <form onSubmit={addProductType} className="grid gap-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3 md:grid-cols-4">
+            <select
+              value={newProductType.code}
+              onChange={(event) => setNewProductType((prev) => ({ ...prev, code: event.target.value as MembershipProductType["code"] }))}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
+            >
+              <option value="RECURRENTE">RECURRENTE</option>
+              <option value="PREPAGO">PREPAGO</option>
+              <option value="GIFT_CARD">GIFT_CARD</option>
+            </select>
+            <input
+              value={newProductType.name}
+              onChange={(event) => setNewProductType((prev) => ({ ...prev, name: event.target.value }))}
+              placeholder="Nombre comercial"
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
+              required
+            />
+            <input
+              type="number"
+              min="0"
+              value={newProductType.sortOrder}
+              onChange={(event) => setNewProductType((prev) => ({ ...prev, sortOrder: event.target.value }))}
+              placeholder="Orden"
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
+            />
+            <button
+              type="submit"
+              className="rounded-lg border border-[#4aa59c] bg-white px-3 py-2 text-xs font-semibold text-[#4aa59c] hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:opacity-60"
+              disabled={!canAdmin}
+            >
+              Agregar
+            </button>
+          </form>
+
+          <CompactTable columns={["Código", "Nombre", "Orden", "Estado", "Acciones"]}>
+            {productTypes
+              .slice()
+              .sort((a, b) => a.sortOrder - b.sortOrder)
+              .map((productType) => (
+                <tr key={productType.id}>
+                  <td className="px-3 py-2 text-xs font-semibold text-slate-700">{productType.code}</td>
+                  <td className="px-3 py-2">
+                    <input
+                      value={productType.name}
+                      onChange={(event) => patchProductType(productType.id, { name: event.target.value })}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      disabled={!canAdmin}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min="0"
+                      value={productType.sortOrder}
+                      onChange={(event) => patchProductType(productType.id, { sortOrder: Number(event.target.value || 0) })}
+                      className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      disabled={!canAdmin}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <label className="inline-flex items-center gap-1 text-xs text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={productType.isActive}
+                        onChange={(event) => patchProductType(productType.id, { isActive: event.target.checked })}
+                        disabled={!canAdmin}
+                      />
+                      Activo
+                    </label>
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => removeProductType(productType.id)}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                      disabled={!canAdmin}
+                    >
+                      Eliminar
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -856,9 +1326,14 @@ export default function MembershipConfigPage() {
                 onChange={(event) => setCatalogDefaults((prev) => ({ ...prev, currencyDefault: event.target.value.toUpperCase() }))}
                 disabled={!canAdmin}
               >
-                <option value="GTQ">GTQ</option>
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
+                {currencies
+                  .filter((item) => item.isActive)
+                  .sort((a, b) => a.sortOrder - b.sortOrder)
+                  .map((item) => (
+                    <option key={`currency-default-${item.id}`} value={item.code}>
+                      {item.code} · {item.name}
+                    </option>
+                  ))}
               </select>
             </label>
 

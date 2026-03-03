@@ -13,6 +13,7 @@ export const membershipContractPaymentMethodSchema = z.enum(["MANUAL", "RECURREN
 export const membershipBillingProviderSchema = z.enum(["MANUAL", "RECURRENT"]);
 export const membershipPlanModalityCodeSchema = z.enum(["INDIVIDUAL", "DUO", "FAMILIAR", "FAMILIAR_PLUS", "EMPRESARIAL"]);
 export const membershipBenefitWindowSchema = z.enum(["MENSUAL", "ANUAL", "CUSTOM"]);
+export const membershipProductTypeCodeSchema = z.enum(["RECURRENTE", "PREPAGO", "GIFT_CARD"]);
 
 export const planBenefitInputSchema = z.object({
   benefitId: z.string().trim().min(1),
@@ -233,6 +234,30 @@ export const membershipCatalogDefaultsSchema = z.object({
   benefitWindowDefault: membershipBenefitWindowSchema.default("MENSUAL"),
   accumulableDefault: z.boolean().default(false),
   defaultModalityCode: membershipPlanModalityCodeSchema.optional().nullable()
+});
+
+export const membershipCurrencyCatalogItemSchema = z.object({
+  id: z.string().trim().min(2).max(80),
+  code: z.string().trim().toUpperCase().min(3).max(8),
+  name: z.string().trim().min(2).max(80),
+  isActive: z.boolean().default(true),
+  sortOrder: z.coerce.number().int().min(0).max(999).default(0)
+});
+
+export const membershipCurrenciesPayloadSchema = z.object({
+  items: z.array(membershipCurrencyCatalogItemSchema).min(1).max(30)
+});
+
+export const membershipProductTypeCatalogItemSchema = z.object({
+  id: z.string().trim().min(2).max(80),
+  code: membershipProductTypeCodeSchema,
+  name: z.string().trim().min(2).max(80),
+  isActive: z.boolean().default(true),
+  sortOrder: z.coerce.number().int().min(0).max(999).default(0)
+});
+
+export const membershipProductTypesPayloadSchema = z.object({
+  items: z.array(membershipProductTypeCatalogItemSchema).min(1).max(10)
 });
 
 export const listDurationPresetsQuerySchema = z.object({
