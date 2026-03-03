@@ -140,6 +140,8 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [canAdmin, setCanAdmin] = useState(false);
+  const [viewerBranchId, setViewerBranchId] = useState<string | null>(null);
   const [canViewPricing, setCanViewPricing] = useState(false);
   const [hidePricesForOperators, setHidePricesForOperators] = useState(true);
   const [createForm, setCreateForm] = useState({
@@ -159,6 +161,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   const pageStartIndex = (safePage - 1) * pageSize;
   const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
   const pagedContracts = contracts.slice(pageStartIndex, pageStartIndex + pageSize);
+  const showBranchFilter = canAdmin || !viewerBranchId;
 
   async function loadData(options?: { targetPage?: number; targetPageSize?: number }) {
     const targetPage = options?.targetPage ?? safePage;
@@ -173,7 +176,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
     if (planFilter) params.set("planId", planFilter);
     if (paymentMethodFilter) params.set("paymentMethod", paymentMethodFilter);
     if (renewWindowFilter) params.set("renewWindowDays", renewWindowFilter);
-    if (branchFilter) params.set("branchId", branchFilter);
+    if (showBranchFilter && branchFilter) params.set("branchId", branchFilter);
     params.set("page", String(targetPage));
     // Fallback sin paginación server-side: cargamos un bloque amplio para paginar en UI.
     params.set("take", String(Math.min(200, Math.max(100, targetPage * targetPageSize))));
@@ -195,6 +198,8 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
 
       setContracts(Array.isArray(contractsJson.data) ? contractsJson.data : []);
       setPlans(Array.isArray(plansJson.data) ? plansJson.data : []);
+      setCanAdmin(Boolean(configJson?.meta?.canAdmin));
+      setViewerBranchId(typeof configJson?.meta?.branchId === "string" ? configJson.meta.branchId : null);
       setCanViewPricing(Boolean(configJson?.meta?.canViewPricing));
       setHidePricesForOperators(Boolean(configJson?.data?.hidePricesForOperators));
       if (options?.targetPage) setPage(options.targetPage);
@@ -218,6 +223,12 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  useEffect(() => {
+    if (!showBranchFilter && branchFilter) {
+      setBranchFilter("");
+    }
+  }, [branchFilter, showBranchFilter]);
 
   useEffect(() => {
     if (!rowMenuOpenId) return;
@@ -464,15 +475,19 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
             </select>
           </label>
 
-          <label className="space-y-1">
-            <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Sucursal</span>
-            <input
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/20"
-              value={branchFilter}
-              onChange={(event) => setBranchFilter(event.target.value)}
-              placeholder="branchId"
-            />
-          </label>
+          {showBranchFilter ? (
+            <label className="space-y-1">
+              <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Sucursal</span>
+              <input
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/20"
+                value={branchFilter}
+                onChange={(event) => setBranchFilter(event.target.value)}
+                placeholder="branchId"
+              />
+            </label>
+          ) : (
+            <div className="hidden xl:block" />
+          )}
 
           <div className="flex items-end">
             <button

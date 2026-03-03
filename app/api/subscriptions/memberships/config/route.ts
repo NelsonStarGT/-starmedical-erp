@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
       data,
       meta: {
         canAdmin: hasPermission(auth.user, PERMISSIONS.MEMBERSHIPS_ADMIN),
+        branchId: auth.user?.branchId ?? null,
         // Pricing must stay admin-only even if legacy role catalogs still include PRICING_VIEW.
         canViewPricing: isAdmin(auth.user)
       }
