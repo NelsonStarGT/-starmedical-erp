@@ -11,6 +11,8 @@ export const membershipPaymentKindSchema = z.enum(["INITIAL", "RENEWAL", "EXTRA"
 export const membershipPaymentStatusSchema = z.enum(["PAID", "PENDING", "FAILED"]);
 export const membershipContractPaymentMethodSchema = z.enum(["MANUAL", "RECURRENT"]);
 export const membershipBillingProviderSchema = z.enum(["MANUAL", "RECURRENT"]);
+export const membershipPlanModalityCodeSchema = z.enum(["INDIVIDUAL", "DUO", "FAMILIAR", "FAMILIAR_PLUS", "EMPRESARIAL"]);
+export const membershipBenefitWindowSchema = z.enum(["MENSUAL", "ANUAL", "CUSTOM"]);
 
 export const planBenefitInputSchema = z.object({
   benefitId: z.string().trim().min(1),
@@ -208,6 +210,29 @@ export const membershipConfigSchema = z.object({
   requireInitialPayment: z.boolean(),
   cashTransferMinMonths: z.coerce.number().int().min(0).max(24),
   priceChangeNoticeDays: z.coerce.number().int().min(0).max(180)
+});
+
+export const membershipPlanModalitySchema = z.object({
+  id: z.string().trim().min(2).max(80),
+  code: membershipPlanModalityCodeSchema,
+  name: z.string().trim().min(2).max(80),
+  segment: membershipPlanSegmentSchema,
+  mappedPlanType: membershipPlanTypeSchema,
+  maxDependentsDefault: z.coerce.number().int().min(0).max(999),
+  allowDependents: z.boolean(),
+  isActive: z.boolean().default(true),
+  sortOrder: z.coerce.number().int().min(0).max(999).default(0)
+});
+
+export const membershipPlanModalitiesPayloadSchema = z.object({
+  items: z.array(membershipPlanModalitySchema).min(1).max(25)
+});
+
+export const membershipCatalogDefaultsSchema = z.object({
+  currencyDefault: z.string().trim().toUpperCase().min(3).max(8).default("GTQ"),
+  benefitWindowDefault: membershipBenefitWindowSchema.default("MENSUAL"),
+  accumulableDefault: z.boolean().default(false),
+  defaultModalityCode: membershipPlanModalityCodeSchema.optional().nullable()
 });
 
 export const listDurationPresetsQuerySchema = z.object({

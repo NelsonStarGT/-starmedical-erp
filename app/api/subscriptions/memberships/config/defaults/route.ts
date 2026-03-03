@@ -1,0 +1,34 @@
+import { NextRequest, NextResponse } from "next/server";
+import { ensureMembershipAccess } from "@/lib/api/memberships";
+import { getMembershipCatalogDefaults, updateMembershipCatalogDefaults } from "@/lib/memberships/service";
+import { membershipCatalogDefaultsSchema } from "@/lib/memberships/schemas";
+import { PERMISSIONS } from "@/lib/rbac";
+import { handleMembershipApiError } from "@/app/api/memberships/_utils";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest) {
+  const auth = ensureMembershipAccess(req, PERMISSIONS.MEMBERSHIPS_READ);
+  if (auth.errorResponse) return auth.errorResponse;
+
+  try {
+    const data = await getMembershipCatalogDefaults();
+    return NextResponse.json({ data });
+  } catch (error) {
+    return handleMembershipApiError(error);
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  const auth = ensureMembershipAccess(req, PERMISSIONS.MEMBERSHIPS_ADMIN);
+  if (auth.errorResponse) return auth.errorResponse;
+
+  try {
+    const json = await req.json();
+    const payload = membershipCatalogDefaultsSchema.parse(json);
+    const data = await updateMembershipCatalogDefaults(payload);
+    return NextResponse.json({ data });
+  } catch (error) {
+    return handleMembershipApiError(error);
+  }
+}

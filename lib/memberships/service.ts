@@ -19,6 +19,8 @@ import {
   enrollMembershipSchema,
   createPlanCategorySchema,
   createPlanSchema,
+  membershipCatalogDefaultsSchema,
+  membershipPlanModalitiesPayloadSchema,
   listBenefitsQuerySchema,
   listContractsQuerySchema,
   listDurationPresetsQuerySchema,
@@ -113,6 +115,8 @@ type UpdateContractStatusInput = z.infer<typeof updateContractStatusSchema>;
 type RegisterPaymentInput = z.infer<typeof registerPaymentSchema>;
 type RenewContractInput = z.infer<typeof renewContractSchema>;
 type MembershipConfigInput = z.infer<typeof membershipConfigSchema>;
+type MembershipPlanModalitiesPayloadInput = z.infer<typeof membershipPlanModalitiesPayloadSchema>;
+type MembershipCatalogDefaultsInput = z.infer<typeof membershipCatalogDefaultsSchema>;
 type MembershipGatewayConfigInput = z.infer<typeof membershipGatewayConfigSchema>;
 type ContractCheckoutInitInput = z.infer<typeof contractCheckoutInitSchema>;
 type PublicSubscribeInput = z.infer<typeof publicSubscribeSchema>;
@@ -139,6 +143,109 @@ function slugify(value: string) {
 
 function now() {
   return new Date();
+}
+
+const DEFAULT_MEMBERSHIP_MODALITIES = [
+  {
+    id: "mod-individual",
+    code: "INDIVIDUAL",
+    name: "Individual",
+    segment: "B2C",
+    mappedPlanType: "INDIVIDUAL",
+    maxDependentsDefault: 0,
+    allowDependents: false,
+    isActive: true,
+    sortOrder: 10
+  },
+  {
+    id: "mod-duo",
+    code: "DUO",
+    name: "Dúo",
+    segment: "B2C",
+    mappedPlanType: "FAMILIAR",
+    maxDependentsDefault: 1,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 20
+  },
+  {
+    id: "mod-familiar",
+    code: "FAMILIAR",
+    name: "Familiar",
+    segment: "B2C",
+    mappedPlanType: "FAMILIAR",
+    maxDependentsDefault: 4,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 30
+  },
+  {
+    id: "mod-familiar-plus",
+    code: "FAMILIAR_PLUS",
+    name: "Familiar Plus",
+    segment: "B2C",
+    mappedPlanType: "FAMILIAR",
+    maxDependentsDefault: 6,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 40
+  },
+  {
+    id: "mod-empresarial",
+    code: "EMPRESARIAL",
+    name: "Empresarial",
+    segment: "B2B",
+    mappedPlanType: "EMPRESARIAL",
+    maxDependentsDefault: 50,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 50
+  }
+] as const;
+
+const DEFAULT_MEMBERSHIP_CATALOG_DEFAULTS = {
+  currencyDefault: "GTQ",
+  benefitWindowDefault: "MENSUAL",
+  accumulableDefault: false,
+  defaultModalityCode: "INDIVIDUAL"
+} as const;
+
+async function ensureMembershipConfigRecord() {
+  return prisma.membershipConfig.upsert({
+    where: { id: 1 },
+    create: {
+      id: 1,
+      ...(pickMembershipConfigFields({
+        reminderDays: 30,
+        graceDays: 7,
+        inactiveAfterDays: 90,
+        autoRenewWithPayment: true,
+        prorateOnMidmonth: true,
+        blockIfBalanceDue: true,
+        hidePricesForOperators: true,
+        requireInitialPayment: true,
+        cashTransferMinMonths: 2,
+        priceChangeNoticeDays: 30
+      }) as any),
+      retryPolicy: {},
+      createdAt: now(),
+      updatedAt: now()
+    },
+    update: {}
+  });
+}
+
+function readMembershipRetryPolicy(raw: unknown) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return raw as Record<string, unknown>;
+}
+
+function readMembershipCatalogStorage(raw: unknown) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const root = raw as Record<string, unknown>;
+  const bucket = root.membershipsCatalogV1;
+  if (!bucket || typeof bucket !== "object" || Array.isArray(bucket)) return {};
+  return bucket as Record<string, unknown>;
 }
 
 function addMonths(base: Date, months: number) {
@@ -1525,6 +1632,87 @@ export async function updateMembershipConfig(input: MembershipConfigInput) {
   });
 
   return normalizeMembershipConfigResponse(config);
+}
+
+export async function getMembershipPlanModalities() {
+  const config = await ensureMembershipConfigRecord();
+  const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
+  const storage = readMembershipCatalogStorage(retryPolicy);
+  const rawItems = Array.isArray(storage.modalities) ? storage.modalities : [];
+
+  const parsed = membershipPlanModalitiesPayloadSchema.safeParse({ items: rawItems });
+  const items = parsed.success ? parsed.data.items : [...DEFAULT_MEMBERSHIP_MODALITIES];
+
+  return [...items].sort((a, b) => {
+    if (a.segment !== b.segment) return a.segment.localeCompare(b.segment);
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
+  });
+}
+
+export async function updateMembershipPlanModalities(rawInput: MembershipPlanModalitiesPayloadInput | unknown) {
+  const payload = membershipPlanModalitiesPayloadSchema.parse(rawInput);
+  const uniqueKey = new Set<string>();
+  for (const item of payload.items) {
+    const key = `${item.code}:${item.segment}`;
+    if (uniqueKey.has(key)) throw new MembershipError(`Modalidad duplicada: ${item.code} (${item.segment})`, 409);
+    uniqueKey.add(key);
+  }
+
+  const config = await ensureMembershipConfigRecord();
+  const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
+  const storage = readMembershipCatalogStorage(retryPolicy);
+
+  const nextRetryPolicy = {
+    ...retryPolicy,
+    membershipsCatalogV1: {
+      ...storage,
+      modalities: payload.items
+    }
+  };
+
+  await prisma.membershipConfig.update({
+    where: { id: config.id },
+    data: {
+      retryPolicy: nextRetryPolicy as Prisma.InputJsonValue,
+      updatedAt: now()
+    }
+  });
+
+  return payload.items;
+}
+
+export async function getMembershipCatalogDefaults() {
+  const config = await ensureMembershipConfigRecord();
+  const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
+  const storage = readMembershipCatalogStorage(retryPolicy);
+  const parsed = membershipCatalogDefaultsSchema.safeParse(storage.catalogDefaults || {});
+  return parsed.success ? parsed.data : { ...DEFAULT_MEMBERSHIP_CATALOG_DEFAULTS };
+}
+
+export async function updateMembershipCatalogDefaults(rawInput: MembershipCatalogDefaultsInput | unknown) {
+  const payload = membershipCatalogDefaultsSchema.parse(rawInput);
+  const config = await ensureMembershipConfigRecord();
+  const retryPolicy = readMembershipRetryPolicy(config.retryPolicy);
+  const storage = readMembershipCatalogStorage(retryPolicy);
+
+  const nextRetryPolicy = {
+    ...retryPolicy,
+    membershipsCatalogV1: {
+      ...storage,
+      catalogDefaults: payload
+    }
+  };
+
+  await prisma.membershipConfig.update({
+    where: { id: config.id },
+    data: {
+      retryPolicy: nextRetryPolicy as Prisma.InputJsonValue,
+      updatedAt: now()
+    }
+  });
+
+  return payload;
 }
 
 export async function getMembershipDashboard(user: SessionUser | null) {

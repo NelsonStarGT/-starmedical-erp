@@ -127,7 +127,7 @@ const CONTEXTUAL_MODULES: ContextualNavModule[] = [
       { id: "dashboard", label: "Dashboard", href: "/admin/suscripciones" },
       { id: "membresias", label: "Membresías", href: "/admin/suscripciones/membresias/afiliaciones/pacientes" },
       { id: "farmacia", label: "Farmacia", href: "/admin/suscripciones/farmacia" },
-      { id: "pasarela", label: "Pasarela", href: "/admin/suscripciones/membresias/configuracion?tab=pasarela" },
+      { id: "pasarela", label: "Pasarela", href: "/admin/suscripciones/pasarela" },
       { id: "configuracion", label: "Configuración", href: "/admin/suscripciones/membresias/configuracion" }
     ]
   },

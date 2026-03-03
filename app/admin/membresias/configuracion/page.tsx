@@ -1,7 +1,7 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { CompactTable } from "@/components/memberships/CompactTable";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
@@ -27,43 +27,30 @@ type Category = {
   sortOrder: number;
 };
 
-type DurationPreset = {
+type PlanModality = {
   id: string;
+  code: "INDIVIDUAL" | "DUO" | "FAMILIAR" | "FAMILIAR_PLUS" | "EMPRESARIAL";
   name: string;
-  days: number;
+  segment: "B2C" | "B2B";
+  mappedPlanType: "INDIVIDUAL" | "FAMILIAR" | "EMPRESARIAL";
+  maxDependentsDefault: number;
+  allowDependents: boolean;
   isActive: boolean;
   sortOrder: number;
-  branchId?: string | null;
 };
 
-type BenefitCatalog = {
-  id: string;
-  title: string;
-  serviceType: string;
-  imageUrl?: string | null;
-  iconKey?: string | null;
-  isActive: boolean;
-  sortOrder: number;
-  branchId?: string | null;
+type CatalogDefaults = {
+  currencyDefault: string;
+  benefitWindowDefault: "MENSUAL" | "ANUAL" | "CUSTOM";
+  accumulableDefault: boolean;
+  defaultModalityCode?: PlanModality["code"] | null;
 };
 
 type ConfigResponse = {
   data: MembershipConfig;
   meta?: {
     canAdmin?: boolean;
-    canViewPricing?: boolean;
   };
-};
-
-type GatewayConfig = {
-  provider: "RECURRENT" | "MANUAL";
-  mode: "test" | "live";
-  isEnabled: boolean;
-  hasApiKey: boolean;
-  hasWebhookSecret: boolean;
-  apiKeyMasked?: string | null;
-  webhookSecretMasked?: string | null;
-  lastWebhookAt?: string | null;
 };
 
 const DEFAULT_CONFIG: MembershipConfig = {
@@ -79,121 +66,209 @@ const DEFAULT_CONFIG: MembershipConfig = {
   priceChangeNoticeDays: 30
 };
 
-const DEFAULT_GATEWAY: GatewayConfig = {
-  provider: "RECURRENT",
-  mode: "test",
-  isEnabled: false,
-  hasApiKey: false,
-  hasWebhookSecret: false,
-  apiKeyMasked: null,
-  webhookSecretMasked: null,
-  lastWebhookAt: null
+const DEFAULT_MODALITIES: PlanModality[] = [
+  {
+    id: "mod-individual",
+    code: "INDIVIDUAL",
+    name: "Individual",
+    segment: "B2C",
+    mappedPlanType: "INDIVIDUAL",
+    maxDependentsDefault: 0,
+    allowDependents: false,
+    isActive: true,
+    sortOrder: 10
+  },
+  {
+    id: "mod-duo",
+    code: "DUO",
+    name: "Dúo",
+    segment: "B2C",
+    mappedPlanType: "FAMILIAR",
+    maxDependentsDefault: 1,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 20
+  },
+  {
+    id: "mod-familiar",
+    code: "FAMILIAR",
+    name: "Familiar",
+    segment: "B2C",
+    mappedPlanType: "FAMILIAR",
+    maxDependentsDefault: 4,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 30
+  },
+  {
+    id: "mod-familiar-plus",
+    code: "FAMILIAR_PLUS",
+    name: "Familiar Plus",
+    segment: "B2C",
+    mappedPlanType: "FAMILIAR",
+    maxDependentsDefault: 6,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 40
+  },
+  {
+    id: "mod-empresarial",
+    code: "EMPRESARIAL",
+    name: "Empresarial",
+    segment: "B2B",
+    mappedPlanType: "EMPRESARIAL",
+    maxDependentsDefault: 50,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 50
+  }
+];
+
+const DEFAULT_CATALOG_DEFAULTS: CatalogDefaults = {
+  currencyDefault: "GTQ",
+  benefitWindowDefault: "MENSUAL",
+  accumulableDefault: false,
+  defaultModalityCode: "INDIVIDUAL"
 };
 
-const TABS = [
-  { id: "catalogos", label: "Catálogos" },
-  { id: "duraciones", label: "Duraciones" },
-  { id: "beneficios", label: "Servicios incluidos" },
-  { id: "pasarela", label: "Pasarela de pagos" },
-  { id: "permisos", label: "Permisos / Visibilidad" }
+const CATALOG_OPTIONS = [
+  {
+    id: "categories",
+    label: "Categorías de plan",
+    description: "Tipo de servicio del producto: Salud, Lab, Imagen, Educación, SSO, Farmacia."
+  },
+  {
+    id: "modalities",
+    label: "Modalidades",
+    description: "Estructura comercial del producto: Individual, Dúo, Familiar, Familiar Plus y Empresarial."
+  },
+  {
+    id: "defaults",
+    label: "Defaults",
+    description: "Valores base para crear planes cuando el catálogo aún está en configuración inicial."
+  },
+  {
+    id: "policies",
+    label: "Políticas operativas",
+    description: "Reglas de operación del módulo: cobro inicial, bloqueo por saldo, visibilidad y ventanas de aviso."
+  }
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+type CatalogId = (typeof CATALOG_OPTIONS)[number]["id"];
+
+async function readJson<T>(url: string, fallbackError: string): Promise<T> {
+  const response = await fetch(url, { cache: "no-store" });
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error((json as { error?: string })?.error || fallbackError);
+  }
+  return json as T;
+}
 
 export default function MembershipConfigPage() {
-  const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState<TabId>("catalogos");
+  const [activeCatalog, setActiveCatalog] = useState<CatalogId>("categories");
   const [config, setConfig] = useState<MembershipConfig>(DEFAULT_CONFIG);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [presets, setPresets] = useState<DurationPreset[]>([]);
-  const [benefits, setBenefits] = useState<BenefitCatalog[]>([]);
+  const [modalities, setModalities] = useState<PlanModality[]>(DEFAULT_MODALITIES);
+  const [catalogDefaults, setCatalogDefaults] = useState<CatalogDefaults>(DEFAULT_CATALOG_DEFAULTS);
   const [segmentFilter, setSegmentFilter] = useState<"ALL" | "B2C" | "B2B">("ALL");
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [canAdmin, setCanAdmin] = useState(false);
-  const [gateway, setGateway] = useState<GatewayConfig>(DEFAULT_GATEWAY);
-  const [gatewayApiKey, setGatewayApiKey] = useState("");
-  const [gatewayWebhookSecret, setGatewayWebhookSecret] = useState("");
-  const [testingGateway, setTestingGateway] = useState(false);
-  const [gatewayTestMessage, setGatewayTestMessage] = useState<string | null>(null);
 
-  const [newCategory, setNewCategory] = useState({
-    name: "",
-    segment: "B2C",
-    sortOrder: "0"
-  });
-
-  const [newPreset, setNewPreset] = useState({
-    name: "",
-    days: "30",
-    sortOrder: "0"
-  });
-
-  const [newBenefit, setNewBenefit] = useState({
-    title: "",
-    serviceType: "CONSULTA",
-    iconKey: "",
-    imageUrl: "",
-    sortOrder: "0"
-  });
-
+  const [newCategory, setNewCategory] = useState({ name: "", segment: "B2C", sortOrder: "0" });
   const [editingCategory, setEditingCategory] = useState<Record<string, { name: string; sortOrder: string }>>({});
+
+  const [newModality, setNewModality] = useState({
+    code: "INDIVIDUAL" as PlanModality["code"],
+    name: "",
+    segment: "B2C" as PlanModality["segment"],
+    mappedPlanType: "INDIVIDUAL" as PlanModality["mappedPlanType"],
+    maxDependentsDefault: "0",
+    allowDependents: false,
+    sortOrder: "0"
+  });
 
   const filteredCategories = useMemo(() => {
     if (segmentFilter === "ALL") return categories;
-    return categories.filter((category) => category.segment === segmentFilter);
+    return categories.filter((row) => row.segment === segmentFilter);
   }, [categories, segmentFilter]);
+
+  const filteredModalities = useMemo(() => {
+    if (segmentFilter === "ALL") return modalities;
+    return modalities.filter((row) => row.segment === segmentFilter);
+  }, [modalities, segmentFilter]);
 
   async function loadAll() {
     setLoading(true);
     setError(null);
+
+    const nextWarnings: string[] = [];
+
     try {
-      const [configRes, categoriesRes, presetsRes, benefitsRes] = await Promise.all([
-        fetch("/api/subscriptions/memberships/config", { cache: "no-store" }),
-        fetch("/api/subscriptions/memberships/plan-categories?includeInactive=true", { cache: "no-store" }),
-        fetch("/api/subscriptions/memberships/config/duration-presets?includeInactive=true", { cache: "no-store" }),
-        fetch("/api/subscriptions/memberships/config/benefits?includeInactive=true", { cache: "no-store" })
+      const configPromise = readJson<ConfigResponse>("/api/subscriptions/memberships/config", "No se pudo cargar configuración");
+      const categoriesPromise = readJson<{ data?: Category[] }>(
+        "/api/subscriptions/memberships/plan-categories?includeInactive=true",
+        "No se pudo cargar categorías"
+      );
+      const modalitiesPromise = readJson<{ data?: PlanModality[] }>(
+        "/api/subscriptions/memberships/config/modalities",
+        "No se pudo cargar modalidades"
+      );
+      const defaultsPromise = readJson<{ data?: CatalogDefaults }>(
+        "/api/subscriptions/memberships/config/defaults",
+        "No se pudo cargar defaults"
+      );
+
+      const [configResult, categoriesResult, modalitiesResult, defaultsResult] = await Promise.allSettled([
+        configPromise,
+        categoriesPromise,
+        modalitiesPromise,
+        defaultsPromise
       ]);
 
-      const configJson: ConfigResponse = await configRes.json();
-      const categoriesJson = await categoriesRes.json();
-      const presetsJson = await presetsRes.json();
-      const benefitsJson = await benefitsRes.json();
-
-      if (!configRes.ok) throw new Error((configJson as any)?.error || "No se pudo cargar configuración");
-      if (!categoriesRes.ok) throw new Error(categoriesJson?.error || "No se pudo cargar categorías");
-      if (!presetsRes.ok) throw new Error(presetsJson?.error || "No se pudo cargar presets");
-      if (!benefitsRes.ok) throw new Error(benefitsJson?.error || "No se pudo cargar servicios incluidos");
-
-      setConfig(configJson.data || DEFAULT_CONFIG);
-      const adminAccess = Boolean(configJson.meta?.canAdmin);
-      setCanAdmin(adminAccess);
-
-      if (adminAccess) {
-        const gatewayRes = await fetch("/api/subscriptions/memberships/config/gateway", { cache: "no-store" });
-        const gatewayJson = await gatewayRes.json();
-        if (!gatewayRes.ok) throw new Error(gatewayJson?.error || "No se pudo cargar pasarela");
-        setGateway(gatewayJson?.data || DEFAULT_GATEWAY);
+      if (configResult.status === "fulfilled") {
+        setConfig(configResult.value.data || DEFAULT_CONFIG);
+        setCanAdmin(Boolean(configResult.value.meta?.canAdmin));
       } else {
-        setGateway(DEFAULT_GATEWAY);
+        setCanAdmin(false);
+        setError(normalizeSubscriptionsErrorMessage(configResult.reason?.message, "No se pudo cargar configuración"));
       }
 
-      const categoryRows = Array.isArray(categoriesJson.data) ? categoriesJson.data : [];
-      const presetRows = Array.isArray(presetsJson.data) ? presetsJson.data : [];
-      const benefitRows = Array.isArray(benefitsJson.data) ? benefitsJson.data : [];
+      if (categoriesResult.status === "fulfilled") {
+        const rows = Array.isArray(categoriesResult.value.data) ? categoriesResult.value.data : [];
+        setCategories(rows);
+        setEditingCategory(
+          rows.reduce((acc: Record<string, { name: string; sortOrder: string }>, row) => {
+            acc[row.id] = { name: row.name, sortOrder: String(row.sortOrder) };
+            return acc;
+          }, {})
+        );
+      } else {
+        setCategories([]);
+        nextWarnings.push("No se pudieron cargar categorías. Puedes guardar planes con categoría vacía y completar luego.");
+      }
 
-      setCategories(categoryRows);
-      setPresets(presetRows);
-      setBenefits(benefitRows);
-      setEditingCategory(
-        categoryRows.reduce((acc: Record<string, { name: string; sortOrder: string }>, row: Category) => {
-          acc[row.id] = { name: row.name, sortOrder: String(row.sortOrder) };
-          return acc;
-        }, {})
-      );
+      if (modalitiesResult.status === "fulfilled") {
+        const rows = Array.isArray(modalitiesResult.value.data) && modalitiesResult.value.data.length > 0 ? modalitiesResult.value.data : DEFAULT_MODALITIES;
+        setModalities(rows);
+      } else {
+        setModalities(DEFAULT_MODALITIES);
+        nextWarnings.push("Modalidades no disponibles desde API. Se usan defaults temporales del módulo.");
+      }
+
+      if (defaultsResult.status === "fulfilled") {
+        setCatalogDefaults(defaultsResult.value.data || DEFAULT_CATALOG_DEFAULTS);
+      } else {
+        setCatalogDefaults(DEFAULT_CATALOG_DEFAULTS);
+        nextWarnings.push("No se pudieron cargar defaults; se aplican valores base (GTQ, ventana mensual, no acumulable).");
+      }
+
+      setWarnings(nextWarnings);
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo cargar configuración"));
     } finally {
@@ -205,26 +280,22 @@ export default function MembershipConfigPage() {
     loadAll();
   }, []);
 
-  useEffect(() => {
-    const rawTab = (searchParams?.get("tab") || "").trim().toLowerCase();
-    const nextTab = TABS.find((tab) => tab.id === rawTab)?.id;
-    if (nextTab) setActiveTab(nextTab);
-  }, [searchParams]);
-
   async function saveConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setMessage(null);
+
     try {
       setSavingConfig(true);
-      const res = await fetch("/api/subscriptions/memberships/config", {
+      const response = await fetch("/api/subscriptions/memberships/config", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config)
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo guardar configuración");
-      setMessage("Configuración guardada");
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudo guardar configuración");
+      setMessage("Políticas operativas guardadas.");
+      await loadAll();
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo guardar configuración"));
     } finally {
@@ -239,7 +310,7 @@ export default function MembershipConfigPage() {
 
     try {
       setSavingId("new-category");
-      const res = await fetch("/api/subscriptions/memberships/plan-categories", {
+      const response = await fetch("/api/subscriptions/memberships/plan-categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -249,10 +320,10 @@ export default function MembershipConfigPage() {
           isActive: true
         })
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo crear categoría");
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudo crear categoría");
       setNewCategory({ name: "", segment: "B2C", sortOrder: "0" });
-      setMessage("Categoría creada");
+      setMessage("Categoría creada.");
       await loadAll();
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo crear categoría"));
@@ -267,7 +338,7 @@ export default function MembershipConfigPage() {
 
     try {
       setSavingId(category.id);
-      const res = await fetch(`/api/subscriptions/memberships/plan-categories/${category.id}`, {
+      const response = await fetch(`/api/subscriptions/memberships/plan-categories/${category.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -275,9 +346,9 @@ export default function MembershipConfigPage() {
           sortOrder: Number(edit.sortOrder || 0)
         })
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo actualizar categoría");
-      setMessage("Categoría actualizada");
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudo actualizar categoría");
+      setMessage("Categoría actualizada.");
       await loadAll();
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar categoría"));
@@ -289,13 +360,13 @@ export default function MembershipConfigPage() {
   async function toggleCategory(category: Category) {
     try {
       setSavingId(category.id);
-      const res = await fetch(`/api/subscriptions/memberships/plan-categories/${category.id}/status`, {
+      const response = await fetch(`/api/subscriptions/memberships/plan-categories/${category.id}/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: !category.isActive })
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudo actualizar estado");
       await loadAll();
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
@@ -304,184 +375,154 @@ export default function MembershipConfigPage() {
     }
   }
 
-  async function createPreset(event: FormEvent<HTMLFormElement>) {
+  function addModality(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newModality.name.trim()) {
+      setError("El nombre de modalidad es requerido.");
+      return;
+    }
+
+    const nowId = `mod-${newModality.code.toLowerCase()}-${Date.now()}`;
+    setModalities((prev) => [
+      ...prev,
+      {
+        id: nowId,
+        code: newModality.code,
+        name: newModality.name.trim(),
+        segment: newModality.segment,
+        mappedPlanType: newModality.mappedPlanType,
+        maxDependentsDefault: Number(newModality.maxDependentsDefault || 0),
+        allowDependents: newModality.allowDependents,
+        isActive: true,
+        sortOrder: Number(newModality.sortOrder || 0)
+      }
+    ]);
+
+    setNewModality({
+      code: "INDIVIDUAL",
+      name: "",
+      segment: "B2C",
+      mappedPlanType: "INDIVIDUAL",
+      maxDependentsDefault: "0",
+      allowDependents: false,
+      sortOrder: "0"
+    });
+    setMessage("Modalidad agregada localmente. Guarda cambios para persistir.");
+  }
+
+  function patchModality(id: string, patch: Partial<PlanModality>) {
+    setModalities((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
+  function removeModality(id: string) {
+    setModalities((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  async function saveModalities() {
+    setError(null);
+    setMessage(null);
+    try {
+      setSavingId("modalities");
+      const response = await fetch("/api/subscriptions/memberships/config/modalities", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: modalities })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudieron guardar modalidades");
+      setMessage("Modalidades guardadas.");
+      await loadAll();
+    } catch (err: any) {
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudieron guardar modalidades"));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function saveDefaults(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setMessage(null);
 
     try {
-      setSavingId("new-preset");
-      const res = await fetch("/api/subscriptions/memberships/config/duration-presets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newPreset.name,
-          days: Number(newPreset.days || 0),
-          sortOrder: Number(newPreset.sortOrder || 0),
-          isActive: true
-        })
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo crear preset");
-      setNewPreset({ name: "", days: "30", sortOrder: "0" });
-      setMessage("Preset creado");
-      await loadAll();
-    } catch (err: any) {
-      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo crear preset"));
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  async function togglePreset(preset: DurationPreset) {
-    try {
-      setSavingId(preset.id);
-      const res = await fetch(`/api/subscriptions/memberships/config/duration-presets/${preset.id}/status`, {
+      setSavingId("defaults");
+      const response = await fetch("/api/subscriptions/memberships/config/defaults", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: !preset.isActive })
+        body: JSON.stringify(catalogDefaults)
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((json as { error?: string })?.error || "No se pudieron guardar defaults");
+      setMessage("Defaults guardados.");
       await loadAll();
     } catch (err: any) {
-      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudieron guardar defaults"));
     } finally {
       setSavingId(null);
-    }
-  }
-
-  async function createBenefit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setMessage(null);
-
-    try {
-      setSavingId("new-benefit");
-      const res = await fetch("/api/subscriptions/memberships/config/benefits", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: newBenefit.title,
-          serviceType: newBenefit.serviceType,
-          iconKey: newBenefit.iconKey || null,
-          imageUrl: newBenefit.imageUrl || null,
-          sortOrder: Number(newBenefit.sortOrder || 0),
-          isActive: true
-        })
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo crear servicio incluido");
-      setNewBenefit({ title: "", serviceType: "CONSULTA", iconKey: "", imageUrl: "", sortOrder: "0" });
-      setMessage("Servicio incluido creado");
-      await loadAll();
-    } catch (err: any) {
-      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo crear servicio incluido"));
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  async function toggleBenefit(benefit: BenefitCatalog) {
-    try {
-      setSavingId(benefit.id);
-      const res = await fetch(`/api/subscriptions/memberships/config/benefits/${benefit.id}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: !benefit.isActive })
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
-      await loadAll();
-    } catch (err: any) {
-      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo actualizar estado"));
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  async function saveGatewayConfig(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setMessage(null);
-    setGatewayTestMessage(null);
-
-    try {
-      setSavingId("gateway");
-      const payload: Record<string, unknown> = {
-        provider: gateway.provider,
-        mode: gateway.mode,
-        isEnabled: gateway.isEnabled
-      };
-      if (gatewayApiKey.trim()) payload.apiKey = gatewayApiKey.trim();
-      if (gatewayWebhookSecret.trim()) payload.webhookSecret = gatewayWebhookSecret.trim();
-
-      const res = await fetch("/api/subscriptions/memberships/config/gateway", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo guardar configuración de pasarela");
-
-      setGateway(json?.data || DEFAULT_GATEWAY);
-      setGatewayApiKey("");
-      setGatewayWebhookSecret("");
-      setMessage("Pasarela actualizada");
-    } catch (err: any) {
-      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo guardar configuración de pasarela"));
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  async function testGatewayConnection() {
-    setError(null);
-    setGatewayTestMessage(null);
-    try {
-      setTestingGateway(true);
-      const res = await fetch("/api/subscriptions/memberships/config/gateway/test", {
-        method: "POST"
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo probar conexión");
-      setGatewayTestMessage(json?.data?.message || "Prueba completada");
-      await loadAll();
-    } catch (err: any) {
-      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo probar conexión"));
-    } finally {
-      setTestingGateway(false);
     }
   }
 
   return (
-    <MembershipsShell title="Configuración · Membresías" description="Fuente de verdad para catálogos, duración, visibilidad y preparación de pagos recurrentes.">
+    <MembershipsShell
+      title="Configuración · Membresías"
+      description="Administrador de catálogos para crear productos sin bloqueos y escalar de setup básico a avanzado."
+    >
       {loading ? <p className="text-xs text-slate-500">Cargando configuración...</p> : null}
       {error ? <p className="text-xs font-medium text-rose-600">{error}</p> : null}
       {message ? <p className="text-xs font-medium text-emerald-700">{message}</p> : null}
+      {warnings.length > 0 ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-semibold">Configuración parcial</p>
+          <ul className="mt-1 list-disc pl-4">
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-2">
-        {TABS.map((tab) => {
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                active ? "bg-[#4aa59c] text-white" : "border border-slate-300 bg-white text-slate-700 hover:border-[#4aadf5]"
-              }`}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
+      <div className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-3 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2e75ba]">Catálogo manager</p>
+            <p className="text-xs text-slate-600">La Pasarela de pagos se administra en el módulo Suscripciones para evitar mezcla de responsabilidades.</p>
+          </div>
+          <Link
+            href="/admin/suscripciones/pasarela"
+            className="rounded-lg border border-[#4aa59c] bg-white px-3 py-2 text-xs font-semibold text-[#4aa59c] hover:border-[#4aadf5] hover:text-[#2e75ba]"
+          >
+            Ir a Pasarela
+          </Link>
+        </div>
       </div>
 
-      {activeTab === "catalogos" ? (
+      <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-2 md:grid-cols-[280px_1fr]">
+          <label className="space-y-1 text-xs text-slate-700">
+            <span className="font-semibold">Catálogo activo</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              value={activeCatalog}
+              onChange={(event) => setActiveCatalog(event.target.value as CatalogId)}
+            >
+              {CATALOG_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2 text-xs text-slate-600">
+            {CATALOG_OPTIONS.find((option) => option.id === activeCatalog)?.description}
+          </div>
+        </div>
+      </section>
+
+      {activeCatalog === "categories" ? (
         <section className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-[#2e75ba]">Catálogo de categorías</h2>
+            <h2 className="text-sm font-semibold text-[#2e75ba]">Categorías de plan (tipo de servicio)</h2>
             <select
               className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
               value={segmentFilter}
@@ -500,11 +541,13 @@ export default function MembershipConfigPage() {
               placeholder="Nombre categoría"
               className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
               required
+              disabled={!canAdmin}
             />
             <select
               value={newCategory.segment}
               onChange={(event) => setNewCategory((prev) => ({ ...prev, segment: event.target.value }))}
               className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
             >
               <option value="B2C">B2C</option>
               <option value="B2B">B2B</option>
@@ -516,10 +559,11 @@ export default function MembershipConfigPage() {
               onChange={(event) => setNewCategory((prev) => ({ ...prev, sortOrder: event.target.value }))}
               placeholder="Orden"
               className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
             />
             <button
               type="submit"
-              disabled={savingId === "new-category"}
+              disabled={savingId === "new-category" || !canAdmin}
               className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
             >
               Crear categoría
@@ -542,6 +586,7 @@ export default function MembershipConfigPage() {
                       }))
                     }
                     className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                    disabled={!canAdmin}
                   />
                 </td>
                 <td className="px-3 py-2 text-xs text-slate-700">{category.segment}</td>
@@ -560,10 +605,15 @@ export default function MembershipConfigPage() {
                       }))
                     }
                     className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                    disabled={!canAdmin}
                   />
                 </td>
                 <td className="px-3 py-2">
-                  <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${category.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
+                  <span
+                    className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                      category.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"
+                    }`}
+                  >
                     {category.isActive ? "ACTIVA" : "INACTIVA"}
                   </span>
                 </td>
@@ -572,16 +622,16 @@ export default function MembershipConfigPage() {
                     <button
                       type="button"
                       onClick={() => saveCategory(category)}
-                      disabled={savingId === category.id}
-                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
+                      disabled={savingId === category.id || !canAdmin}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
                     >
                       Guardar
                     </button>
                     <button
                       type="button"
                       onClick={() => toggleCategory(category)}
-                      disabled={savingId === category.id}
-                      className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
+                      disabled={savingId === category.id || !canAdmin}
+                      className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c] disabled:opacity-60"
                     >
                       {category.isActive ? "Desactivar" : "Activar"}
                     </button>
@@ -593,280 +643,299 @@ export default function MembershipConfigPage() {
         </section>
       ) : null}
 
-      {activeTab === "duraciones" ? (
+      {activeCatalog === "modalities" ? (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-[#2e75ba]">Presets de duración</h2>
-          <form onSubmit={createPreset} className="grid gap-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3 md:grid-cols-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-[#2e75ba]">Modalidades de producto</h2>
+            <button
+              type="button"
+              onClick={saveModalities}
+              disabled={savingId === "modalities" || !canAdmin}
+              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
+            >
+              {savingId === "modalities" ? "Guardando..." : "Guardar modalidades"}
+            </button>
+          </div>
+
+          <form onSubmit={addModality} className="grid gap-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3 md:grid-cols-8">
             <input
-              value={newPreset.name}
-              onChange={(event) => setNewPreset((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="Ej. 12 meses"
-              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              value={newModality.name}
+              onChange={(event) => setNewModality((prev) => ({ ...prev, name: event.target.value }))}
+              placeholder="Nombre"
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs md:col-span-2"
               required
+              disabled={!canAdmin}
             />
+            <select
+              value={newModality.code}
+              onChange={(event) => setNewModality((prev) => ({ ...prev, code: event.target.value as PlanModality["code"] }))}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
+            >
+              <option value="INDIVIDUAL">INDIVIDUAL</option>
+              <option value="DUO">DUO</option>
+              <option value="FAMILIAR">FAMILIAR</option>
+              <option value="FAMILIAR_PLUS">FAMILIAR_PLUS</option>
+              <option value="EMPRESARIAL">EMPRESARIAL</option>
+            </select>
+            <select
+              value={newModality.segment}
+              onChange={(event) => setNewModality((prev) => ({ ...prev, segment: event.target.value as PlanModality["segment"] }))}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
+            >
+              <option value="B2C">B2C</option>
+              <option value="B2B">B2B</option>
+            </select>
+            <select
+              value={newModality.mappedPlanType}
+              onChange={(event) =>
+                setNewModality((prev) => ({
+                  ...prev,
+                  mappedPlanType: event.target.value as PlanModality["mappedPlanType"]
+                }))
+              }
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
+            >
+              <option value="INDIVIDUAL">INDIVIDUAL</option>
+              <option value="FAMILIAR">FAMILIAR</option>
+              <option value="EMPRESARIAL">EMPRESARIAL</option>
+            </select>
             <input
               type="number"
-              min="1"
-              value={newPreset.days}
-              onChange={(event) => setNewPreset((prev) => ({ ...prev, days: event.target.value }))}
-              placeholder="Días"
+              min="0"
+              value={newModality.maxDependentsDefault}
+              onChange={(event) => setNewModality((prev) => ({ ...prev, maxDependentsDefault: event.target.value }))}
+              placeholder="Máx dep."
               className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
-              required
+              disabled={!canAdmin}
             />
             <input
               type="number"
               min="0"
-              value={newPreset.sortOrder}
-              onChange={(event) => setNewPreset((prev) => ({ ...prev, sortOrder: event.target.value }))}
+              value={newModality.sortOrder}
+              onChange={(event) => setNewModality((prev) => ({ ...prev, sortOrder: event.target.value }))}
               placeholder="Orden"
               className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              disabled={!canAdmin}
             />
             <button
               type="submit"
-              disabled={savingId === "new-preset"}
-              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
+              className="rounded-lg border border-[#4aa59c] bg-white px-3 py-2 text-xs font-semibold text-[#4aa59c] hover:border-[#4aadf5] hover:text-[#2e75ba] disabled:opacity-60"
+              disabled={!canAdmin}
             >
-              Crear preset
+              Agregar
             </button>
+            <label className="md:col-span-8 inline-flex items-center gap-2 text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={newModality.allowDependents}
+                onChange={(event) => setNewModality((prev) => ({ ...prev, allowDependents: event.target.checked }))}
+                disabled={!canAdmin}
+              />
+              Permite dependientes
+            </label>
           </form>
 
-          <CompactTable columns={["Preset", "Días", "Ámbito", "Estado", "Acciones"]}>
-            {presets.map((preset) => (
-              <tr key={preset.id}>
-                <td className="px-3 py-2 text-xs text-slate-800">{preset.name}</td>
-                <td className="px-3 py-2 text-xs text-slate-700">{preset.days}</td>
-                <td className="px-3 py-2 text-xs text-slate-700">{preset.branchId ? "Sucursal" : "Global"}</td>
-                <td className="px-3 py-2">
-                  <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${preset.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
-                    {preset.isActive ? "ACTIVO" : "INACTIVO"}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
-                  <button
-                    type="button"
-                    onClick={() => togglePreset(preset)}
-                    disabled={savingId === preset.id}
-                    className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
-                  >
-                    {preset.isActive ? "Desactivar" : "Activar"}
-                  </button>
-                </td>
-              </tr>
-            ))}
+          <CompactTable columns={["Modalidad", "Segmento", "Tipo persistido", "Dep. por defecto", "Estado", "Acciones"]}>
+            {filteredModalities
+              .slice()
+              .sort((a, b) => a.sortOrder - b.sortOrder)
+              .map((modality) => (
+                <tr key={modality.id}>
+                  <td className="px-3 py-2">
+                    <div className="grid gap-1">
+                      <input
+                        value={modality.name}
+                        onChange={(event) => patchModality(modality.id, { name: event.target.value })}
+                        className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                        disabled={!canAdmin}
+                      />
+                      <p className="text-[11px] text-slate-500">{modality.code}</p>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={modality.segment}
+                      onChange={(event) => patchModality(modality.id, { segment: event.target.value as PlanModality["segment"] })}
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      disabled={!canAdmin}
+                    >
+                      <option value="B2C">B2C</option>
+                      <option value="B2B">B2B</option>
+                    </select>
+                  </td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={modality.mappedPlanType}
+                      onChange={(event) =>
+                        patchModality(modality.id, {
+                          mappedPlanType: event.target.value as PlanModality["mappedPlanType"]
+                        })
+                      }
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      disabled={!canAdmin}
+                    >
+                      <option value="INDIVIDUAL">INDIVIDUAL</option>
+                      <option value="FAMILIAR">FAMILIAR</option>
+                      <option value="EMPRESARIAL">EMPRESARIAL</option>
+                    </select>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="grid gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        value={modality.maxDependentsDefault}
+                        onChange={(event) =>
+                          patchModality(modality.id, {
+                            maxDependentsDefault: Number(event.target.value || 0)
+                          })
+                        }
+                        className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                        disabled={!canAdmin}
+                      />
+                      <label className="inline-flex items-center gap-1 text-[11px] text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={modality.allowDependents}
+                          onChange={(event) => patchModality(modality.id, { allowDependents: event.target.checked })}
+                          disabled={!canAdmin}
+                        />
+                        Permite dep.
+                      </label>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <label className="inline-flex items-center gap-1 text-xs text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={modality.isActive}
+                        onChange={(event) => patchModality(modality.id, { isActive: event.target.checked })}
+                        disabled={!canAdmin}
+                      />
+                      Activa
+                    </label>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        value={modality.sortOrder}
+                        onChange={(event) => patchModality(modality.id, { sortOrder: Number(event.target.value || 0) })}
+                        className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                        disabled={!canAdmin}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeModality(modality.id)}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                        disabled={!canAdmin}
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
           </CompactTable>
         </section>
       ) : null}
 
-      {activeTab === "beneficios" ? (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-[#2e75ba]">Catálogo de servicios incluidos</h2>
-          <form onSubmit={createBenefit} className="grid gap-2 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3 md:grid-cols-6">
-            <input
-              value={newBenefit.title}
-              onChange={(event) => setNewBenefit((prev) => ({ ...prev, title: event.target.value }))}
-              placeholder="Título del servicio"
-              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs md:col-span-2"
-              required
-            />
-            <select
-              value={newBenefit.serviceType}
-              onChange={(event) => setNewBenefit((prev) => ({ ...prev, serviceType: event.target.value }))}
-              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
-            >
-              <option value="CONSULTA">Consulta</option>
-              <option value="LAB">Lab</option>
-              <option value="RX">Rx</option>
-              <option value="IMAGEN">Imagen</option>
-              <option value="FARMACIA">Farmacia</option>
-              <option value="AUDIOLOGIA">Audiología</option>
-              <option value="OTRO">Otro</option>
-            </select>
-            <input
-              value={newBenefit.iconKey}
-              onChange={(event) => setNewBenefit((prev) => ({ ...prev, iconKey: event.target.value }))}
-              placeholder="iconKey"
-              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
-            />
-            <input
-              value={newBenefit.imageUrl}
-              onChange={(event) => setNewBenefit((prev) => ({ ...prev, imageUrl: event.target.value }))}
-              placeholder="imageUrl (opcional)"
-              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
-            />
-            <button
-              type="submit"
-              disabled={savingId === "new-benefit"}
-              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
-            >
-              Crear
-            </button>
-          </form>
+      {activeCatalog === "defaults" ? (
+        <form onSubmit={saveDefaults} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-[#2e75ba]">Defaults del módulo</h2>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label className="space-y-1 text-xs text-slate-700">
+              <span className="font-semibold">Moneda default</span>
+              <select
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
+                value={catalogDefaults.currencyDefault}
+                onChange={(event) => setCatalogDefaults((prev) => ({ ...prev, currencyDefault: event.target.value.toUpperCase() }))}
+                disabled={!canAdmin}
+              >
+                <option value="GTQ">GTQ</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+              </select>
+            </label>
 
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {benefits.map((benefit) => (
-              <article key={benefit.id} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-                <div className="flex items-center gap-3">
-                  {benefit.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={benefit.imageUrl} alt={benefit.title} className="h-12 w-12 rounded-md object-cover" />
-                  ) : (
-                    <div className="flex h-12 w-12 items-center justify-center rounded-md border border-dashed border-slate-300 text-[10px] text-slate-500">
-                      {benefit.iconKey || "ICON"}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-slate-900">{benefit.title}</p>
-                    <p className="text-[11px] text-slate-500">{benefit.serviceType}</p>
-                  </div>
-                  <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${benefit.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
-                    {benefit.isActive ? "ACTIVO" : "INACTIVO"}
-                  </span>
-                </div>
-                <div className="mt-2 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => toggleBenefit(benefit)}
-                    disabled={savingId === benefit.id}
-                    className="rounded-md border border-[#4aa59c] px-2 py-1 text-[11px] font-semibold text-[#4aa59c]"
-                  >
-                    {benefit.isActive ? "Desactivar" : "Activar"}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
+            <label className="space-y-1 text-xs text-slate-700">
+              <span className="font-semibold">Ventana de beneficios</span>
+              <select
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
+                value={catalogDefaults.benefitWindowDefault}
+                onChange={(event) =>
+                  setCatalogDefaults((prev) => ({
+                    ...prev,
+                    benefitWindowDefault: event.target.value as CatalogDefaults["benefitWindowDefault"]
+                  }))
+                }
+                disabled={!canAdmin}
+              >
+                <option value="MENSUAL">Mensual</option>
+                <option value="ANUAL">Anual</option>
+                <option value="CUSTOM">Custom</option>
+              </select>
+            </label>
 
-      {activeTab === "pasarela" ? (
-        <section className="space-y-3 rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
-          <h2 className="text-sm font-semibold text-[#2e75ba]">Pasarela de pagos recurrentes</h2>
-          {!canAdmin ? <p className="text-xs text-slate-600">Solo perfiles admin pueden gestionar llaves de pasarela.</p> : null}
+            <label className="space-y-1 text-xs text-slate-700">
+              <span className="font-semibold">Modalidad sugerida</span>
+              <select
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
+                value={catalogDefaults.defaultModalityCode || ""}
+                onChange={(event) =>
+                  setCatalogDefaults((prev) => ({
+                    ...prev,
+                    defaultModalityCode: event.target.value ? (event.target.value as PlanModality["code"]) : null
+                  }))
+                }
+                disabled={!canAdmin}
+              >
+                <option value="">Sin default</option>
+                {modalities
+                  .filter((item) => item.isActive)
+                  .map((item) => (
+                    <option key={`default-modality-${item.id}`} value={item.code}>
+                      {item.name} ({item.segment})
+                    </option>
+                  ))}
+              </select>
+            </label>
 
-          {canAdmin ? (
-            <form onSubmit={saveGatewayConfig} className="space-y-3">
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="space-y-1 text-xs text-slate-700">
-                  <span className="font-semibold">Provider</span>
-                  <select
-                    value={gateway.provider}
-                    onChange={(event) =>
-                      setGateway((prev) => ({
-                        ...prev,
-                        provider: event.target.value as GatewayConfig["provider"]
-                      }))
-                    }
-                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
-                  >
-                    <option value="RECURRENT">RECURRENT</option>
-                    <option value="MANUAL">MANUAL</option>
-                  </select>
-                </label>
-
-                <label className="space-y-1 text-xs text-slate-700">
-                  <span className="font-semibold">Mode</span>
-                  <select
-                    value={gateway.mode}
-                    onChange={(event) =>
-                      setGateway((prev) => ({
-                        ...prev,
-                        mode: event.target.value as GatewayConfig["mode"]
-                      }))
-                    }
-                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
-                  >
-                    <option value="test">test</option>
-                    <option value="live">live</option>
-                  </select>
-                </label>
-
-                <label className="space-y-1 text-xs text-slate-700 md:col-span-2">
-                  <span className="font-semibold">API key</span>
-                  <input
-                    type="password"
-                    value={gatewayApiKey}
-                    onChange={(event) => setGatewayApiKey(event.target.value)}
-                    placeholder={gateway.apiKeyMasked || "Ingresar nueva API key"}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
-                    autoComplete="off"
-                  />
-                  <p className="text-[11px] text-slate-500">
-                    {gateway.hasApiKey ? `Actual: ${gateway.apiKeyMasked}` : "Sin API key configurada"}
-                  </p>
-                </label>
-
-                <label className="space-y-1 text-xs text-slate-700 md:col-span-2">
-                  <span className="font-semibold">Webhook secret</span>
-                  <input
-                    type="password"
-                    value={gatewayWebhookSecret}
-                    onChange={(event) => setGatewayWebhookSecret(event.target.value)}
-                    placeholder={gateway.webhookSecretMasked || "Ingresar nuevo webhook secret"}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2"
-                    autoComplete="off"
-                  />
-                  <p className="text-[11px] text-slate-500">
-                    {gateway.hasWebhookSecret ? `Actual: ${gateway.webhookSecretMasked}` : "Sin webhook secret configurado"}
-                  </p>
-                </label>
-              </div>
-
-              <label className="inline-flex items-center gap-2 text-xs text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={gateway.isEnabled}
-                  onChange={(event) => setGateway((prev) => ({ ...prev, isEnabled: event.target.checked }))}
-                />
-                Habilitar pasarela recurrente
-              </label>
-
-              <div className="rounded-lg border border-slate-200 bg-white p-2 text-[11px] text-slate-600">
-                Webhook status:{" "}
-                <span className="font-semibold text-slate-800">
-                  {gateway.lastWebhookAt ? new Date(gateway.lastWebhookAt).toLocaleString() : "sin eventos recibidos"}
-                </span>
-              </div>
-
-              {gatewayTestMessage ? <p className="text-xs font-medium text-emerald-700">{gatewayTestMessage}</p> : null}
-
-              <div className="flex flex-wrap justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => testGatewayConnection()}
-                  disabled={testingGateway}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60"
-                >
-                  {testingGateway ? "Probando..." : "Probar conexión"}
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingId === "gateway"}
-                  className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
-                >
-                  {savingId === "gateway" ? "Guardando..." : "Guardar pasarela"}
-                </button>
-              </div>
-            </form>
-          ) : null}
-        </section>
-      ) : null}
-
-      {activeTab === "permisos" ? (
-        <form onSubmit={saveConfig} className="space-y-3">
-          <section className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
-            <h2 className="text-sm font-semibold text-[#2e75ba]">Visibilidad de precios</h2>
-            <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-700">
+            <label className="inline-flex items-center gap-2 pt-6 text-xs text-slate-700">
               <input
                 type="checkbox"
-                checked={config.hidePricesForOperators}
-                onChange={(event) => setConfig((prev) => ({ ...prev, hidePricesForOperators: event.target.checked }))}
+                checked={catalogDefaults.accumulableDefault}
+                onChange={(event) => setCatalogDefaults((prev) => ({ ...prev, accumulableDefault: event.target.checked }))}
+                disabled={!canAdmin}
               />
-              Ocultar precios a operadores sin permiso de pricing.
+              Beneficios acumulables por default
             </label>
-          </section>
+          </div>
 
-          <section className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
-            <h2 className="text-sm font-semibold text-[#2e75ba]">Parámetros globales</h2>
+          <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3 text-xs text-slate-600">
+            Si un catálogo está incompleto, el editor de planes usará estos defaults y permitirá guardar sin bloquear operación.
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={savingId === "defaults" || !canAdmin}
+              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
+            >
+              {savingId === "defaults" ? "Guardando..." : "Guardar defaults"}
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {activeCatalog === "policies" ? (
+        <form onSubmit={saveConfig} className="space-y-3">
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-sm font-semibold text-[#2e75ba]">Políticas operativas</h2>
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               <label className="space-y-1 text-xs text-slate-700">
                 <span className="font-semibold">Aviso renovación (días)</span>
@@ -958,16 +1027,25 @@ export default function MembershipConfigPage() {
                 />
                 Requiere pago inicial
               </label>
+
+              <label className="inline-flex items-center gap-2 pt-6 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={config.hidePricesForOperators}
+                  onChange={(event) => setConfig((prev) => ({ ...prev, hidePricesForOperators: event.target.checked }))}
+                />
+                Ocultar precios a operadores
+              </label>
             </div>
           </section>
 
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={savingConfig}
+              disabled={savingConfig || !canAdmin}
               className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4aadf5] disabled:opacity-60"
             >
-              {savingConfig ? "Guardando..." : "Guardar configuración"}
+              {savingConfig ? "Guardando..." : "Guardar políticas"}
             </button>
           </div>
         </form>
