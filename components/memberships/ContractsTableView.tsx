@@ -107,6 +107,16 @@ type ContractsTableViewProps = {
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+type PaymentMethodFilter = "" | "MANUAL" | "RECURRENT";
+type RenewWindowFilter = "" | "7" | "15" | "30";
+type TableFilters = {
+  query: string;
+  statusFilter: string;
+  planFilter: string;
+  paymentMethodFilter: PaymentMethodFilter;
+  renewWindowFilter: RenewWindowFilter;
+  branchFilter: string;
+};
 const STATUS_FILTERS: Array<{ value: string; label: string }> = [
   { value: "", label: "Todas" },
   { value: "ACTIVO", label: "Activo" },
@@ -147,8 +157,19 @@ function getOwnerClientCode(ownerProfile: ContractRow["owner"] | ContractRow["Cl
   return ownerProfile?.clientCode || ownerProfile?.code || "—";
 }
 
+function parsePaymentMethodFilter(value: string | null): PaymentMethodFilter {
+  if (value === "MANUAL" || value === "RECURRENT") return value;
+  return "";
+}
+
+function parseRenewWindowFilter(value: string | null): RenewWindowFilter {
+  if (value === "7" || value === "15" || value === "30") return value;
+  return "";
+}
+
 export function ContractsTableView({ ownerType, title, description }: ContractsTableViewProps) {
   const searchParams = useSearchParams();
+  const searchParamsKey = searchParams?.toString() || "";
   const [contracts, setContracts] = useState<ContractRow[]>([]);
   const [plans, setPlans] = useState<PlanOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -160,8 +181,8 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [planFilter, setPlanFilter] = useState("");
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState<"" | "MANUAL" | "RECURRENT">("");
-  const [renewWindowFilter, setRenewWindowFilter] = useState<"" | "7" | "15" | "30">("");
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethodFilter>("");
+  const [renewWindowFilter, setRenewWindowFilter] = useState<RenewWindowFilter>("");
   const [branchFilter, setBranchFilter] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
@@ -183,20 +204,29 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   const pagedContracts = contracts.slice(pageStartIndex, pageStartIndex + pageSize);
   const showBranchFilter = canAdmin || !viewerBranchId;
 
-  async function loadData(options?: { targetPage?: number; targetPageSize?: number }) {
+  async function loadData(options?: { targetPage?: number; targetPageSize?: number; filters?: Partial<TableFilters> }) {
     const targetPage = options?.targetPage ?? safePage;
     const targetPageSize = options?.targetPageSize ?? pageSize;
+    const effectiveFilters: TableFilters = {
+      query,
+      statusFilter,
+      planFilter,
+      paymentMethodFilter,
+      renewWindowFilter,
+      branchFilter,
+      ...(options?.filters || {})
+    };
     setLoading(true);
     setError(null);
 
     const params = new URLSearchParams();
     params.set("ownerType", ownerType);
-    if (query) params.set("q", query);
-    if (statusFilter) params.set("status", statusFilter);
-    if (planFilter) params.set("planId", planFilter);
-    if (paymentMethodFilter) params.set("paymentMethod", paymentMethodFilter);
-    if (renewWindowFilter) params.set("renewWindowDays", renewWindowFilter);
-    if (showBranchFilter && branchFilter) params.set("branchId", branchFilter);
+    if (effectiveFilters.query) params.set("q", effectiveFilters.query);
+    if (effectiveFilters.statusFilter) params.set("status", effectiveFilters.statusFilter);
+    if (effectiveFilters.planFilter) params.set("planId", effectiveFilters.planFilter);
+    if (effectiveFilters.paymentMethodFilter) params.set("paymentMethod", effectiveFilters.paymentMethodFilter);
+    if (effectiveFilters.renewWindowFilter) params.set("renewWindowDays", effectiveFilters.renewWindowFilter);
+    if (showBranchFilter && effectiveFilters.branchFilter) params.set("branchId", effectiveFilters.branchFilter);
     params.set("page", String(targetPage));
     // Fallback sin paginación server-side: cargamos un bloque amplio para paginar en UI.
     params.set("take", String(Math.min(200, Math.max(100, targetPage * targetPageSize))));
@@ -243,6 +273,35 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   }, [ownerType, searchParams]);
 
   useEffect(() => {
+    const params = new URLSearchParams(searchParamsKey);
+    const hasFilterParams = ["q", "search", "status", "planId", "paymentMethod", "renewWindowDays", "branchId"].some((key) =>
+      params.has(key)
+    );
+    if (!hasFilterParams) return;
+
+    const nextFilters: TableFilters = {
+      query: String(params.get("q") || params.get("search") || "").trim(),
+      statusFilter: String(params.get("status") || "").trim(),
+      planFilter: String(params.get("planId") || "").trim(),
+      paymentMethodFilter: parsePaymentMethodFilter(params.get("paymentMethod")),
+      renewWindowFilter: parseRenewWindowFilter(params.get("renewWindowDays")),
+      branchFilter: showBranchFilter ? String(params.get("branchId") || "").trim() : ""
+    };
+
+    setQuery(nextFilters.query);
+    setStatusFilter(nextFilters.statusFilter);
+    setPlanFilter(nextFilters.planFilter);
+    setPaymentMethodFilter(nextFilters.paymentMethodFilter);
+    setRenewWindowFilter(nextFilters.renewWindowFilter);
+    setBranchFilter(nextFilters.branchFilter);
+    setPage(1);
+    setRowMenuOpenId(null);
+    setInfoMessage(null);
+    void loadData({ targetPage: 1, targetPageSize: pageSize, filters: nextFilters });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParamsKey, showBranchFilter]);
+
+  useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
@@ -279,6 +338,26 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
     setRowMenuOpenId(null);
     setInfoMessage(null);
     void loadData({ targetPage: 1, targetPageSize: pageSize });
+  }
+
+  function applyQueueFilters(patch: Partial<TableFilters>) {
+    const nextFilters: TableFilters = {
+      query,
+      statusFilter,
+      planFilter,
+      paymentMethodFilter,
+      renewWindowFilter,
+      branchFilter,
+      ...patch
+    };
+
+    setStatusFilter(nextFilters.statusFilter);
+    setPaymentMethodFilter(nextFilters.paymentMethodFilter);
+    setRenewWindowFilter(nextFilters.renewWindowFilter);
+    setPage(1);
+    setRowMenuOpenId(null);
+    setInfoMessage(null);
+    void loadData({ targetPage: 1, targetPageSize: pageSize, filters: nextFilters });
   }
 
   async function changeStatus(contractId: string, status: string) {
@@ -363,6 +442,84 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       }
     >
       <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2e75ba]">Cola rápida</span>
+            <button
+              type="button"
+              onClick={() => applyQueueFilters({ renewWindowFilter: "7", statusFilter: "", paymentMethodFilter: "" })}
+              className={cn(
+                "inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition",
+                renewWindowFilter === "7" && !statusFilter && !paymentMethodFilter
+                  ? "border-[#4aa59c] bg-white text-[#2e75ba]"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              )}
+            >
+              Por vencer 7d
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQueueFilters({ renewWindowFilter: "15", statusFilter: "", paymentMethodFilter: "" })}
+              className={cn(
+                "inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition",
+                renewWindowFilter === "15" && !statusFilter && !paymentMethodFilter
+                  ? "border-[#4aa59c] bg-white text-[#2e75ba]"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              )}
+            >
+              Por vencer 15d
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQueueFilters({ renewWindowFilter: "30", statusFilter: "", paymentMethodFilter: "" })}
+              className={cn(
+                "inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition",
+                renewWindowFilter === "30" && !statusFilter && !paymentMethodFilter
+                  ? "border-[#4aa59c] bg-white text-[#2e75ba]"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              )}
+            >
+              Por vencer 30d
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQueueFilters({ statusFilter: "VENCIDO", renewWindowFilter: "", paymentMethodFilter: "" })}
+              className={cn(
+                "inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition",
+                statusFilter === "VENCIDO" && !paymentMethodFilter
+                  ? "border-[#4aa59c] bg-white text-[#2e75ba]"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              )}
+            >
+              Vencidas
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQueueFilters({ statusFilter: "PENDIENTE_PAGO", renewWindowFilter: "", paymentMethodFilter: "" })}
+              className={cn(
+                "inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition",
+                statusFilter === "PENDIENTE_PAGO" && !paymentMethodFilter
+                  ? "border-[#4aa59c] bg-white text-[#2e75ba]"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              )}
+            >
+              Pago pendiente
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQueueFilters({ statusFilter: "SUSPENDIDO", renewWindowFilter: "", paymentMethodFilter: "RECURRENT" })}
+              className={cn(
+                "inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition",
+                statusFilter === "SUSPENDIDO" && paymentMethodFilter === "RECURRENT"
+                  ? "border-[#4aa59c] bg-white text-[#2e75ba]"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+              )}
+            >
+              Falló recurrente
+            </button>
+          </div>
+        </div>
+
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             {STATUS_FILTERS.map((chip) => {
@@ -452,11 +609,11 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
           </label>
 
           <label className="space-y-1">
-            <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Por vencer</span>
+            <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2e75ba]">Por vencer</span>
             <select
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/20"
+              className="h-9 w-full rounded-lg border border-[#4aa59c]/50 bg-white px-3 text-xs font-semibold text-[#2e75ba] shadow-sm focus:border-[#4aa59c] focus:outline-none focus:ring-2 focus:ring-[#4aa59c]/20"
               value={renewWindowFilter}
-              onChange={(event) => setRenewWindowFilter(event.target.value as "" | "7" | "15" | "30")}
+              onChange={(event) => setRenewWindowFilter(event.target.value as RenewWindowFilter)}
             >
               <option value="">No filtrar</option>
               <option value="7">7 días</option>

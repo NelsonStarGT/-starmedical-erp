@@ -152,19 +152,14 @@ export default function ModuleSubnav({
             href: withQuery("/admin/suscripciones/membresias/afiliaciones/pacientes"),
             active:
               matchesPathPrefix(pathname, "/admin/suscripciones/membresias/afiliaciones") ||
-              matchesPathPrefix(pathname, "/admin/suscripciones/membresias/contratos")
+              matchesPathPrefix(pathname, "/admin/suscripciones/membresias/contratos") ||
+              matchesPathPrefix(pathname, "/admin/suscripciones/membresias/renovaciones")
           },
           {
             key: "planes",
             label: "Planes",
             href: withQuery("/admin/suscripciones/membresias/planes"),
             active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/planes")
-          },
-          {
-            key: "renovaciones",
-            label: "Renovaciones",
-            href: withQuery("/admin/suscripciones/membresias/renovaciones"),
-            active: matchesPathPrefix(pathname, "/admin/suscripciones/membresias/renovaciones")
           },
           {
             key: "impresion",

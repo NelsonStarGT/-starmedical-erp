@@ -25,10 +25,9 @@ export function MembershipsInnerSubnav() {
     const isAffiliations =
       isPrefix(pathname, "/admin/suscripciones/membresias/afiliaciones") ||
       isPrefix(pathname, "/admin/suscripciones/membresias/contratos") ||
+      isPrefix(pathname, "/admin/suscripciones/membresias/renovaciones") ||
       isPrefix(pathname, "/admin/membresias/contratos");
     const isPlans = isPrefix(pathname, "/admin/suscripciones/membresias/planes") || isPrefix(pathname, "/admin/membresias/planes");
-    const isRenewals =
-      isPrefix(pathname, "/admin/suscripciones/membresias/renovaciones") || isPrefix(pathname, "/admin/membresias/renovaciones");
     const isPrint = isPrefix(pathname, "/admin/suscripciones/membresias/impresion") || isPrefix(pathname, "/admin/membresias/impresion");
     const isConfig =
       isPrefix(pathname, "/admin/suscripciones/membresias/configuracion") || isPrefix(pathname, "/admin/membresias/configuracion");
@@ -42,7 +41,6 @@ export function MembershipsInnerSubnav() {
         active: isAffiliations
       },
       { key: "planes", label: "Planes", href: "/admin/suscripciones/membresias/planes", active: isPlans },
-      { key: "renovaciones", label: "Renovaciones", href: "/admin/suscripciones/membresias/renovaciones", active: isRenewals },
       { key: "impresion", label: "Impresión", href: "/admin/suscripciones/membresias/impresion", active: isPrint },
       {
         key: "configuracion",
