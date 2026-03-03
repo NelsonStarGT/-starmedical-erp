@@ -3,7 +3,7 @@
 import { type HTMLAttributes, type HTMLInputTypeAttribute, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   CalendarDays,
@@ -418,6 +418,7 @@ export default function PersonCreateForm({
   initialOperatingDefaults?: OperatingCountryDefaultsSnapshot;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const clientsDateFormat = useClientsDateFormat(initialDateFormat);
   const [isPending, startTransition] = useTransition();
 
@@ -462,6 +463,37 @@ export default function PersonCreateForm({
     relations: false,
     affiliations: false
   });
+
+  const notifyCreatedPersonToOpener = (payload: { id: string; name?: string | null }) => {
+    if (typeof window === "undefined" || !window.opener) return false;
+    const returnMode = (searchParams.get("returnMode") || "").trim();
+    const returnOriginRaw = (searchParams.get("returnOrigin") || "").trim();
+    if (returnMode !== "postMessage" || !returnOriginRaw) return false;
+
+    let targetOrigin: string;
+    try {
+      targetOrigin = new URL(returnOriginRaw).origin;
+    } catch {
+      return false;
+    }
+
+    if (targetOrigin !== window.location.origin) return false;
+
+    try {
+      window.opener.postMessage(
+        {
+          type: "CLIENT_CREATED",
+          clientType: "PERSON",
+          id: payload.id,
+          name: payload.name?.trim() || null
+        },
+        targetOrigin
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   const setSectionOpen = useCallback((section: FormSectionKey, open: boolean) => {
     setOpenSections((prev) => ({ ...prev, [section]: open }));
@@ -1494,6 +1526,19 @@ export default function PersonCreateForm({
             isActive: item.isActive
           }))
         });
+
+        const posted = notifyCreatedPersonToOpener({
+          id: result.id,
+          name: [form.firstName, form.lastName].filter(Boolean).join(" ")
+        });
+        if (posted) {
+          try {
+            window.close();
+          } catch {
+            // no-op
+          }
+          return;
+        }
 
         const nextTab = affiliations.length ? "afiliaciones" : "resumen";
         router.push(`/admin/clientes/${result.id}?tab=${nextTab}`);

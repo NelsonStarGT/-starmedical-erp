@@ -66,6 +66,12 @@ const STEPS = [
 ] as const;
 
 type WizardStep = 0 | 1 | 2 | 3;
+type ClientCreatedMessage = {
+  type: "CLIENT_CREATED";
+  clientType: "COMPANY" | "PERSON";
+  id: string;
+  name?: string | null;
+};
 
 function getFocusableElements(container: HTMLElement | null) {
   if (!container) return [];
@@ -105,6 +111,18 @@ function formatDate(value: Date) {
   });
 }
 
+function isClientCreatedMessage(input: unknown): input is ClientCreatedMessage {
+  if (!input || typeof input !== "object") return false;
+  const value = input as Record<string, unknown>;
+  if (value.type !== "CLIENT_CREATED") return false;
+  if (value.clientType !== "COMPANY" && value.clientType !== "PERSON") return false;
+  if (typeof value.id !== "string") return false;
+  const id = value.id.trim();
+  if (!id || id.length > 120 || /\\s/.test(id)) return false;
+  if (value.name !== undefined && value.name !== null && typeof value.name !== "string") return false;
+  return true;
+}
+
 export function CompanyEnrollWizardDrawer({ open, onClose, plans, onCreated }: Props) {
   const router = useRouter();
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -139,6 +157,7 @@ export function CompanyEnrollWizardDrawer({ open, onClose, plans, onCreated }: P
 
   const [createdContractId, setCreatedContractId] = useState<string | null>(null);
   const [assignSummary, setAssignSummary] = useState<AssignSummary | null>(null);
+  const [returnOrigin, setReturnOrigin] = useState<string>("");
 
   const availablePlans = useMemo(() => plans.filter((plan) => plan.segment === "B2B" && plan.active), [plans]);
   const selectedPlan = useMemo(
@@ -157,6 +176,17 @@ export function CompanyEnrollWizardDrawer({ open, onClose, plans, onCreated }: P
   const importCount = importSummary?.personClientIds.length || 0;
   const selectedCount = selectedEmployees.length;
   const totalEmployeesToAssociate = importCount + selectedCount;
+  const companyCreateHref = returnOrigin
+    ? `/admin/clientes/empresas/nuevo?returnMode=postMessage&returnOrigin=${encodeURIComponent(returnOrigin)}`
+    : "/admin/clientes/empresas/nuevo";
+  const personCreateHref = returnOrigin
+    ? `/admin/clientes/personas/nuevo?returnMode=postMessage&returnOrigin=${encodeURIComponent(returnOrigin)}`
+    : "/admin/clientes/personas/nuevo";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setReturnOrigin(window.location.origin);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -202,6 +232,66 @@ export function CompanyEnrollWizardDrawer({ open, onClose, plans, onCreated }: P
       lastFocusedRef.current?.focus();
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const allowedOrigin = returnOrigin || (typeof window !== "undefined" ? window.location.origin : "");
+    const openerRef = typeof window !== "undefined" ? window.opener : null;
+
+    const onMessage = (event: MessageEvent) => {
+      if (!allowedOrigin || event.origin !== allowedOrigin) return;
+      if (openerRef && event.source && event.source !== openerRef) return;
+      if (!isClientCreatedMessage(event.data)) return;
+
+      const payload = event.data;
+      if (payload.clientType === "COMPANY") {
+        const inferredName = (payload.name || "").trim() || `Empresa ${payload.id.slice(0, 8)}`;
+        setSelectedCompany({
+          id: payload.id,
+          type: "COMPANY",
+          name: inferredName,
+          email: null,
+          phone: null,
+          nit: null
+        });
+        setCompanyIdManual(payload.id);
+        setStep((prev) => (prev < 2 ? 2 : prev));
+        showToast({
+          tone: "success",
+          title: "Empresa recibida",
+          message: `Se vinculó ${inferredName} al wizard.`
+        });
+        return;
+      }
+
+      setSelectedEmployees((prev) => {
+        if (prev.some((row) => row.id === payload.id)) return prev;
+        const inferredName = (payload.name || "").trim() || `Persona ${payload.id.slice(0, 8)}`;
+        return [
+          ...prev,
+          {
+            id: payload.id,
+            type: "PERSON",
+            name: inferredName,
+            email: null,
+            phone: null,
+            nit: null
+          }
+        ];
+      });
+      setStep((prev) => (prev < 2 ? 2 : prev));
+      showToast({
+        tone: "success",
+        title: "Colaborador recibido",
+        message: `Se agregó ${payload.name || payload.id} al listado del wizard.`
+      });
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+    };
+  }, [open, returnOrigin, showToast]);
 
   useEffect(() => {
     if (!open || step !== 1) return;
@@ -581,7 +671,7 @@ export function CompanyEnrollWizardDrawer({ open, onClose, plans, onCreated }: P
                 <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
                   <p className="text-xs text-slate-600">¿Necesitas crear la empresa ahora?</p>
                   <Link
-                    href="/admin/clientes/empresas/nuevo"
+                    href={companyCreateHref}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-2 inline-flex rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"
@@ -728,7 +818,7 @@ export function CompanyEnrollWizardDrawer({ open, onClose, plans, onCreated }: P
                   <div className="rounded-lg border border-slate-200 bg-[#F8FAFC] p-3">
                     <p className="text-xs text-slate-600">Crea personas en Clientes y luego selecciónalas por búsqueda.</p>
                     <Link
-                      href="/admin/clientes/personas/nuevo"
+                      href={personCreateHref}
                       target="_blank"
                       rel="noreferrer"
                       className="mt-2 inline-flex rounded-lg border border-[#4aa59c] px-3 py-2 text-xs font-semibold text-[#4aa59c] transition hover:bg-white"

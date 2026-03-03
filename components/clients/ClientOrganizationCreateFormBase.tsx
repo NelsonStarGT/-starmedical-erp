@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ClientCatalogType, ClientProfileType } from "@prisma/client";
 import { Building2, ExternalLink, PlusCircle, Upload, X } from "lucide-react";
 import {
@@ -604,6 +604,7 @@ export default function ClientOrganizationCreateFormBase({
   initialContactDirectories?: ClientContactDirectoriesSnapshot;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const isInstitutionMode = mode === "institution";
   const isInsurerMode = mode === "insurer";
   const organizationLabel = isInstitutionMode ? "institución" : isInsurerMode ? "aseguradora" : "empresa";
@@ -685,6 +686,38 @@ export default function ClientOrganizationCreateFormBase({
   const [isDocumentsPending, startDocumentsTransition] = useTransition();
   const [isPreflightOpen, setIsPreflightOpen] = useState(false);
   const preflightCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  const notifyCreatedClientToOpener = (payload: { clientType: "COMPANY"; id: string; name?: string | null }) => {
+    if (typeof window === "undefined" || !window.opener) return false;
+    const returnMode = (searchParams.get("returnMode") || "").trim();
+    const returnOriginRaw = (searchParams.get("returnOrigin") || "").trim();
+    if (returnMode !== "postMessage" || !returnOriginRaw) return false;
+
+    let targetOrigin: string;
+    try {
+      targetOrigin = new URL(returnOriginRaw).origin;
+    } catch {
+      return false;
+    }
+
+    // Defensive check: solo devolvemos mensaje al mismo origin de la app.
+    if (targetOrigin !== window.location.origin) return false;
+
+    try {
+      window.opener.postMessage(
+        {
+          type: "CLIENT_CREATED",
+          clientType: payload.clientType,
+          id: payload.id,
+          name: payload.name?.trim() || null
+        },
+        targetOrigin
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   const contactDirectories = useMemo(
     () => initialContactDirectories ?? buildFallbackClientContactDirectories(),
@@ -1723,6 +1756,22 @@ export default function ClientOrganizationCreateFormBase({
               economicActivitySecondaryIds: form.economicActivitySecondaryIds.filter((item) => item !== form.economicActivityId),
               economicActivityOtherNote: activityRequiresOtherNote ? form.economicActivityOtherNote : undefined
             });
+
+        if (!isInstitutionMode && !isInsurerMode) {
+          const posted = notifyCreatedClientToOpener({
+            clientType: "COMPANY",
+            id: result.id,
+            name: form.tradeName || form.legalName || undefined
+          });
+          if (posted) {
+            try {
+              window.close();
+            } catch {
+              // no-op
+            }
+            return;
+          }
+        }
 
         if (mode === "with_documents") {
           router.push(
