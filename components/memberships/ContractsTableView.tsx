@@ -7,6 +7,7 @@ import { MoreHorizontal } from "lucide-react";
 import { EmptyState } from "@/components/memberships/EmptyState";
 import { MembershipsShell } from "@/components/memberships/MembershipsShell";
 import { SubscriptionMembershipEnrollDrawer } from "@/components/memberships/SubscriptionMembershipEnrollDrawer";
+import { CompanyMembershipEnrollDrawer } from "@/components/memberships/CompanyMembershipEnrollDrawer";
 import { dateLabel, money } from "@/app/admin/suscripciones/membresias/_lib";
 import { buildMembershipInvoiceLink } from "@/lib/memberships/links";
 import { normalizeSubscriptionsErrorMessage } from "@/lib/subscriptions/uiErrors";
@@ -139,7 +140,8 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
   const [enrollOpen, setEnrollOpen] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
+  const [companyEnrollOpen, setCompanyEnrollOpen] = useState(false);
+  const [showAdvancedQuickCreate, setShowAdvancedQuickCreate] = useState(false);
   const [canAdmin, setCanAdmin] = useState(false);
   const [viewerBranchId, setViewerBranchId] = useState<string | null>(null);
   const [canViewPricing, setCanViewPricing] = useState(false);
@@ -217,7 +219,9 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
 
   useEffect(() => {
     const openByQuery = searchParams?.get("enroll");
-    if (openByQuery === "1" && ownerType === "PERSON") setEnrollOpen(true);
+    if (openByQuery !== "1") return;
+    if (ownerType === "PERSON") setEnrollOpen(true);
+    if (ownerType === "COMPANY") setCompanyEnrollOpen(true);
   }, [ownerType, searchParams]);
 
   useEffect(() => {
@@ -286,7 +290,7 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       if (!res.ok) throw new Error(json?.error || "No se pudo afiliar titular");
 
       setCreateForm((prev) => ({ ...prev, ownerId: "" }));
-      setShowCreate(false);
+      setShowAdvancedQuickCreate(false);
       await loadData({ targetPage: 1, targetPageSize: pageSize });
     } catch (err: any) {
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo afiliar titular"));
@@ -364,11 +368,21 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
 
           <button
             type="button"
-            onClick={() => (ownerType === "PERSON" ? setEnrollOpen(true) : setShowCreate((prev) => !prev))}
+            onClick={() => (ownerType === "PERSON" ? setEnrollOpen(true) : setCompanyEnrollOpen(true))}
             className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5]"
           >
-            {ownerType === "PERSON" ? "Afiliar" : showCreate ? "Cerrar" : "Afiliar"}
+            Afiliar
           </button>
+
+          {ownerType === "COMPANY" ? (
+            <button
+              type="button"
+              onClick={() => setShowAdvancedQuickCreate((prev) => !prev)}
+              className="rounded-lg border border-[#4aa59c]/40 bg-white px-3 py-2 text-xs font-semibold text-[#2e75ba] transition hover:bg-[#F8FAFC]"
+            >
+              {showAdvancedQuickCreate ? "Ocultar avanzado" : "Modo avanzado"}
+            </button>
+          ) : null}
         </div>
       }
     >
@@ -501,9 +515,9 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
         </div>
       </section>
 
-      {ownerType === "COMPANY" && showCreate ? (
+      {ownerType === "COMPANY" && showAdvancedQuickCreate ? (
         <form onSubmit={submitCreateCompanyQuick} className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Afiliación rápida empresa</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Afiliación rápida empresa (avanzado)</h3>
           <p className="mt-1 text-[11px] text-slate-600">
             Flujo rápido para B2B usando <code>ownerId</code> existente en Clientes.
           </p>
@@ -582,8 +596,12 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
         <EmptyState
           title="No hay afiliaciones"
           description="Afiliar un titular habilita renovación, estados y seguimiento operativo."
-          ctaHref={ownerType === "PERSON" ? "/admin/suscripciones/membresias/afiliaciones/pacientes?enroll=1" : undefined}
-          ctaLabel="Afiliar titular"
+          ctaHref={
+            ownerType === "PERSON"
+              ? "/admin/suscripciones/membresias/afiliaciones/pacientes?enroll=1"
+              : "/admin/suscripciones/membresias/afiliaciones/empresas?enroll=1"
+          }
+          ctaLabel={ownerType === "PERSON" ? "Afiliar titular" : "Afiliar empresa"}
         />
       ) : null}
 
@@ -799,6 +817,17 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
           plans={filteredPlans}
           canViewPricing={canViewPricing}
           hidePricesForOperators={hidePricesForOperators}
+          onCreated={async () => {
+            await loadData({ targetPage: 1, targetPageSize: pageSize });
+          }}
+        />
+      ) : null}
+
+      {ownerType === "COMPANY" ? (
+        <CompanyMembershipEnrollDrawer
+          open={companyEnrollOpen}
+          onClose={() => setCompanyEnrollOpen(false)}
+          plans={filteredPlans}
           onCreated={async () => {
             await loadData({ targetPage: 1, targetPageSize: pageSize });
           }}
