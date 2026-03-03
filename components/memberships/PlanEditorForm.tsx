@@ -29,6 +29,25 @@ type PlanBenefitInput = {
   notes?: string | null;
 };
 
+type PlanModality = {
+  id: string;
+  code: "INDIVIDUAL" | "DUO" | "FAMILIAR" | "FAMILIAR_PLUS" | "EMPRESARIAL";
+  name: string;
+  segment: "B2C" | "B2B";
+  mappedPlanType: "INDIVIDUAL" | "FAMILIAR" | "EMPRESARIAL";
+  maxDependentsDefault: number;
+  allowDependents: boolean;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+type CatalogDefaults = {
+  currencyDefault: string;
+  benefitWindowDefault: "MENSUAL" | "ANUAL" | "CUSTOM";
+  accumulableDefault: boolean;
+  defaultModalityCode?: PlanModality["code"] | null;
+};
+
 type PlanEditorFormProps = {
   mode: "create" | "edit";
   planId?: string;
@@ -79,19 +98,114 @@ type SelectedBenefit = {
 };
 
 const PRODUCT_META_REGEX = /^\[product:(RECURRENTE|PREPAGO)\]\s*/i;
+const MODALITY_META_REGEX = /^\[modality:([A-Z_]+)\]\s*/i;
 const BENEFIT_META_REGEX = /^\[meta:([^\]]+)\]\s*/i;
 
+const DEFAULT_MODALITIES: PlanModality[] = [
+  {
+    id: "mod-individual",
+    code: "INDIVIDUAL",
+    name: "Individual",
+    segment: "B2C",
+    mappedPlanType: "INDIVIDUAL",
+    maxDependentsDefault: 0,
+    allowDependents: false,
+    isActive: true,
+    sortOrder: 10
+  },
+  {
+    id: "mod-duo",
+    code: "DUO",
+    name: "Dúo",
+    segment: "B2C",
+    mappedPlanType: "FAMILIAR",
+    maxDependentsDefault: 1,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 20
+  },
+  {
+    id: "mod-familiar",
+    code: "FAMILIAR",
+    name: "Familiar",
+    segment: "B2C",
+    mappedPlanType: "FAMILIAR",
+    maxDependentsDefault: 4,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 30
+  },
+  {
+    id: "mod-familiar-plus",
+    code: "FAMILIAR_PLUS",
+    name: "Familiar Plus",
+    segment: "B2C",
+    mappedPlanType: "FAMILIAR",
+    maxDependentsDefault: 6,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 40
+  },
+  {
+    id: "mod-empresarial",
+    code: "EMPRESARIAL",
+    name: "Empresarial",
+    segment: "B2B",
+    mappedPlanType: "EMPRESARIAL",
+    maxDependentsDefault: 50,
+    allowDependents: true,
+    isActive: true,
+    sortOrder: 50
+  }
+];
+
+const DEFAULT_CATALOG_DEFAULTS: CatalogDefaults = {
+  currencyDefault: "GTQ",
+  benefitWindowDefault: "MENSUAL",
+  accumulableDefault: false,
+  defaultModalityCode: "INDIVIDUAL"
+};
+
 function parseProductMeta(description: string | null | undefined) {
-  const raw = String(description || "");
-  const match = raw.match(PRODUCT_META_REGEX);
-  const productModel: ProductModel = match?.[1]?.toUpperCase() === "PREPAGO" ? "PREPAGO" : "RECURRENTE";
-  const cleanDescription = raw.replace(PRODUCT_META_REGEX, "").trim();
-  return { productModel, cleanDescription };
+  const original = String(description || "").trim();
+  let cursor = original;
+  let productModel: ProductModel = "RECURRENTE";
+  let modalityCode: PlanModality["code"] | null = null;
+
+  let keepParsing = true;
+  while (keepParsing) {
+    keepParsing = false;
+
+    const productMatch = cursor.match(PRODUCT_META_REGEX);
+    if (productMatch) {
+      productModel = productMatch[1]?.toUpperCase() === "PREPAGO" ? "PREPAGO" : "RECURRENTE";
+      cursor = cursor.slice(productMatch[0].length).trimStart();
+      keepParsing = true;
+    }
+
+    const modalityMatch = cursor.match(MODALITY_META_REGEX);
+    if (modalityMatch) {
+      const candidate = String(modalityMatch[1] || "").toUpperCase();
+      if (candidate === "INDIVIDUAL" || candidate === "DUO" || candidate === "FAMILIAR" || candidate === "FAMILIAR_PLUS" || candidate === "EMPRESARIAL") {
+        modalityCode = candidate;
+      }
+      cursor = cursor.slice(modalityMatch[0].length).trimStart();
+      keepParsing = true;
+    }
+  }
+
+  return { productModel, modalityCode, cleanDescription: cursor.trim() };
 }
 
-function buildProductDescription(productModel: ProductModel, description: string) {
+function buildProductDescription(productModel: ProductModel, modalityCode: PlanModality["code"], description: string) {
   const clean = description.trim();
-  return `[product:${productModel}]${clean ? ` ${clean}` : ""}`;
+  return `[product:${productModel}][modality:${modalityCode}]${clean ? ` ${clean}` : ""}`;
+}
+
+function modalityByPlanType(type: "INDIVIDUAL" | "FAMILIAR" | "EMPRESARIAL" | undefined): PlanModality["code"] {
+  if (type === "EMPRESARIAL") return "EMPRESARIAL";
+  if (type === "FAMILIAR") return "FAMILIAR";
+  return "INDIVIDUAL";
 }
 
 function parseBenefitMeta(note: string | null | undefined) {
@@ -211,17 +325,22 @@ function toProductTypeDescription(model: ProductModel) {
 export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProps) {
   const router = useRouter();
   const parsedDescription = parseProductMeta(initialData?.description ?? null);
+  const initialModalityCode = parsedDescription.modalityCode || modalityByPlanType(initialData?.type);
 
   const [categories, setCategories] = useState<PlanCategory[]>([]);
+  const [modalities, setModalities] = useState<PlanModality[]>(DEFAULT_MODALITIES);
+  const [catalogDefaults, setCatalogDefaults] = useState<CatalogDefaults>(DEFAULT_CATALOG_DEFAULTS);
   const [benefits, setBenefits] = useState<BenefitCatalog[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [inventoryWarning, setInventoryWarning] = useState<string | null>(null);
+  const [catalogWarning, setCatalogWarning] = useState<string | null>(null);
   const [loadingCatalogs, setLoadingCatalogs] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [canAdmin, setCanAdmin] = useState(false);
+  const [canAdmin, setCanAdmin] = useState(true);
   const [canViewPricing, setCanViewPricing] = useState(false);
   const [hidePricesForOperators, setHidePricesForOperators] = useState(true);
+  const [selectedModalityCode, setSelectedModalityCode] = useState<PlanModality["code"]>(initialModalityCode);
 
   const [benefitSearch, setBenefitSearch] = useState("");
   const [inventorySearch, setInventorySearch] = useState("");
@@ -233,14 +352,13 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
     slug: initialData?.slug ?? "",
     name: initialData?.name ?? "",
     description: parsedDescription.cleanDescription,
-    type: initialData?.type ?? "INDIVIDUAL",
     segment: initialData?.segment ?? "B2C",
     categoryId: initialData?.categoryId ?? "",
     imageUrl: initialData?.imageUrl ?? "",
     active: initialData?.active ?? true,
     priceMonthly: String(initialData?.priceMonthly ?? ""),
     priceAnnual: String(initialData?.priceAnnual ?? ""),
-    currency: initialData?.currency ?? "GTQ",
+    currency: initialData?.currency ?? DEFAULT_CATALOG_DEFAULTS.currencyDefault,
     maxDependents:
       initialData?.maxDependents !== null && initialData?.maxDependents !== undefined
         ? String(initialData.maxDependents)
@@ -271,26 +389,96 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
     (async () => {
       try {
         setLoadingCatalogs(true);
-        const [categoriesRes, benefitsRes, configRes] = await Promise.all([
+        setCatalogWarning(null);
+
+        const requests = await Promise.allSettled([
           fetch("/api/subscriptions/memberships/plan-categories?includeInactive=true", { cache: "no-store" }),
           fetch("/api/subscriptions/memberships/config/benefits?includeInactive=true", { cache: "no-store" }),
-          fetch("/api/subscriptions/memberships/config", { cache: "no-store" })
+          fetch("/api/subscriptions/memberships/config", { cache: "no-store" }),
+          fetch("/api/subscriptions/memberships/config/modalities", { cache: "no-store" }),
+          fetch("/api/subscriptions/memberships/config/defaults", { cache: "no-store" })
         ]);
 
-        const categoriesJson = await categoriesRes.json();
-        const benefitsJson = await benefitsRes.json();
-        const configJson = await configRes.json();
-
-        if (!categoriesRes.ok) throw new Error(categoriesJson?.error || "No se pudo cargar categorías");
-        if (!benefitsRes.ok) throw new Error(benefitsJson?.error || "No se pudo cargar beneficios");
-        if (!configRes.ok) throw new Error(configJson?.error || "No se pudo cargar permisos de pricing");
-
         if (!mounted) return;
-        setCategories(Array.isArray(categoriesJson?.data) ? categoriesJson.data : []);
-        setBenefits(Array.isArray(benefitsJson?.data) ? benefitsJson.data : []);
-        setCanAdmin(Boolean(configJson?.meta?.canAdmin));
-        setCanViewPricing(Boolean(configJson?.meta?.canViewPricing));
-        setHidePricesForOperators(Boolean(configJson?.data?.hidePricesForOperators));
+
+        const warnings: string[] = [];
+
+        const categoriesResult = requests[0];
+        if (categoriesResult.status === "fulfilled") {
+          const categoriesJson = await categoriesResult.value.json().catch(() => ({}));
+          if (categoriesResult.value.ok) {
+            setCategories(Array.isArray((categoriesJson as { data?: PlanCategory[] })?.data) ? (categoriesJson as { data?: PlanCategory[] }).data || [] : []);
+          } else {
+            setCategories([]);
+            warnings.push("No se pudieron cargar categorías. Puedes guardar sin categoría y completar luego.");
+          }
+        } else {
+          setCategories([]);
+          warnings.push("No se pudieron cargar categorías. Puedes guardar sin categoría y completar luego.");
+        }
+
+        const benefitsResult = requests[1];
+        if (benefitsResult.status === "fulfilled") {
+          const benefitsJson = await benefitsResult.value.json().catch(() => ({}));
+          if (benefitsResult.value.ok) {
+            setBenefits(Array.isArray((benefitsJson as { data?: BenefitCatalog[] })?.data) ? (benefitsJson as { data?: BenefitCatalog[] }).data || [] : []);
+          } else {
+            setBenefits([]);
+            warnings.push("No se pudo cargar catálogo de beneficios. Puedes crear el plan y vincular beneficios después.");
+          }
+        } else {
+          setBenefits([]);
+          warnings.push("No se pudo cargar catálogo de beneficios. Puedes crear el plan y vincular beneficios después.");
+        }
+
+        const configResult = requests[2];
+        if (configResult.status === "fulfilled") {
+          const configJson = await configResult.value.json().catch(() => ({}));
+          if (configResult.value.ok) {
+            setCanAdmin(Boolean((configJson as any)?.meta?.canAdmin));
+            setCanViewPricing(Boolean((configJson as any)?.meta?.canViewPricing));
+            setHidePricesForOperators(Boolean((configJson as any)?.data?.hidePricesForOperators));
+          } else {
+            warnings.push("No se pudieron validar permisos con Configuración. Se aplican defaults de edición local.");
+          }
+        } else {
+          warnings.push("No se pudieron validar permisos con Configuración. Se aplican defaults de edición local.");
+        }
+
+        const modalitiesResult = requests[3];
+        if (modalitiesResult.status === "fulfilled") {
+          const modalitiesJson = await modalitiesResult.value.json().catch(() => ({}));
+          if (modalitiesResult.value.ok && Array.isArray((modalitiesJson as { data?: PlanModality[] })?.data) && (modalitiesJson as { data?: PlanModality[] }).data?.length) {
+            setModalities((modalitiesJson as { data?: PlanModality[] }).data || DEFAULT_MODALITIES);
+          } else {
+            setModalities(DEFAULT_MODALITIES);
+            warnings.push("No se pudo cargar catálogo de modalidades. Se usan defaults del módulo.");
+          }
+        } else {
+          setModalities(DEFAULT_MODALITIES);
+          warnings.push("No se pudo cargar catálogo de modalidades. Se usan defaults del módulo.");
+        }
+
+        const defaultsResult = requests[4];
+        if (defaultsResult.status === "fulfilled") {
+          const defaultsJson = await defaultsResult.value.json().catch(() => ({}));
+          if (defaultsResult.value.ok && (defaultsJson as { data?: CatalogDefaults })?.data) {
+            const nextDefaults = (defaultsJson as { data?: CatalogDefaults }).data || DEFAULT_CATALOG_DEFAULTS;
+            setCatalogDefaults(nextDefaults);
+            setForm((prev) => ({
+              ...prev,
+              currency: prev.currency || nextDefaults.currencyDefault || DEFAULT_CATALOG_DEFAULTS.currencyDefault
+            }));
+          } else {
+            setCatalogDefaults(DEFAULT_CATALOG_DEFAULTS);
+          }
+        } else {
+          setCatalogDefaults(DEFAULT_CATALOG_DEFAULTS);
+        }
+
+        if (warnings.length > 0) {
+          setCatalogWarning(warnings.join(" "));
+        }
       } catch (err: any) {
         if (mounted) setError(normalizeSubscriptionsErrorMessage(err?.message, "Error cargando catálogos"));
       } finally {
@@ -357,6 +545,29 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
     [categories, form.segment]
   );
 
+  const availableModalities = useMemo(() => {
+    const scoped = modalities
+      .filter((modality) => modality.segment === form.segment && modality.isActive)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    if (scoped.length > 0) return scoped;
+    return DEFAULT_MODALITIES.filter((modality) => modality.segment === form.segment);
+  }, [modalities, form.segment]);
+
+  const selectedModality = useMemo(
+    () => availableModalities.find((item) => item.code === selectedModalityCode) || availableModalities[0] || null,
+    [availableModalities, selectedModalityCode]
+  );
+
+  useEffect(() => {
+    if (!selectedModality && availableModalities.length > 0) {
+      setSelectedModalityCode(availableModalities[0].code);
+      return;
+    }
+    if (selectedModality && !form.maxDependents) {
+      setForm((prev) => ({ ...prev, maxDependents: String(selectedModality.maxDependentsDefault || 0) }));
+    }
+  }, [availableModalities, selectedModality, form.maxDependents]);
+
   const filteredBenefits = useMemo(() => {
     const term = benefitSearch.trim().toLowerCase();
     return benefits.filter((benefit) => {
@@ -398,27 +609,6 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
     });
   }, [inventoryItems, inventorySearch, inventoryKindFilter, inventoryCategoryFilter]);
 
-  function addBenefit(benefitId: string) {
-    setSelectedBenefits((prev) => {
-      if (prev.some((item) => item.benefitId === benefitId)) return prev;
-      return [
-        ...prev,
-        {
-          benefitId,
-          mode: "CUPO",
-          quantity: "1",
-          discountPercent: "",
-          window: "MENSUAL",
-          windowCustomDays: "",
-          inventoryKind: "",
-          inventoryId: "",
-          inventoryLabel: "",
-          note: ""
-        }
-      ];
-    });
-  }
-
   function toggleBenefitSelection(benefitId: string) {
     setSelectedBenefits((prev) => {
       const exists = prev.some((item) => item.benefitId === benefitId);
@@ -430,7 +620,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
           mode: "CUPO",
           quantity: "1",
           discountPercent: "",
-          window: "MENSUAL",
+          window: catalogDefaults.benefitWindowDefault,
           windowCustomDays: "",
           inventoryKind: "",
           inventoryId: "",
@@ -503,17 +693,25 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       return;
     }
 
+    const persistedType = selectedModality?.mappedPlanType || (form.segment === "B2B" ? "EMPRESARIAL" : "INDIVIDUAL");
+    const resolvedMaxDependents =
+      form.maxDependents !== ""
+        ? Number(form.maxDependents)
+        : selectedModality
+          ? Number(selectedModality.maxDependentsDefault || 0)
+          : null;
+
     const payload: Record<string, unknown> = {
       slug: form.slug || undefined,
       name: form.name,
-      description: buildProductDescription(productModel, form.description),
-      type: form.type,
+      description: buildProductDescription(productModel, selectedModalityCode, form.description),
+      type: persistedType,
       segment: form.segment,
       categoryId: form.categoryId || null,
       imageUrl: form.imageUrl || null,
       active: form.active,
       currency: form.currency,
-      maxDependents: form.maxDependents ? Number(form.maxDependents) : null,
+      maxDependents: resolvedMaxDependents,
       benefits: selectedBenefits.map((benefit) => ({
         benefitId: benefit.benefitId,
         quantity: benefit.mode === "CUPO" ? Number(benefit.quantity || 0) : null,
@@ -550,6 +748,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
   return (
     <form className="space-y-4" onSubmit={handleSubmit}>
       {loadingCatalogs ? <p className="text-xs text-slate-500">Cargando catálogos...</p> : null}
+      {catalogWarning ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">{catalogWarning}</div> : null}
       {!canAdmin ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           Edición restringida: este formulario es solo para perfiles administradores.
@@ -592,12 +791,17 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
               value={form.segment}
               onChange={(event) => {
                 const segment = event.target.value as "B2C" | "B2B";
+                const defaultFromConfig = modalities.find(
+                  (item) => item.isActive && item.segment === segment && item.code === catalogDefaults.defaultModalityCode
+                );
+                const fallbackBySegment = modalities.find((item) => item.isActive && item.segment === segment);
+                const hardFallback = DEFAULT_MODALITIES.find((item) => item.segment === segment);
                 setForm((prev) => ({
                   ...prev,
                   segment,
-                  type: segment === "B2C" ? "INDIVIDUAL" : "EMPRESARIAL",
                   categoryId: ""
                 }));
+                setSelectedModalityCode((defaultFromConfig || fallbackBySegment || hardFallback || DEFAULT_MODALITIES[0]).code);
               }}
             >
               <option value="B2C">B2C</option>
@@ -619,7 +823,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
           </label>
 
           <label className="space-y-1 text-xs text-slate-700">
-            <span className="font-medium">Categoría</span>
+            <span className="font-medium">Categoría (tipo de servicio)</span>
             <select
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
               value={form.categoryId}
@@ -633,24 +837,29 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
                 </option>
               ))}
             </select>
+            {availableCategories.length === 0 ? (
+              <span className="block text-[11px] text-amber-700">
+                No hay categorías activas para {form.segment}. Puedes guardar sin categoría y completarla después desde Configuración.
+              </span>
+            ) : null}
           </label>
 
           <label className="space-y-1 text-xs text-slate-700">
-            <span className="font-medium">Tipo comercial</span>
+            <span className="font-medium">Modalidad</span>
             <select
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              value={form.type}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  type: event.target.value as "INDIVIDUAL" | "FAMILIAR" | "EMPRESARIAL"
-                }))
-              }
+              value={selectedModalityCode}
+              onChange={(event) => setSelectedModalityCode(event.target.value as PlanModality["code"])}
             >
-              <option value="INDIVIDUAL">Individual</option>
-              <option value="FAMILIAR">Familiar</option>
-              <option value="EMPRESARIAL">Empresarial</option>
+              {availableModalities.map((modality) => (
+                <option key={`modality-${modality.id}`} value={modality.code}>
+                  {modality.name}
+                </option>
+              ))}
             </select>
+            <span className="block text-[11px] text-slate-500">
+              Persistencia interna: {selectedModality?.mappedPlanType || "INDIVIDUAL"}.
+            </span>
           </label>
 
           <label className="space-y-1 text-xs text-slate-700 md:col-span-2">
