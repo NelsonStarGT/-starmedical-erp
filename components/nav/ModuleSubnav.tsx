@@ -315,34 +315,31 @@ export default function ModuleSubnav({
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-[#F8FAFC] px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-[#2e75ba]">Navegación de Suscripciones</span>
-                <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
-                  <button
-                    type="button"
-                    onClick={() => updateSubscriptionsMode("operacion")}
-                    className={cn(
-                      "rounded-md px-3 py-1.5 text-xs font-semibold transition",
-                      subscriptionsMode === "operacion"
-                        ? "bg-[#4aa59c] text-white"
-                        : "text-slate-600 hover:bg-[#F8FAFC]"
-                    )}
-                  >
-                    Operación
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => updateSubscriptionsMode("catalogos")}
-                    className={cn(
-                      "rounded-md px-3 py-1.5 text-xs font-semibold transition",
-                      subscriptionsMode === "catalogos"
-                        ? "bg-[#4aa59c] text-white"
-                        : "text-slate-600 hover:bg-[#F8FAFC]"
-                    )}
-                  >
-                    Catálogos
-                  </button>
-                </div>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                <button
+                  type="button"
+                  onClick={() => updateSubscriptionsMode("operacion")}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-xs font-semibold transition",
+                    subscriptionsMode === "operacion"
+                      ? "bg-[#4aa59c] text-white"
+                      : "text-slate-600 hover:bg-[#F8FAFC]"
+                  )}
+                >
+                  Operación
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateSubscriptionsMode("catalogos")}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-xs font-semibold transition",
+                    subscriptionsMode === "catalogos"
+                      ? "bg-[#4aa59c] text-white"
+                      : "text-slate-600 hover:bg-[#F8FAFC]"
+                  )}
+                >
+                  Catálogos
+                </button>
               </div>
 
               <Link
