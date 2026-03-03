@@ -116,6 +116,7 @@ type SelectedBenefit = {
 const PRODUCT_META_REGEX = /^\[product:(RECURRENTE|PREPAGO|GIFT_CARD)\]\s*/i;
 const MODALITY_META_REGEX = /^\[modality:([A-Z_]+)\]\s*/i;
 const BENEFIT_META_REGEX = /^\[meta:([^\]]+)\]\s*/i;
+const INVENTORY_BENEFIT_REF_PREFIX = "INVREF:";
 
 const DEFAULT_MODALITIES: PlanModality[] = [
   {
@@ -306,9 +307,6 @@ function buildBenefitNotes(benefit: SelectedBenefit) {
   if (benefit.inventoryId) {
     parts.push(`k=${benefit.inventoryKind || "SERVICE"}`);
     parts.push(`i=${benefit.inventoryId}`);
-    if (benefit.inventoryLabel) {
-      parts.push(`l=${encodeURIComponent(benefit.inventoryLabel.slice(0, 60))}`);
-    }
   }
 
   const meta = `[meta:${parts.join(";")}]`;
@@ -358,6 +356,23 @@ function mapInventoryKindToServiceType(kind: InventoryKind | "") {
   if (kind === "PRODUCT") return "FARMACIA";
   if (kind === "COMBO") return "OTRO";
   return "CONSULTA";
+}
+
+function buildInventoryBenefitRef(kind: InventoryKind | "", id: string) {
+  if (!kind || !id) return "";
+  return `${INVENTORY_BENEFIT_REF_PREFIX}${kind}:${id}`;
+}
+
+function parseInventoryBenefitRef(iconKey: string | null | undefined): { kind: InventoryKind; id: string } | null {
+  const raw = String(iconKey || "").trim();
+  if (!raw.startsWith(INVENTORY_BENEFIT_REF_PREFIX)) return null;
+  const payload = raw.slice(INVENTORY_BENEFIT_REF_PREFIX.length);
+  const [kindRaw, ...idParts] = payload.split(":");
+  const kind = kindRaw?.toUpperCase();
+  const id = idParts.join(":").trim();
+  if (!id) return null;
+  if (kind !== "SERVICE" && kind !== "PRODUCT" && kind !== "COMBO") return null;
+  return { kind, id };
 }
 
 function buildInventoryBenefitKey(item: InventoryItem) {
@@ -602,6 +617,8 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
               .map((row) => {
                 if (!row || typeof row !== "object") return null;
                 const item = row as Record<string, unknown>;
+                const active = item.active === undefined ? true : Boolean(item.active);
+                if (!active) return null;
                 const typeRaw = String(item.type || "").toUpperCase();
                 const kind: InventoryKind = typeRaw === "PRODUCT" ? "PRODUCT" : typeRaw === "COMBO" ? "COMBO" : "SERVICE";
                 return toInventoryItem(
@@ -610,7 +627,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
                     name: item.name,
                     code: item.code,
                     categoryId: item.categoryId,
-                    categoryName: item.categoryName
+                    categoryName: item.category || item.categoryName
                   },
                   kind
                 );
@@ -637,6 +654,27 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       clearTimeout(timeout);
     };
   }, [inventorySearch, inventoryKindFilter]);
+
+  useEffect(() => {
+    if (benefits.length === 0) return;
+    setSelectedBenefits((prev) => {
+      let changed = false;
+      const next = prev.map((benefit) => {
+        if (benefit.inventoryKind && benefit.inventoryId) return benefit;
+        const catalog = benefits.find((item) => item.id === benefit.benefitId);
+        const parsed = parseInventoryBenefitRef(catalog?.iconKey);
+        if (!parsed) return benefit;
+        changed = true;
+        return {
+          ...benefit,
+          inventoryKind: parsed.kind,
+          inventoryId: parsed.id,
+          inventoryLabel: benefit.inventoryLabel || catalog?.title || ""
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [benefits]);
 
   const shouldHidePricing = hidePricesForOperators && !canViewPricing;
 
@@ -726,9 +764,12 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       if (exists) return prev.filter((benefit) => `${benefit.inventoryKind}:${benefit.inventoryId}` !== key);
 
       const serviceType = mapInventoryKindToServiceType(item.kind);
-      const existingCatalog = benefits.find(
-        (benefit) => benefit.isActive && benefit.serviceType === serviceType && benefit.title.trim().toLowerCase() === item.label.trim().toLowerCase()
-      );
+      const inventoryRef = buildInventoryBenefitRef(item.kind, item.id);
+      const existingCatalog =
+        benefits.find((benefit) => benefit.iconKey === inventoryRef) ||
+        benefits.find(
+          (benefit) => benefit.isActive && benefit.serviceType === serviceType && benefit.title.trim().toLowerCase() === item.label.trim().toLowerCase()
+        );
 
       return [
         ...prev,
@@ -795,15 +836,16 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       return benefit.benefitId;
     }
 
+    const inventoryRef = buildInventoryBenefitRef(benefit.inventoryKind, benefit.inventoryId);
     const title =
       benefit.inventoryLabel.trim() ||
       filteredInventoryItems.find((item) => item.id === benefit.inventoryId && item.kind === benefit.inventoryKind)?.label ||
       benefit.benefitId;
     const serviceType = mapInventoryKindToServiceType(benefit.inventoryKind);
 
-    const existing = benefits.find(
-      (item) => item.serviceType === serviceType && item.title.trim().toLowerCase() === title.trim().toLowerCase()
-    );
+    const existing =
+      (inventoryRef ? benefits.find((item) => item.iconKey === inventoryRef) : null) ||
+      benefits.find((item) => item.serviceType === serviceType && item.title.trim().toLowerCase() === title.trim().toLowerCase());
     if (existing) return existing.id;
 
     const response = await fetch("/api/subscriptions/memberships/config/benefits", {
@@ -812,7 +854,7 @@ export function PlanEditorForm({ mode, planId, initialData }: PlanEditorFormProp
       body: JSON.stringify({
         title: title.slice(0, 160),
         serviceType,
-        iconKey: benefit.inventoryKind || null,
+        iconKey: inventoryRef || benefit.inventoryKind || null,
         sortOrder: 0,
         isActive: true
       })
