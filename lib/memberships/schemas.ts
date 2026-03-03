@@ -147,6 +147,11 @@ export const enrollMembershipSchema = z.object({
   cancelUrl: z.string().trim().url().optional().nullable()
 });
 
+export const bulkAssignDependentsSchema = z.object({
+  personIds: z.array(z.string().trim().min(1)).min(1).max(5000),
+  onlyLinkedToOwnerCompany: z.boolean().default(true)
+});
+
 export const updateContractSchema = z
   .object({
     planId: z.string().trim().min(1).optional(),

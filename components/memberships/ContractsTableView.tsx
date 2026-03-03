@@ -146,6 +146,10 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   const [viewerBranchId, setViewerBranchId] = useState<string | null>(null);
   const [canViewPricing, setCanViewPricing] = useState(false);
   const [hidePricesForOperators, setHidePricesForOperators] = useState(true);
+  const [bulkContractId, setBulkContractId] = useState("");
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkImportBusy, setBulkImportBusy] = useState(false);
+  const [bulkImportSummary, setBulkImportSummary] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     ownerId: "",
     planId: "",
@@ -156,6 +160,10 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
   const filteredPlans = useMemo(() => {
     return plans.filter((plan) => (ownerType === "PERSON" ? plan.segment === "B2C" : plan.segment === "B2B"));
   }, [plans, ownerType]);
+  const companyContracts = useMemo(
+    () => contracts.filter((contract) => contract.ownerType === "COMPANY"),
+    [contracts]
+  );
 
   const totalRows = contracts.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
@@ -332,6 +340,70 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
       setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo renovar afiliación"));
     } finally {
       setRenewBusyId(null);
+    }
+  }
+
+  async function importB2BCollaborators() {
+    if (!bulkContractId) {
+      setError("Selecciona el contrato B2B para vincular colaboradores.");
+      return;
+    }
+    if (!bulkFile) {
+      setError("Selecciona el archivo Excel/CSV de colaboradores.");
+      return;
+    }
+
+    setError(null);
+    setInfoMessage(null);
+    setBulkImportSummary(null);
+    setBulkImportBusy(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("type", "PERSON");
+      formData.append("mode", "process");
+      formData.append("dedupeMode", "skip");
+      formData.append("file", bulkFile);
+
+      const importRes = await fetch("/api/admin/clientes/import/csv", {
+        method: "POST",
+        body: formData
+      });
+      const importJson = await importRes.json();
+      if (!importRes.ok || !importJson?.ok) {
+        throw new Error(importJson?.error || "No se pudo importar colaboradores desde Clientes.");
+      }
+
+      const personIds = Array.isArray(importJson?.personClientIds)
+        ? importJson.personClientIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
+        : [];
+      if (!personIds.length) {
+        setBulkImportSummary("Importación completada sin personas válidas para vincular al contrato.");
+        return;
+      }
+
+      const assignRes = await fetch(`/api/subscriptions/memberships/contracts/${encodeURIComponent(bulkContractId)}/dependents/bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          personIds,
+          onlyLinkedToOwnerCompany: true
+        })
+      });
+      const assignJson = await assignRes.json();
+      if (!assignRes.ok) {
+        throw new Error(assignJson?.error || "No se pudo asociar colaboradores al contrato.");
+      }
+
+      const summary = assignJson?.data || {};
+      setBulkImportSummary(
+        `Importación lista. Solicitadas ${summary.requested ?? personIds.length}, agregadas ${summary.added ?? 0}, ya existentes ${summary.skippedExisting ?? 0}, no vinculadas a empresa ${summary.skippedNotLinked ?? 0}.`
+      );
+      await loadData({ targetPage: safePage, targetPageSize: pageSize });
+    } catch (err: any) {
+      setError(normalizeSubscriptionsErrorMessage(err?.message, "No se pudo completar importación B2B."));
+    } finally {
+      setBulkImportBusy(false);
     }
   }
 
@@ -586,6 +658,73 @@ export function ContractsTableView({ ownerType, title, description }: ContractsT
             </button>
           </div>
         </form>
+      ) : null}
+
+      {ownerType === "COMPANY" ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[#2e75ba]">Paso colaboradores (B2B)</h3>
+              <p className="mt-1 text-[11px] text-slate-600">
+                Reutiliza importación de Clientes para cargar colaboradores y asociarlos al contrato empresarial.
+              </p>
+            </div>
+            <a
+              href="/api/admin/clientes/import/template?type=PERSON&format=xlsx"
+              className="inline-flex h-8 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-[#4aadf5] hover:text-[#2e75ba]"
+            >
+              Plantilla personas
+            </a>
+          </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
+            <label className="space-y-1 text-[11px] text-slate-700 md:col-span-2">
+              <span className="font-semibold">Contrato B2B destino</span>
+              <select
+                value={bulkContractId}
+                onChange={(event) => setBulkContractId(event.target.value)}
+                className="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+              >
+                <option value="">Seleccionar contrato</option>
+                {companyContracts.map((contract) => (
+                  <option key={contract.id} value={contract.id}>
+                    {contract.code} · {contract.owner?.companyName || contract.ClientProfile?.companyName || "Empresa"}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1 text-[11px] text-slate-700 md:col-span-2">
+              <span className="font-semibold">Archivo de colaboradores (CSV/XLSX)</span>
+              <input
+                type="file"
+                accept=".csv,.xlsx"
+                onChange={(event) => setBulkFile(event.target.files?.[0] ?? null)}
+                className="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+              />
+            </label>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-slate-500">
+              Usa columna <code>company_keys</code> para validar vínculo por NIT o CODE.
+            </p>
+            <button
+              type="button"
+              onClick={() => void importB2BCollaborators()}
+              disabled={bulkImportBusy}
+              className="rounded-lg bg-[#4aa59c] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#4aadf5] disabled:opacity-60"
+            >
+              {bulkImportBusy ? "Importando..." : "Importar Excel y vincular"}
+            </button>
+          </div>
+
+          {bulkImportSummary ? (
+            <p className="mt-2 rounded-lg border border-[#4aa59c]/30 bg-[#4aa59c]/10 px-3 py-2 text-xs text-[#2e75ba]">
+              {bulkImportSummary}
+            </p>
+          ) : null}
+        </section>
       ) : null}
 
       {loading ? <p className="text-xs text-slate-500">Cargando afiliaciones...</p> : null}

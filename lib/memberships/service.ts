@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "crypto";
 import {
   MembershipBillingFrequency,
   MembershipOwnerType,
@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import type { SessionUser } from "@/lib/auth";
 import {
   contractCheckoutInitSchema,
+  bulkAssignDependentsSchema,
   createBenefitCatalogSchema,
   createContractSchema,
   createDurationPresetSchema,
@@ -106,6 +107,7 @@ type UpdateCategoryInput = z.infer<typeof updatePlanCategorySchema>;
 type ListContractsInput = z.infer<typeof listContractsQuerySchema>;
 type CreateContractInput = z.infer<typeof createContractSchema>;
 type EnrollMembershipInput = z.infer<typeof enrollMembershipSchema>;
+type BulkAssignDependentsInput = z.infer<typeof bulkAssignDependentsSchema>;
 type UpdateContractInput = z.infer<typeof updateContractSchema>;
 type UpdateContractStatusInput = z.infer<typeof updateContractStatusSchema>;
 type RegisterPaymentInput = z.infer<typeof registerPaymentSchema>;
@@ -930,6 +932,113 @@ export async function createContract(input: CreateContractInput, user: SessionUs
     .catch(() => null);
 
   return serializeContract(created);
+}
+
+export async function bulkAssignContractDependents(contractId: string, rawInput: BulkAssignDependentsInput, user: SessionUser | null) {
+  const input = bulkAssignDependentsSchema.parse(rawInput);
+  const contract = await prisma.membershipContract.findUnique({
+    where: { id: contractId },
+    select: {
+      id: true,
+      ownerType: true,
+      ownerId: true,
+      allowDependents: true,
+      assignedBranchId: true
+    }
+  });
+  if (!contract) throw new MembershipError("Contrato no encontrado", 404);
+  ensureSameBranchOrAdmin(user, contract);
+
+  if (contract.ownerType !== MembershipOwnerType.COMPANY || !contract.ownerId) {
+    throw new MembershipError("El contrato seleccionado no es B2B por empresa", 400);
+  }
+  if (!contract.allowDependents) {
+    throw new MembershipError("El contrato no permite dependientes", 409);
+  }
+
+  const ownerCompany = await prisma.clientProfile.findUnique({
+    where: { id: contract.ownerId },
+    select: {
+      id: true,
+      tenantId: true,
+      type: true,
+      deletedAt: true
+    }
+  });
+  if (!ownerCompany || ownerCompany.deletedAt || ownerCompany.type !== ClientProfileType.COMPANY) {
+    throw new MembershipError("Empresa titular inválida para contrato B2B", 409);
+  }
+
+  const requestedIds = Array.from(new Set(input.personIds.map((id) => String(id || "").trim()).filter(Boolean)));
+  if (!requestedIds.length) {
+    throw new MembershipError("No se recibieron personas para vincular", 400);
+  }
+
+  const eligiblePersons = await prisma.clientProfile.findMany({
+    where: {
+      id: { in: requestedIds },
+      type: ClientProfileType.PERSON,
+      tenantId: ownerCompany.tenantId,
+      deletedAt: null
+    },
+    select: { id: true }
+  });
+  const eligibleIds = eligiblePersons.map((row) => row.id);
+
+  const allowedByLinkIds = input.onlyLinkedToOwnerCompany
+    ? (
+        await prisma.personCompanyLink.findMany({
+          where: {
+            tenantId: ownerCompany.tenantId,
+            companyId: ownerCompany.id,
+            personId: { in: eligibleIds },
+            isActive: true,
+            deletedAt: null
+          },
+          select: { personId: true }
+        })
+      ).map((row) => row.personId)
+    : eligibleIds;
+  const allowedSet = new Set(allowedByLinkIds);
+  const filteredIds = eligibleIds.filter((id) => allowedSet.has(id));
+
+  const existingDependents = await prisma.membershipDependent.findMany({
+    where: {
+      contractId,
+      personId: { in: filteredIds }
+    },
+    select: { personId: true }
+  });
+  const existingSet = new Set(existingDependents.map((row) => row.personId).filter(Boolean));
+  const toCreate = filteredIds.filter((id) => !existingSet.has(id));
+
+  if (toCreate.length) {
+    const timestamp = now();
+    await prisma.$transaction(
+      toCreate.map((personId) =>
+        prisma.membershipDependent.create({
+          data: {
+            id: randomUUID(),
+            contractId,
+            personId,
+            relationType: "COLABORADOR",
+            active: true,
+            createdAt: timestamp
+          }
+        })
+      )
+    );
+  }
+
+  return {
+    requested: requestedIds.length,
+    eligible: eligibleIds.length,
+    linkedToCompany: filteredIds.length,
+    added: toCreate.length,
+    skippedExisting: filteredIds.length - toCreate.length,
+    skippedOutOfScope: requestedIds.length - eligibleIds.length,
+    skippedNotLinked: input.onlyLinkedToOwnerCompany ? eligibleIds.length - filteredIds.length : 0
+  };
 }
 
 export async function enrollMembership(input: EnrollMembershipInput, user: SessionUser | null) {
