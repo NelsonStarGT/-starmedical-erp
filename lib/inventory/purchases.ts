@@ -11,12 +11,18 @@ type OrderWithItems = Prisma.PurchaseOrderGetPayload<{
 
 const CODE_PADDING = 6;
 
-export async function generateSequentialCode(kind: "request" | "order") {
+export async function generateSequentialCode(kind: "request" | "order", tenantId: string) {
   const prefix = kind === "request" ? "PR" : "PO";
   const latest =
     kind === "request"
-      ? await prisma.purchaseRequest.findFirst({ orderBy: { code: "desc" } })
-      : await prisma.purchaseOrder.findFirst({ orderBy: { code: "desc" } });
+      ? await prisma.purchaseRequest.findFirst({
+          where: { tenantId, deletedAt: null },
+          orderBy: { code: "desc" }
+        })
+      : await prisma.purchaseOrder.findFirst({
+          where: { tenantId, deletedAt: null },
+          orderBy: { code: "desc" }
+        });
   const lastNum = parseCodeNumber(latest?.code, prefix);
   const next = lastNum + 1;
   return `${prefix}-${String(next).padStart(CODE_PADDING, "0")}`;

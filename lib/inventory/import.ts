@@ -17,6 +17,7 @@ type ImportResult = {
 type ImportOptions = {
   preview?: boolean;
   branchId?: string;
+  tenantId: string;
   userId: string;
 };
 
@@ -49,9 +50,10 @@ export async function buildTemplate(kind: ImportKind) {
 }
 
 export async function processImport(kind: ImportKind, file: Buffer, opts: ImportOptions): Promise<ImportResult> {
+  const tenantId = opts.tenantId;
   const imported = await importExcelViaProcessingService({
     context: {
-      tenantId: process.env.DEFAULT_TENANT_ID || "global",
+      tenantId,
       actorId: opts.userId || "inventory-import"
     },
     fileBuffer: Buffer.isBuffer(file) ? file : Buffer.from(file),
@@ -82,18 +84,27 @@ export async function processImport(kind: ImportKind, file: Buffer, opts: Import
         row.slice(1, 13);
       if (!codigo || !nombre || !catSlug) continue;
       try {
-        const category = await prisma.productCategory.findUnique({ where: { slug: String(catSlug) } });
+        const category = await prisma.productCategory.findFirst({
+          where: { tenantId, deletedAt: null, slug: String(catSlug) }
+        });
         if (!category) throw new Error("Categoría no encontrada");
         if (!active((category as any).status)) throw new Error("Categoría inactiva");
-        const subcategory = subSlug ? await prisma.productSubcategory.findUnique({ where: { slug: String(subSlug) } }) : null;
+        const subcategory = subSlug
+          ? await prisma.productSubcategory.findFirst({
+              where: { tenantId, deletedAt: null, slug: String(subSlug) }
+            })
+          : null;
         if (subSlug && !subcategory) throw new Error("Subcategoría no encontrada");
         if (subcategory && subcategory.categoryId !== category.id) throw new Error("Subcategoría no pertenece a la categoría");
         if (subcategory && !active((subcategory as any).status)) throw new Error("Subcategoría inactiva");
-        const area = areaSlug ? await prisma.inventoryArea.findUnique({ where: { slug: String(areaSlug) } }) : null;
+        const area = areaSlug
+          ? await prisma.inventoryArea.findFirst({ where: { tenantId, deletedAt: null, slug: String(areaSlug) } })
+          : null;
         if (proveedor && !allowedProviders.includes(String(proveedor))) throw new Error("Proveedor no válido");
         if (unidad && !allowedUnits.includes(String(unidad))) throw new Error("Unidad no válida");
-        const existing = await prisma.product.findUnique({ where: { code: String(codigo) } });
+        const existing = await prisma.product.findFirst({ where: { tenantId, deletedAt: null, code: String(codigo) } });
         const data: Prisma.ProductCreateInput = {
+          tenantId,
           code: String(codigo),
           name: String(nombre),
           category: { connect: { id: category.id } },
@@ -106,7 +117,8 @@ export async function processImport(kind: ImportKind, file: Buffer, opts: Import
           avgCost: Number(avgCost ?? 0),
           status: (estado as string) || "Activo",
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
+          deletedAt: null
         };
         if (presentacion) (data as any).presentation = String(presentacion);
         if (existing) {
@@ -142,21 +154,25 @@ export async function processImport(kind: ImportKind, file: Buffer, opts: Import
       const [codigo, sucursal, stock, minStock] = row.slice(1, 5);
       if (!codigo) continue;
       try {
-        const product = await prisma.product.findUnique({ where: { code: String(codigo) } });
+        const product = await prisma.product.findFirst({ where: { tenantId, deletedAt: null, code: String(codigo) } });
         if (!product) throw new Error("Producto no encontrado");
         const branch = String(sucursal || branchId);
         if (!allowedBranches.includes(branch)) throw new Error("Sucursal no válida");
         const desired = Number(stock ?? 0);
         const min = Number(minStock ?? 0);
         const current = await prisma.productStock.upsert({
-          where: { productId_branchId: { productId: product.id, branchId: branch } },
-          create: { productId: product.id, branchId: branch, stock: 0, minStock: min },
-          update: {}
+          where: { tenantId_productId_branchId: { tenantId, productId: product.id, branchId: branch } },
+          create: { tenantId, productId: product.id, branchId: branch, stock: 0, minStock: min, deletedAt: null },
+          update: { deletedAt: null }
         });
         const delta = desired - current.stock;
         if (!opts.preview) {
-          await prisma.productStock.update({ where: { productId_branchId: { productId: product.id, branchId: branch } }, data: { stock: desired, minStock: min } });
+          await prisma.productStock.update({
+            where: { tenantId_productId_branchId: { tenantId, productId: product.id, branchId: branch } },
+            data: { stock: desired, minStock: min, deletedAt: null }
+          });
           await registerInventoryMovement({
+            tenantId,
             productId: product.id,
             branchId: branch,
             type: MovementType.ADJUSTMENT,
@@ -181,10 +197,11 @@ export async function processImport(kind: ImportKind, file: Buffer, opts: Import
       const [codigo, precio] = row.slice(1, 3);
       if (!codigo || precio === undefined || precio === null) continue;
       try {
-        const product = await prisma.product.findUnique({ where: { code: String(codigo) } });
+        const product = await prisma.product.findFirst({ where: { tenantId, deletedAt: null, code: String(codigo) } });
         if (!product) throw new Error("Producto no encontrado");
         if (!opts.preview) {
           await registerInventoryMovement({
+            tenantId,
             productId: product.id,
             branchId: branchId,
             type: MovementType.PRICE_UPDATE,
@@ -208,13 +225,14 @@ export async function processImport(kind: ImportKind, file: Buffer, opts: Import
       const [codigo, costo, cantidad, sucursal] = row.slice(1, 5);
       if (!codigo || costo === undefined || costo === null) continue;
       try {
-        const product = await prisma.product.findUnique({ where: { code: String(codigo) } });
+        const product = await prisma.product.findFirst({ where: { tenantId, deletedAt: null, code: String(codigo) } });
         if (!product) throw new Error("Producto no encontrado");
         const branch = String(sucursal || branchId);
         if (!allowedBranches.includes(branch)) throw new Error("Sucursal no válida");
         const qty = cantidad ? Number(cantidad) : null;
         if (!opts.preview) {
           await registerInventoryMovement({
+            tenantId,
             productId: product.id,
             branchId: branch,
             type: qty && qty > 0 ? MovementType.ENTRY : MovementType.COST_UPDATE,
@@ -239,22 +257,30 @@ export async function processImport(kind: ImportKind, file: Buffer, opts: Import
       const [codigo, nombre, catSlug, subSlug, precio, duracionMin, estado] = row.slice(1, 8);
       if (!codigo || !nombre || !catSlug) continue;
       try {
-        const category = await prisma.serviceCategory.findUnique({ where: { slug: String(catSlug) } });
+        const category = await prisma.serviceCategory.findFirst({
+          where: { tenantId, deletedAt: null, slug: String(catSlug) }
+        });
         if (!category) throw new Error("Categoría no encontrada");
         if (!active((category as any).status)) throw new Error("Categoría inactiva");
-        const subcategory = subSlug ? await prisma.serviceSubcategory.findUnique({ where: { slug: String(subSlug) } }) : null;
+        const subcategory = subSlug
+          ? await prisma.serviceSubcategory.findFirst({
+              where: { tenantId, deletedAt: null, slug: String(subSlug) }
+            })
+          : null;
         if (subSlug && !subcategory) throw new Error("Subcategoría no encontrada");
         if (subcategory && subcategory.categoryId !== category.id) throw new Error("Subcategoría no pertenece a la categoría");
         if (subcategory && !active((subcategory as any).status)) throw new Error("Subcategoría inactiva");
-        const existing = await prisma.service.findUnique({ where: { code: String(codigo) } });
+        const existing = await prisma.service.findFirst({ where: { tenantId, deletedAt: null, code: String(codigo) } });
         const data: Prisma.ServiceCreateInput = {
+          tenantId,
           code: String(codigo),
           name: String(nombre),
           category: { connect: { id: category.id } },
           subcategory: subcategory ? { connect: { id: subcategory.id } } : undefined,
           price: Number(precio ?? 0),
           durationMin: Number(duracionMin ?? 0),
-          status: (estado as string) || "Activo"
+          status: (estado as string) || "Activo",
+          deletedAt: null
         };
         if (existing) {
           if (!opts.preview) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireRoles } from "@/lib/api/auth";
-import { runInventoryQA } from "@/lib/inventory/qa";
+import { requireRoles } from "@/lib/inventory/auth";
+import { resolveInventoryScope } from "@/lib/inventory/scope";
+import { runInventoryQAForTenant } from "@/lib/inventory/qa";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +11,11 @@ export async function GET(req: NextRequest) {
   }
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
 
   try {
-    const result = await runInventoryQA(new Date());
+    const result = await runInventoryQAForTenant(scope.tenantId, new Date());
     return NextResponse.json(result);
   } catch (err) {
     console.error(err);

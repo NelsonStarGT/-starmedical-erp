@@ -2,17 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { MovementType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { registerInventoryMovement } from "@/lib/inventory/movements";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { hasPermission } from "@/lib/types/inventario";
 
 export async function GET(req: NextRequest) {
   try {
     const auth = requireRoles(req, ["Administrador", "Operador", "Recepcion"]);
     if (auth.errorResponse) return auth.errorResponse;
+    const { scope, errorResponse } = resolveInventoryScope(req);
+    if (errorResponse || !scope) return errorResponse;
 
     const searchParams = req.nextUrl.searchParams;
     const productId = searchParams.get("productId") || undefined;
-    const branchId = searchParams.get("branchId") || undefined;
+    const branchIdParam = searchParams.get("branchId") || undefined;
+    if (scope.branchId && branchIdParam && branchIdParam !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
+    const branchId = scope.branchId || branchIdParam;
     const type = searchParams.get("type") || undefined;
     const user = searchParams.get("createdById") || undefined;
     const from = searchParams.get("dateFrom") ? new Date(searchParams.get("dateFrom") as string) : undefined;
@@ -28,9 +35,9 @@ export async function GET(req: NextRequest) {
     if (from || to) where.createdAt = { gte: from, lte: to };
 
     const [total, data] = await Promise.all([
-      prisma.inventoryMovement.count({ where }),
+      prisma.inventoryMovement.count({ where: inventoryWhere(scope, where, { branchScoped: true }) }),
       prisma.inventoryMovement.findMany({
-        where,
+        where: inventoryWhere(scope, where, { branchScoped: true }),
         include: { product: true },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,
@@ -57,11 +64,16 @@ export async function POST(req: NextRequest) {
   try {
     const auth = requireRoles(req, ["Administrador", "Operador"]);
     if (auth.errorResponse) return auth.errorResponse;
+    const { scope, errorResponse } = resolveInventoryScope(req);
+    if (errorResponse || !scope) return errorResponse;
     const role = auth.role as any;
     const body = await req.json();
     const { productId, branchId, type, quantity, unitCost, salePrice, reference, reason, createdById } = body;
     if (!productId || !branchId || !type || !createdById) {
       return NextResponse.json({ error: "productId, branchId, type y createdById son requeridos" }, { status: 400 });
+    }
+    if (scope.branchId && scope.branchId !== branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
     }
     const movementType = type as MovementType;
 
@@ -75,6 +87,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Motivo requerido para este tipo de movimiento" }, { status: 400 });
     }
     const result = await registerInventoryMovement({
+      tenantId: scope.tenantId,
       productId,
       branchId,
       type: movementType,

@@ -2,7 +2,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { prisma } from "@/lib/prisma";
 import { exportExcelViaProcessingService } from "@/lib/processing-service/excel";
 
-type Params = { dateFrom: Date; dateTo: Date; branchId?: string | null };
+type Params = { tenantId: string; dateFrom: Date; dateTo: Date; branchId?: string | null };
 
 export type CierreSatRow = {
   productId: string;
@@ -19,11 +19,13 @@ export type CierreSatRow = {
   valorFinal?: number;
 };
 
-export async function calculateCierreSat({ dateFrom, dateTo, branchId }: Params) {
+export async function calculateCierreSat({ tenantId, dateFrom, dateTo, branchId }: Params) {
   const start = startOfDay(dateFrom);
   const end = endOfDay(dateTo);
 
   const baseWhere: any = {
+    tenantId,
+    deletedAt: null,
     createdAt: { lt: end }
   };
   if (branchId) baseWhere.branchId = branchId;
@@ -47,7 +49,7 @@ export async function calculateCierreSat({ dateFrom, dateTo, branchId }: Params)
   }
 
   const products = await prisma.product.findMany({
-    where: { id: { in: Array.from(productIds) } },
+    where: { tenantId, deletedAt: null, id: { in: Array.from(productIds) } },
     select: { id: true, name: true, code: true, unit: true, avgCost: true }
   });
   const productMap = new Map(products.map((p) => [p.id, p]));
@@ -115,7 +117,7 @@ export async function generateCierreSatXlsx(params: Params) {
   ]);
   const { buffer } = await exportExcelViaProcessingService({
     context: {
-      tenantId: process.env.DEFAULT_TENANT_ID || "global",
+      tenantId: params.tenantId,
       actorId: "inventory-cierre-sat"
     },
     fileName: "cierre-sat.xlsx",

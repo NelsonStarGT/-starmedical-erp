@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MovementType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { resolveInventoryScope } from "@/lib/inventory/scope";
 import { generateMovementsPdf } from "@/lib/inventory/movementsReport";
 import { sendMail } from "@/lib/email/mailer";
 import { parseRecipients } from "@/lib/inventory/reportSchedule";
@@ -12,12 +13,19 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const body = await req.json();
-    const { dateFrom, dateTo, branchId, type, productId, createdById } = body;
+    const { dateFrom, dateTo, branchId: branchIdParam, type, productId, createdById } = body;
     if (!dateFrom || !dateTo) return NextResponse.json({ error: "dateFrom y dateTo requeridos" }, { status: 400 });
+    if (scope.branchId && branchIdParam && branchIdParam !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
+    const branchId = scope.branchId || branchIdParam;
 
     const pdf = await generateMovementsPdf({
+      tenantId: scope.tenantId,
       dateFrom: new Date(dateFrom),
       dateTo: new Date(dateTo),
       branchId: branchId || undefined,
@@ -27,7 +35,7 @@ export async function POST(req: NextRequest) {
       generatedBy: auth.role || undefined
     });
 
-    const recipients = await resolveRecipients();
+    const recipients = await resolveRecipients(scope.tenantId);
     if (recipients.length === 0) return NextResponse.json({ error: "No hay destinatarios configurados" }, { status: 400 });
 
     const subject = `StarMedical - Reporte Movimientos Inventario (${dateFrom} a ${dateTo})`;
@@ -48,15 +56,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function resolveRecipients() {
+async function resolveRecipients(tenantId: string) {
   const scheduleRecipients = await prisma.inventoryEmailSchedule.findMany({
-    where: { isEnabled: true, reportType: "MOVIMIENTOS" }
+    where: { tenantId, deletedAt: null, isEnabled: true, reportType: "MOVIMIENTOS" }
   });
   const settings = await prisma.inventoryEmailSetting.findMany({
-    where: { isEnabled: true, reportType: "MOVIMIENTOS" }
+    where: { tenantId, deletedAt: null, isEnabled: true, reportType: "MOVIMIENTOS" }
   });
   const fallback = await prisma.inventoryEmailSetting.findMany({
-    where: { isEnabled: true, reportType: "KARDEX" }
+    where: { tenantId, deletedAt: null, isEnabled: true, reportType: "KARDEX" }
   });
   const emails: string[] = [];
   scheduleRecipients.forEach((s) => parseRecipients(s).forEach((email) => emails.push(email)));

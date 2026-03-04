@@ -5,11 +5,14 @@ import { exportExcelViaProcessingService } from "@/lib/processing-service/excel"
 type KardexParams = {
   dateFrom: Date;
   dateTo: Date;
+  tenantId: string;
   branchId?: string;
 };
 
-export async function generateKardexXlsx({ dateFrom, dateTo, branchId }: KardexParams) {
+export async function generateKardexXlsx({ dateFrom, dateTo, tenantId, branchId }: KardexParams) {
   const where: any = {
+    tenantId,
+    deletedAt: null,
     createdAt: {
       gte: dateFrom,
       lte: dateTo
@@ -58,7 +61,7 @@ export async function generateKardexXlsx({ dateFrom, dateTo, branchId }: KardexP
 
   const { buffer } = await exportExcelViaProcessingService({
     context: {
-      tenantId: process.env.DEFAULT_TENANT_ID || "global",
+      tenantId,
       actorId: "inventory-report"
     },
     fileName: "kardex.xlsx",

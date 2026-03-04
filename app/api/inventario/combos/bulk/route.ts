@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePermission, roleFromRequest } from "@/lib/api/auth";
+import { requirePermission, roleFromAuthenticatedRequest } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 
 export const runtime = "nodejs";
 
@@ -14,21 +15,23 @@ type Payload = {
 export async function POST(req: NextRequest) {
   const perm = requirePermission(req, "editar_combo");
   if (perm) return perm;
-  const role = roleFromRequest(req);
+  const { scope: inventoryScope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !inventoryScope) return errorResponse;
+  const role = roleFromAuthenticatedRequest(req);
   const isAdmin = role === "Administrador";
 
   try {
     const body = (await req.json()) as Payload;
-    const { mode, scope, ids = [], filters } = body || {};
-    if (!mode || !scope) return NextResponse.json({ error: "Parámetros incompletos" }, { status: 400 });
+    const { mode, scope: targetScope, ids = [], filters } = body || {};
+    if (!mode || !targetScope) return NextResponse.json({ error: "Parámetros incompletos" }, { status: 400 });
 
     let targetIds: string[] = ids;
-    if (scope === "filtered") {
+    if (targetScope === "filtered") {
       const combos = await prisma.combo.findMany({
-        where: {
+        where: inventoryWhere(inventoryScope, {
           status: filters?.status || undefined,
           name: filters?.search ? { contains: filters.search, mode: "insensitive" } : undefined
-        },
+        }),
         select: { id: true }
       });
       targetIds = combos.map((c) => c.id);
@@ -42,7 +45,10 @@ export async function POST(req: NextRequest) {
 
     for (const id of targetIds) {
       if (mode === "deactivate") {
-        await prisma.combo.update({ where: { id }, data: { status: "Inactivo" } });
+        await prisma.combo.updateMany({
+          where: inventoryWhere(inventoryScope, { id }),
+          data: { status: "Inactivo" }
+        });
         processed += 1;
         deactivated += 1;
         continue;
@@ -52,12 +58,17 @@ export async function POST(req: NextRequest) {
           skipped.push({ id, reason: "Solo Admin puede eliminar" });
           continue;
         }
-        const priceListUsage = await prisma.priceListItem.count({ where: { itemType: "COMBO", itemId: id } });
+        const priceListUsage = await prisma.priceListItem.count({
+          where: inventoryWhere(inventoryScope, { itemType: "COMBO", itemId: id })
+        });
         if (priceListUsage > 0) {
           skipped.push({ id, reason: "Tiene precios asociados" });
           continue;
         }
-        await prisma.combo.delete({ where: { id } });
+        await prisma.combo.updateMany({
+          where: inventoryWhere(inventoryScope, { id }),
+          data: { deletedAt: new Date(), status: "Inactivo" }
+        });
         processed += 1;
         deleted += 1;
       }

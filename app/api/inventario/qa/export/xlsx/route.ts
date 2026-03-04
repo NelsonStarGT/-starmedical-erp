@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireRoles } from "@/lib/api/auth";
-import { qaToWorkbook, runInventoryQA } from "@/lib/inventory/qa";
+import { requireRoles } from "@/lib/inventory/auth";
+import { resolveInventoryScope } from "@/lib/inventory/scope";
+import { qaToWorkbook, runInventoryQAForTenant } from "@/lib/inventory/qa";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,10 +12,12 @@ export async function GET(req: NextRequest) {
   }
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
 
   try {
-    const { findings } = await runInventoryQA(new Date());
-    const buffer = await qaToWorkbook(findings);
+    const { findings } = await runInventoryQAForTenant(scope.tenantId, new Date());
+    const buffer = await qaToWorkbook(findings, scope.tenantId);
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {

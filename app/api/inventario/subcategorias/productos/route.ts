@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePermission } from "@/lib/api/auth";
+import { requirePermission, requireRoles } from "@/lib/inventory/auth";
+import { inventoryCreateData, inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
+  const auth = requireRoles(req, ["Administrador", "Operador", "Recepcion"]);
+  if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
+
   const categoryId = req.nextUrl.searchParams.get("categoryId") || undefined;
   const items = await prisma.productSubcategory.findMany({
-    where: categoryId ? { categoryId } : undefined,
+    where: inventoryWhere(scope, categoryId ? { categoryId } : {}),
     orderBy: { order: "asc" }
   });
   return NextResponse.json({ data: items });
@@ -16,12 +22,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const perm = requirePermission(req, "editar_config");
   if (perm) return perm;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const body = await req.json();
     const { categoryId, name, slug, order = 0, status = "Activo" } = body || {};
     if (!categoryId || !name || !slug) return NextResponse.json({ error: "Faltan campos requeridos" }, { status: 400 });
     const created = await prisma.productSubcategory.create({
-      data: { categoryId, name, slug, order, status }
+      data: inventoryCreateData(scope, { categoryId, name, slug, order, status })
     });
     return NextResponse.json({ data: created }, { status: 201 });
   } catch (err: any) {

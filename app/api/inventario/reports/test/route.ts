@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { InventoryReportType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { sendMail } from "@/lib/email/mailer";
 import { generateKardexXlsx } from "@/lib/inventory/reports";
 import { generateMovementsPdf } from "@/lib/inventory/movementsReport";
@@ -14,6 +15,8 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -21,16 +24,21 @@ export async function POST(req: NextRequest) {
     const scheduleId = body.scheduleId as string | undefined;
 
     const schedule = scheduleId
-      ? await prisma.inventoryEmailSchedule.findUnique({ where: { id: scheduleId } })
+      ? await prisma.inventoryEmailSchedule.findFirst({
+          where: inventoryWhere(scope, { id: scheduleId }, { branchScoped: true })
+        })
       : null;
 
     const setting =
       schedule ||
       (await prisma.inventoryEmailSetting.findFirst({
-        where: { isEnabled: true, ...(requestedType ? { reportType: requestedType } : {}) },
+        where: inventoryWhere(scope, { isEnabled: true, ...(requestedType ? { reportType: requestedType } : {}) }),
         orderBy: { createdAt: "asc" }
       })) ||
-      (await prisma.inventoryEmailSetting.findFirst({ where: { isEnabled: true }, orderBy: { createdAt: "asc" } }));
+      (await prisma.inventoryEmailSetting.findFirst({
+        where: inventoryWhere(scope, { isEnabled: true }),
+        orderBy: { createdAt: "asc" }
+      }));
 
     if (!setting) return NextResponse.json({ error: "No hay configuración creada" }, { status: 400 });
 
@@ -38,7 +46,10 @@ export async function POST(req: NextRequest) {
     if (recipients.length === 0) return NextResponse.json({ error: "No hay destinatarios configurados" }, { status: 400 });
 
     const reportType = (requestedType || (setting.reportType as InventoryReportType) || "KARDEX") as InventoryReportType;
-    const branchId = body.branchId ?? (setting as any).branchId ?? null;
+    const branchId = scope.branchId || body.branchId || (setting as any).branchId || null;
+    if (scope.branchId && body.branchId && body.branchId !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
 
     const dateFrom = body.dateFrom ? new Date(body.dateFrom) : null;
     const dateTo = body.dateTo ? new Date(body.dateTo) : null;
@@ -48,6 +59,7 @@ export async function POST(req: NextRequest) {
       : computeRangeForSetting(setting, new Date());
 
     const attachment = await buildAttachment(reportType, {
+      tenantId: scope.tenantId,
       dateFrom: range.dateFrom,
       dateTo: range.dateTo,
       branchId
@@ -87,10 +99,11 @@ export async function POST(req: NextRequest) {
 
 async function buildAttachment(
   type: InventoryReportType,
-  params: { dateFrom: Date; dateTo: Date; branchId?: string | null }
+  params: { tenantId: string; dateFrom: Date; dateTo: Date; branchId?: string | null }
 ) {
   if (type === "MOVIMIENTOS") {
     const pdf = await generateMovementsPdf({
+      tenantId: params.tenantId,
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
       branchId: params.branchId || undefined
@@ -103,6 +116,7 @@ async function buildAttachment(
   }
   if (type === "CIERRE_SAT") {
     const pdf = await generateCierreSatPdf({
+      tenantId: params.tenantId,
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
       branchId: params.branchId || undefined
@@ -114,6 +128,7 @@ async function buildAttachment(
     };
   }
   const buffer = await generateKardexXlsx({
+    tenantId: params.tenantId,
     dateFrom: params.dateFrom,
     dateTo: params.dateTo,
     branchId: params.branchId || undefined

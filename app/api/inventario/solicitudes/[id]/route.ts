@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PurchaseRequestStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { mapPurchaseRequest } from "@/lib/inventory/purchases";
 
 export const dynamic = "force-dynamic";
@@ -9,10 +10,15 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const auth = requireRoles(req, ["Administrador", "Operador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
-    const data = await prisma.purchaseRequest.findUnique({
-      where: { id: params.id },
-      include: { items: { include: { product: true } }, orders: true }
+    const data = await prisma.purchaseRequest.findFirst({
+      where: inventoryWhere(scope, { id: params.id }, { branchScoped: true }),
+      include: {
+        items: { where: inventoryWhere(scope, {}), include: { product: true } },
+        orders: { where: inventoryWhere(scope, {}) }
+      }
     });
     if (!data) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
     return NextResponse.json({ data: mapPurchaseRequest(data) });
@@ -25,13 +31,18 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const auth = requireRoles(req, ["Administrador", "Operador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   const role = auth.role;
   try {
     const body = await req.json();
     const action = body.action || "update";
-    const request = await prisma.purchaseRequest.findUnique({
-      where: { id: params.id },
-      include: { items: true, orders: true }
+    const request = await prisma.purchaseRequest.findFirst({
+      where: inventoryWhere(scope, { id: params.id }, { branchScoped: true }),
+      include: {
+        items: { where: inventoryWhere(scope, {}) },
+        orders: { where: inventoryWhere(scope, {}) }
+      }
     });
     if (!request) return NextResponse.json({ error: "Solicitud no encontrada" }, { status: 404 });
 
@@ -43,7 +54,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         return NextResponse.json({ error: "Agrega al menos un producto" }, { status: 400 });
       }
       const updated = await prisma.$transaction(async (tx) => {
-        await tx.purchaseRequestItem.deleteMany({ where: { purchaseRequestId: request.id } });
+        await tx.purchaseRequestItem.deleteMany({ where: inventoryWhere(scope, { purchaseRequestId: request.id }) });
         return tx.purchaseRequest.update({
           where: { id: request.id },
           data: {
@@ -51,6 +62,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
             notes: body.notes || null,
             items: {
               create: body.items.map((it: any) => ({
+                tenantId: scope.tenantId,
                 productId: it.productId,
                 quantity: Number(it.quantity || 0),
                 unitId: it.unitId || null,
@@ -59,7 +71,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
               }))
             }
           },
-          include: { items: { include: { product: true } }, orders: true }
+          include: {
+            items: { where: inventoryWhere(scope, {}), include: { product: true } },
+            orders: { where: inventoryWhere(scope, {}) }
+          }
         });
       });
       return NextResponse.json({ data: mapPurchaseRequest(updated) });
@@ -73,7 +88,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const updated = await prisma.purchaseRequest.update({
         where: { id: request.id },
         data: { status: "SUBMITTED" },
-        include: { items: { include: { product: true } }, orders: true }
+        include: {
+          items: { where: inventoryWhere(scope, {}), include: { product: true } },
+          orders: { where: inventoryWhere(scope, {}) }
+        }
       });
       return NextResponse.json({ data: mapPurchaseRequest(updated) });
     }
@@ -84,7 +102,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const updated = await prisma.purchaseRequest.update({
         where: { id: request.id },
         data: { status: "APPROVED" },
-        include: { items: { include: { product: true } }, orders: true }
+        include: {
+          items: { where: inventoryWhere(scope, {}), include: { product: true } },
+          orders: { where: inventoryWhere(scope, {}) }
+        }
       });
       return NextResponse.json({ data: mapPurchaseRequest(updated) });
     }
@@ -95,7 +116,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const updated = await prisma.purchaseRequest.update({
         where: { id: request.id },
         data: { status: "REJECTED", notes: body.notes || request.notes },
-        include: { items: { include: { product: true } }, orders: true }
+        include: {
+          items: { where: inventoryWhere(scope, {}), include: { product: true } },
+          orders: { where: inventoryWhere(scope, {}) }
+        }
       });
       return NextResponse.json({ data: mapPurchaseRequest(updated) });
     }
@@ -109,7 +133,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const updated = await prisma.purchaseRequest.update({
         where: { id: request.id },
         data: { status: "CANCELLED" },
-        include: { items: { include: { product: true } }, orders: true }
+        include: {
+          items: { where: inventoryWhere(scope, {}), include: { product: true } },
+          orders: { where: inventoryWhere(scope, {}) }
+        }
       });
       return NextResponse.json({ data: mapPurchaseRequest(updated) });
     }

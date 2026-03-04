@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { exportExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 export const runtime = "nodejs";
@@ -9,19 +10,35 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const [products, services, combos, productCats, productSubcats, serviceCats, serviceSubcats, areas, priceLists, priceItems] =
       await Promise.all([
-        prisma.product.findMany({ include: { category: true, subcategory: true, inventoryArea: true, stocks: true } }),
-        prisma.service.findMany({ include: { category: true, subcategory: true } }),
-        prisma.combo.findMany({ include: { products: { include: { product: true } }, services: { include: { service: true } } } }),
-        prisma.productCategory.findMany(),
-        prisma.productSubcategory.findMany(),
-        prisma.serviceCategory.findMany(),
-        prisma.serviceSubcategory.findMany(),
-        prisma.inventoryArea.findMany(),
-        prisma.priceList.findMany(),
-        prisma.priceListItem.findMany()
+        prisma.product.findMany({
+          where: inventoryWhere(scope, {}),
+          include: {
+            category: true,
+            subcategory: true,
+            inventoryArea: true,
+            stocks: { where: inventoryWhere(scope, {}, { branchScoped: true }) }
+          }
+        }),
+        prisma.service.findMany({ where: inventoryWhere(scope, {}), include: { category: true, subcategory: true } }),
+        prisma.combo.findMany({
+          where: inventoryWhere(scope, {}),
+          include: {
+            products: { where: inventoryWhere(scope, {}), include: { product: true } },
+            services: { where: inventoryWhere(scope, {}), include: { service: true } }
+          }
+        }),
+        prisma.productCategory.findMany({ where: inventoryWhere(scope, {}) }),
+        prisma.productSubcategory.findMany({ where: inventoryWhere(scope, {}) }),
+        prisma.serviceCategory.findMany({ where: inventoryWhere(scope, {}) }),
+        prisma.serviceSubcategory.findMany({ where: inventoryWhere(scope, {}) }),
+        prisma.inventoryArea.findMany({ where: inventoryWhere(scope, {}) }),
+        prisma.priceList.findMany({ where: inventoryWhere(scope, {}) }),
+        prisma.priceListItem.findMany({ where: inventoryWhere(scope, {}) })
       ]);
 
     const sheets = [
@@ -107,7 +124,7 @@ export async function GET(req: NextRequest) {
     ];
     const { buffer } = await exportExcelViaProcessingService({
       context: {
-        tenantId: req.headers.get("x-tenant-id"),
+        tenantId: scope.tenantId,
         actorId: `inventory-${auth.role || "admin"}`
       },
       fileName: "auditoria-inventario.xlsx",

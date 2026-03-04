@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { InventoryReportType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { sendMail } from "@/lib/email/mailer";
 import { generateMovementsPdf } from "@/lib/inventory/movementsReport";
 import { generateKardexXlsx } from "@/lib/inventory/reports";
@@ -14,9 +15,13 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
 
   try {
-    const schedule = await prisma.inventoryEmailSchedule.findUnique({ where: { id: params.id } });
+    const schedule = await prisma.inventoryEmailSchedule.findFirst({
+      where: inventoryWhere(scope, { id: params.id }, { branchScoped: true })
+    });
     if (!schedule) return NextResponse.json({ error: "Regla no encontrada" }, { status: 404 });
     if (!schedule.isEnabled) return NextResponse.json({ error: "La regla está desactivada" }, { status: 400 });
 
@@ -25,6 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const range = computeRangeForSetting(schedule, new Date());
     const attachment = await buildAttachment(schedule.reportType as InventoryReportType, {
+      tenantId: scope.tenantId,
       dateFrom: range.dateFrom,
       dateTo: range.dateTo,
       branchId: schedule.branchId
@@ -44,7 +50,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       attachments: [attachment]
     });
 
-    await prisma.inventoryEmailSchedule.update({ where: { id: schedule.id }, data: { lastSentAt: new Date() } });
+    await prisma.inventoryEmailSchedule.update({
+      where: { id: schedule.id },
+      data: { lastSentAt: new Date() }
+    });
 
     return NextResponse.json({ sent: true, recipients: recipients.length, range: { from: range.dateFrom, to: range.dateTo } });
   } catch (err: any) {
@@ -55,10 +64,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
 async function buildAttachment(
   type: InventoryReportType,
-  params: { dateFrom: Date; dateTo: Date; branchId?: string | null }
+  params: { tenantId: string; dateFrom: Date; dateTo: Date; branchId?: string | null }
 ) {
   if (type === "MOVIMIENTOS") {
     const pdf = await generateMovementsPdf({
+      tenantId: params.tenantId,
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
       branchId: params.branchId || undefined
@@ -71,6 +81,7 @@ async function buildAttachment(
   }
   if (type === "CIERRE_SAT") {
     const pdf = await generateCierreSatPdf({
+      tenantId: params.tenantId,
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
       branchId: params.branchId || undefined
@@ -82,6 +93,7 @@ async function buildAttachment(
     };
   }
   const buffer = await generateKardexXlsx({
+    tenantId: params.tenantId,
     dateFrom: params.dateFrom,
     dateTo: params.dateTo,
     branchId: params.branchId || undefined

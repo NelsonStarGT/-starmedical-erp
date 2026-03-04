@@ -2,6 +2,7 @@ import { MovementType, Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 type RegisterMovementInput = {
+  tenantId: string;
   productId: string;
   branchId: string;
   type: MovementType;
@@ -14,19 +15,19 @@ type RegisterMovementInput = {
 };
 
 export async function registerInventoryMovement(input: RegisterMovementInput, client: PrismaClient | Prisma.TransactionClient = prisma) {
-  const { productId, branchId, type, quantity = 0, unitCost, salePrice, reference, reason, createdById } = input;
+  const { tenantId, productId, branchId, type, quantity = 0, unitCost, salePrice, reference, reason, createdById } = input;
 
-  const product = await client.product.findUnique({ where: { id: productId } });
+  const product = await client.product.findFirst({ where: { id: productId, tenantId, deletedAt: null } });
   if (!product) throw new Error("Producto no encontrado");
 
   const stockRecord = await client.productStock.upsert({
-    where: { productId_branchId: { productId, branchId } },
-    create: { productId, branchId, stock: 0, minStock: 0 },
-    update: {}
+    where: { tenantId_productId_branchId: { tenantId, productId, branchId } },
+    create: { tenantId, productId, branchId, stock: 0, minStock: 0, deletedAt: null },
+    update: { deletedAt: null }
   });
 
   const totalStock = await client.productStock.aggregate({
-    where: { productId },
+    where: { tenantId, productId, deletedAt: null },
     _sum: { stock: true }
   });
   const totalBefore = totalStock._sum.stock || 0;
@@ -90,6 +91,7 @@ export async function registerInventoryMovement(input: RegisterMovementInput, cl
 
   const movementData: Prisma.InventoryMovementCreateInput = {
     product: { connect: { id: productId } },
+    tenantId,
     branchId,
     type,
     quantity: type === "PRICE_UPDATE" || type === "COST_UPDATE" ? null : movementQuantity,
@@ -105,8 +107,8 @@ export async function registerInventoryMovement(input: RegisterMovementInput, cl
   const [movement, updatedStock, updatedProduct] = await run([
     client.inventoryMovement.create({ data: movementData }),
     client.productStock.update({
-      where: { productId_branchId: { productId, branchId } },
-      data: { stock: newBranchStock }
+      where: { tenantId_productId_branchId: { tenantId, productId, branchId } },
+      data: { stock: newBranchStock, deletedAt: null }
     }),
     client.product.update({
       where: { id: productId },

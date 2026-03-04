@@ -1,20 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { roleFromRequest } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { inventoryServiceUnavailable, mapFallbackProductsForApi, runtimeFallbackEnabled } from "@/lib/inventory/runtime-fallback";
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function resolveStatusScope(req: NextRequest) {
+  const raw = normalizeOptionalString(req.nextUrl.searchParams.get("status"));
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const role = roleFromRequest(req);
-    if (!role) return NextResponse.json({ error: "Rol no proporcionado" }, { status: 401 });
+    const auth = requireRoles(req, ["Administrador", "Operador", "Recepcion"]);
+    if (auth.errorResponse) return auth.errorResponse;
+    const { scope, errorResponse } = resolveInventoryScope(req);
+    if (errorResponse || !scope) return errorResponse;
 
+    const statusScope = resolveStatusScope(req);
     const search = req.nextUrl.searchParams.get("q")?.toLowerCase() || "";
+    const where: Prisma.ProductWhereInput = {};
+    if (statusScope.length === 1) where.status = statusScope[0];
+    if (statusScope.length > 1) where.status = { in: statusScope };
+    if (scope.branchId) {
+      where.stocks = {
+        some: {
+          tenantId: scope.tenantId,
+          deletedAt: null,
+          branchId: scope.branchId
+        }
+      };
+    }
     const items = await prisma.product.findMany({
+      where: inventoryWhere(scope, where),
       include: {
         category: true,
         subcategory: true,
         inventoryArea: true,
-        stocks: true
+        stocks: {
+          where: inventoryWhere(scope, {}, { branchScoped: true })
+        }
       },
       orderBy: { updatedAt: "desc" }
     });
@@ -57,7 +92,17 @@ export async function GET(req: NextRequest) {
         };
       });
 
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      data,
+      meta: {
+        scope: {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          status: statusScope,
+          deletedAt: null
+        }
+      }
+    });
   } catch (err) {
     console.error(err);
     if (!runtimeFallbackEnabled()) {

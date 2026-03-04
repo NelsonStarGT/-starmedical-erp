@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryCreateData, inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { importExcelViaProcessingService } from "@/lib/processing-service/excel";
 
 export const runtime = "nodejs";
@@ -15,6 +16,8 @@ function normalizeItemType(raw: string | null) {
 export async function POST(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const formData = await req.formData();
     const file = formData.get("file");
@@ -22,7 +25,7 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(await (file as any).arrayBuffer()) as Buffer;
     const parsed = await importExcelViaProcessingService({
       context: {
-        tenantId: req.headers.get("x-tenant-id"),
+        tenantId: scope.tenantId,
         actorId: `inventory-${auth.role || "admin"}`
       },
       fileBuffer: buffer,
@@ -48,7 +51,7 @@ export async function POST(req: NextRequest) {
       (column) => !["código", "codigo", "nombre", "tipo"].includes(column.toLowerCase())
     );
 
-    const priceLists = await prisma.priceList.findMany();
+    const priceLists = await prisma.priceList.findMany({ where: inventoryWhere(scope, {}) });
     const listMap = listCols.reduce<Record<string, string>>((acc, title) => {
       const match = priceLists.find((list) => list.name === title || list.id === title);
       if (match) acc[title] = match.id;
@@ -80,7 +83,7 @@ export async function POST(req: NextRequest) {
     await Promise.all(
       Object.entries(codesByType).map(async ([type, codes]) => {
         const arr = Array.from(codes);
-        const map = await resolveIds(type, arr);
+        const map = await resolveIds(scope.tenantId, type, arr);
         Object.assign(idMap, map);
       })
     );
@@ -89,13 +92,19 @@ export async function POST(req: NextRequest) {
       const itemId = idMap[change.itemCode] || idMap[change.itemCode.toUpperCase()] || idMap[change.itemCode.toLowerCase()];
       if (!itemId) continue;
       const existing = await prisma.priceListItem.findFirst({
-        where: { priceListId: change.priceListId, itemType: change.itemType, itemId }
+        where: inventoryWhere(scope, { priceListId: change.priceListId, itemType: change.itemType, itemId })
       });
       if (existing) {
         await prisma.priceListItem.update({ where: { id: existing.id }, data: { precio: change.price } });
       } else {
         await prisma.priceListItem.create({
-          data: { priceListId: change.priceListId, itemType: change.itemType, itemId, precio: change.price, ivaIncluded: true } as any
+          data: inventoryCreateData(scope, {
+            priceListId: change.priceListId,
+            itemType: change.itemType,
+            itemId,
+            precio: change.price,
+            ivaIncluded: true
+          } as any)
         });
       }
     }
@@ -107,10 +116,13 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function resolveIds(itemType: string, codes: string[]) {
+async function resolveIds(tenantId: string, itemType: string, codes: string[]) {
   if (codes.length === 0) return {};
   if (itemType === "SERVICE") {
-    const services = await prisma.service.findMany({ where: { OR: [{ code: { in: codes } }, { id: { in: codes } }] }, select: { id: true, code: true } });
+    const services = await prisma.service.findMany({
+      where: { tenantId, deletedAt: null, OR: [{ code: { in: codes } }, { id: { in: codes } }] },
+      select: { id: true, code: true }
+    });
     const map: Record<string, string> = {};
     services.forEach((s) => {
       if (s.code) map[s.code] = s.id;
@@ -119,14 +131,20 @@ async function resolveIds(itemType: string, codes: string[]) {
     return map;
   }
   if (itemType === "COMBO") {
-    const combos = await prisma.combo.findMany({ where: { id: { in: codes } }, select: { id: true } });
+    const combos = await prisma.combo.findMany({
+      where: { tenantId, deletedAt: null, id: { in: codes } },
+      select: { id: true }
+    });
     const map: Record<string, string> = {};
     combos.forEach((c) => {
       map[c.id] = c.id;
     });
     return map;
   }
-  const products = await prisma.product.findMany({ where: { OR: [{ code: { in: codes } }, { id: { in: codes } }] }, select: { id: true, code: true } });
+  const products = await prisma.product.findMany({
+    where: { tenantId, deletedAt: null, OR: [{ code: { in: codes } }, { id: { in: codes } }] },
+    select: { id: true, code: true }
+  });
   const map: Record<string, string> = {};
   products.forEach((p) => {
     map[p.code] = p.id;

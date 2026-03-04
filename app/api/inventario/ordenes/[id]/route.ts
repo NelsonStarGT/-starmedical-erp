@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma, PurchaseOrderStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { deriveOrderStatusFromItems, deriveRequestStatusFromOrder, mapPurchaseOrder } from "@/lib/inventory/purchases";
 import { registerInventoryMovement } from "@/lib/inventory/movements";
 
@@ -10,10 +11,15 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
-    const data = await prisma.purchaseOrder.findUnique({
-      where: { id: params.id },
-      include: { items: { include: { product: true } }, request: true }
+    const data = await prisma.purchaseOrder.findFirst({
+      where: inventoryWhere(scope, { id: params.id }, { branchScoped: true }),
+      include: {
+        items: { where: inventoryWhere(scope, {}), include: { product: true } },
+        request: true
+      }
     });
     if (!data) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
     return NextResponse.json({ data: mapPurchaseOrder(data) });
@@ -26,12 +32,17 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const body = await req.json();
     const action = body.action || "update";
-    const order = await prisma.purchaseOrder.findUnique({
-      where: { id: params.id },
-      include: { items: true, request: true }
+    const order = await prisma.purchaseOrder.findFirst({
+      where: inventoryWhere(scope, { id: params.id }, { branchScoped: true }),
+      include: {
+        items: { where: inventoryWhere(scope, {}) },
+        request: true
+      }
     });
     if (!order) return NextResponse.json({ error: "Orden no encontrada" }, { status: 404 });
 
@@ -41,7 +52,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         return NextResponse.json({ error: "Agrega items" }, { status: 400 });
       }
       const updated = await prisma.$transaction(async (tx) => {
-        await tx.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: order.id } });
+        await tx.purchaseOrderItem.deleteMany({ where: inventoryWhere(scope, { purchaseOrderId: order.id }) });
         return tx.purchaseOrder.update({
           where: { id: order.id },
           data: {
@@ -50,13 +61,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
             notes: body.notes || null,
             items: {
               create: body.items.map((it: any) => ({
+                tenantId: scope.tenantId,
                 productId: it.productId,
                 quantity: Number(it.quantity || 0),
                 unitCost: it.unitCost ? new Prisma.Decimal(it.unitCost) : null
               }))
             }
           },
-          include: { items: { include: { product: true } }, request: true }
+          include: {
+            items: { where: inventoryWhere(scope, {}), include: { product: true } },
+            request: true
+          }
         });
       });
       return NextResponse.json({ data: mapPurchaseOrder(updated) });
@@ -67,7 +82,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const updated = await prisma.purchaseOrder.update({
         where: { id: order.id },
         data: { status: "SENT" },
-        include: { items: { include: { product: true } }, request: true }
+        include: {
+          items: { where: inventoryWhere(scope, {}), include: { product: true } },
+          request: true
+        }
       });
       return NextResponse.json({ data: mapPurchaseOrder(updated) });
     }
@@ -77,7 +95,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const updated = await prisma.purchaseOrder.update({
         where: { id: order.id },
         data: { status: "CANCELLED" },
-        include: { items: { include: { product: true } }, request: true }
+        include: {
+          items: { where: inventoryWhere(scope, {}), include: { product: true } },
+          request: true
+        }
       });
       return NextResponse.json({ data: mapPurchaseOrder(updated) });
     }
@@ -89,7 +110,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       if (receiveItems.length === 0) return NextResponse.json({ error: "No hay cantidades a recibir" }, { status: 400 });
 
       const updated = await prisma.$transaction(async (tx) => {
-        const originalItems = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId: order.id } });
+        const originalItems = await tx.purchaseOrderItem.findMany({
+          where: inventoryWhere(scope, { purchaseOrderId: order.id })
+        });
         let applied = 0;
 
         for (const rec of receiveItems) {
@@ -111,6 +134,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           });
           await registerInventoryMovement(
             {
+              tenantId: scope.tenantId,
               productId: target.productId,
               branchId: order.branchId,
               type: "ENTRY",
@@ -126,7 +150,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
         if (applied === 0) throw new Error("No hay cantidades válidas para recibir");
 
-        const refreshedItems = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId: order.id } });
+        const refreshedItems = await tx.purchaseOrderItem.findMany({
+          where: inventoryWhere(scope, { purchaseOrderId: order.id })
+        });
         const nextStatus = deriveOrderStatusFromItems(
           refreshedItems.map((i) => ({ quantity: i.quantity, receivedQty: i.receivedQty })),
           order.status as PurchaseOrderStatus
@@ -135,7 +161,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         const updatedOrder = await tx.purchaseOrder.update({
           where: { id: order.id },
           data: { status: nextStatus },
-          include: { items: { include: { product: true } }, request: true }
+          include: {
+            items: { where: inventoryWhere(scope, {}), include: { product: true } },
+            request: true
+          }
         });
 
         if (order.requestId) {

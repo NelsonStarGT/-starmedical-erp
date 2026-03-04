@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -14,23 +15,25 @@ export async function POST(req: NextRequest) {
   }
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
 
   try {
     const body = await req.json().catch(() => ({}));
     const mode = body.mode === "wipe_all_runtime" ? "wipe_all_runtime" : "wipe_movements";
 
-    const deletedMovements = await prisma.inventoryMovement.deleteMany({});
+    const deletedMovements = await prisma.inventoryMovement.deleteMany({ where: inventoryWhere(scope, {}) });
     let resetStocks = 0;
     let deletedPriceItems = 0;
 
     if (mode === "wipe_all_runtime") {
-      const delStocks = await prisma.productStock.deleteMany({});
+      const delStocks = await prisma.productStock.deleteMany({ where: inventoryWhere(scope, {}) });
       resetStocks = delStocks.count;
-      const delPrices = await prisma.priceListItem.deleteMany({});
+      const delPrices = await prisma.priceListItem.deleteMany({ where: inventoryWhere(scope, {}) });
       deletedPriceItems = delPrices.count;
     } else {
       // set all stocks to zero
-      const stocks = await prisma.productStock.findMany();
+      const stocks = await prisma.productStock.findMany({ where: inventoryWhere(scope, {}) });
       for (const s of stocks) {
         await prisma.productStock.update({ where: { id: s.id }, data: { stock: 0 } });
         resetStocks += 1;

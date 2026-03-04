@@ -3,6 +3,7 @@ import { MovementType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 type Filters = {
+  tenantId: string;
   dateFrom: Date;
   dateTo: Date;
   branchId?: string;
@@ -24,6 +25,8 @@ const REPORT_META = {
 
 export async function fetchMovements(filters: Filters) {
   const where: Prisma.InventoryMovementWhereInput = {
+    tenantId: filters.tenantId,
+    deletedAt: null,
     createdAt: { gte: filters.dateFrom, lte: filters.dateTo }
   };
   if (filters.branchId) where.branchId = filters.branchId;

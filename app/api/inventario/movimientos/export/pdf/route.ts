@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MovementType } from "@prisma/client";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { resolveInventoryScope } from "@/lib/inventory/scope";
 import { generateMovementsPdf } from "@/lib/inventory/movementsReport";
 
 export const runtime = "nodejs";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador", "Operador", "Recepcion"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const params = req.nextUrl.searchParams;
     const dateFrom = params.get("dateFrom");
@@ -17,13 +20,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "dateFrom y dateTo son requeridos" }, { status: 400 });
     }
 
-    const branchId = params.get("branchId") || undefined;
+    const branchIdParam = params.get("branchId") || undefined;
+    if (scope.branchId && branchIdParam && branchIdParam !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
+    const branchId = scope.branchId || branchIdParam;
     const type = (params.get("type") as MovementType | null) || undefined;
     const productId = params.get("productId") || undefined;
     const createdById = params.get("createdById") || undefined;
     const generatedBy = params.get("generatedBy") || undefined;
 
     const buffer = await generateMovementsPdf({
+      tenantId: scope.tenantId,
       dateFrom: new Date(dateFrom),
       dateTo: new Date(dateTo),
       branchId,

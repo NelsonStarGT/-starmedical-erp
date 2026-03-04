@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma, PurchaseOrderStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryCreateData, inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { generateSequentialCode, mapPurchaseOrder } from "@/lib/inventory/purchases";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const params = req.nextUrl.searchParams;
     const statuses = (params.get("status") || "")
@@ -16,7 +19,11 @@ export async function GET(req: NextRequest) {
       .map((s) => s.trim())
       .filter(Boolean) as PurchaseOrderStatus[];
     const supplierId = params.get("supplierId") || undefined;
-    const branchId = params.get("branchId") || undefined;
+    const branchIdParam = params.get("branchId") || undefined;
+    if (scope.branchId && branchIdParam && branchIdParam !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
+    const branchId = scope.branchId || branchIdParam;
     const q = params.get("q")?.toLowerCase().trim() || "";
     const from = params.get("dateFrom") ? new Date(params.get("dateFrom") as string) : undefined;
     const to = params.get("dateTo") ? new Date(params.get("dateTo") as string) : undefined;
@@ -34,8 +41,11 @@ export async function GET(req: NextRequest) {
     }
 
     const data = await prisma.purchaseOrder.findMany({
-      where,
-      include: { items: { include: { product: true } }, request: true },
+      where: inventoryWhere(scope, where, { branchScoped: true }),
+      include: {
+        items: { where: inventoryWhere(scope, {}), include: { product: true } },
+        request: true
+      },
       orderBy: { createdAt: "desc" }
     });
     return NextResponse.json({ data: data.map(mapPurchaseOrder) });
@@ -48,16 +58,26 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const body = await req.json();
-    const { supplierId, branchId, createdById, requestId, items, notes, status } = body;
-    if (!supplierId || !branchId || !createdById) {
+    const { supplierId, branchId: branchIdParam, createdById, requestId, items, notes, status } = body;
+    if (scope.branchId && branchIdParam && branchIdParam !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
+    const branchId = scope.branchId || branchIdParam;
+    const actorUserId = createdById || scope.userId;
+    if (!supplierId || !branchId || !actorUserId) {
       return NextResponse.json({ error: "supplierId, branchId y createdById son requeridos" }, { status: 400 });
     }
 
     let requestItems: any[] = [];
     if (requestId) {
-      const request = await prisma.purchaseRequest.findUnique({ where: { id: requestId }, include: { items: true } });
+      const request = await prisma.purchaseRequest.findFirst({
+        where: inventoryWhere(scope, { id: requestId }, { branchScoped: true }),
+        include: { items: { where: inventoryWhere(scope, {}) } }
+      });
       if (!request) return NextResponse.json({ error: "Solicitud no encontrada" }, { status: 404 });
       if (request.status !== "APPROVED") return NextResponse.json({ error: "La solicitud debe estar aprobada" }, { status: 400 });
       requestItems = request.items;
@@ -73,22 +93,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "La orden requiere al menos un item" }, { status: 400 });
     }
 
-    const code = await generateSequentialCode("order");
+    const code = await generateSequentialCode("order", scope.tenantId);
     const targetStatus: PurchaseOrderStatus = status === "SENT" ? "SENT" : "DRAFT";
 
     const order = await prisma.$transaction(async (tx) => {
       const created = await tx.purchaseOrder.create({
-        data: {
+        data: inventoryCreateData(scope, {
           code,
           supplierId,
           branchId,
-          createdById,
+          createdById: actorUserId,
           status: targetStatus,
           requestId: requestId || null,
           notes: notes || null,
-          items: { create: itemsToCreate }
-        },
-        include: { items: { include: { product: true } }, request: true }
+          items: {
+            create: itemsToCreate.map((item: { productId: string; quantity: number; unitCost: Prisma.Decimal | null }) => ({
+              ...item,
+              tenantId: scope.tenantId
+            }))
+          }
+        }),
+        include: {
+          items: { where: inventoryWhere(scope, {}), include: { product: true } },
+          request: true
+        }
       });
       if (requestId) {
         await tx.purchaseRequest.update({ where: { id: requestId }, data: { status: "ORDERED" } });

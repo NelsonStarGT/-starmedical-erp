@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { resolveInventoryScope } from "@/lib/inventory/scope";
 import { generateCierreSatXlsx } from "@/lib/inventory/cierreSat";
 
 export const runtime = "nodejs";
@@ -8,11 +9,17 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
 
   const { searchParams } = req.nextUrl;
   const dateFromRaw = searchParams.get("dateFrom");
   const dateToRaw = searchParams.get("dateTo");
-  const branchId = searchParams.get("branchId") || undefined;
+  const branchIdParam = searchParams.get("branchId") || undefined;
+  if (scope.branchId && branchIdParam && branchIdParam !== scope.branchId) {
+    return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+  }
+  const branchId = scope.branchId || branchIdParam;
 
   if (!dateFromRaw || !dateToRaw) return NextResponse.json({ error: "dateFrom y dateTo son requeridos" }, { status: 400 });
   const dateFrom = new Date(dateFromRaw);
@@ -22,7 +29,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const buffer = await generateCierreSatXlsx({ dateFrom, dateTo, branchId });
+    const buffer = await generateCierreSatXlsx({ tenantId: scope.tenantId, dateFrom, dateTo, branchId });
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {

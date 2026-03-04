@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PurchaseRequestStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryCreateData, inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import { generateSequentialCode, mapPurchaseRequest } from "@/lib/inventory/purchases";
 
 export const dynamic = "force-dynamic";
@@ -9,13 +10,19 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador", "Operador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const params = req.nextUrl.searchParams;
     const statuses = (params.get("status") || "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean) as PurchaseRequestStatus[];
-    const branchId = params.get("branchId") || undefined;
+    const branchIdParam = params.get("branchId") || undefined;
+    if (scope.branchId && branchIdParam && branchIdParam !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
+    const branchId = scope.branchId || branchIdParam;
     const q = params.get("q")?.toLowerCase().trim() || "";
     const from = params.get("dateFrom") ? new Date(params.get("dateFrom") as string) : undefined;
     const to = params.get("dateTo") ? new Date(params.get("dateTo") as string) : undefined;
@@ -32,7 +39,7 @@ export async function GET(req: NextRequest) {
     }
 
     const data = await prisma.purchaseRequest.findMany({
-      where,
+      where: inventoryWhere(scope, where, { branchScoped: true }),
       include: { items: { include: { product: true } }, orders: true },
       orderBy: { createdAt: "desc" }
     });
@@ -46,28 +53,36 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador", "Operador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const body = await req.json();
-    const { branchId, requestedById, notes, items, status } = body;
-    if (!branchId || !requestedById) {
+    const { branchId: branchIdParam, requestedById, notes, items, status } = body;
+    if (scope.branchId && branchIdParam && branchIdParam !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
+    const branchId = scope.branchId || branchIdParam;
+    const requestedBy = requestedById || scope.userId;
+    if (!branchId || !requestedBy) {
       return NextResponse.json({ error: "branchId y requestedById son requeridos" }, { status: 400 });
     }
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: "Agrega al menos un producto a la solicitud" }, { status: 400 });
     }
 
-    const code = await generateSequentialCode("request");
+    const code = await generateSequentialCode("request", scope.tenantId);
     const initialStatus: PurchaseRequestStatus = status === "SUBMITTED" ? "SUBMITTED" : "DRAFT";
 
     const created = await prisma.purchaseRequest.create({
-      data: {
+      data: inventoryCreateData(scope, {
         code,
         branchId,
-        requestedById,
+        requestedById: requestedBy,
         status: initialStatus,
         notes: notes || null,
         items: {
           create: items.map((it: any) => ({
+            tenantId: scope.tenantId,
             productId: it.productId,
             quantity: Number(it.quantity || 0),
             unitId: it.unitId || null,
@@ -75,7 +90,7 @@ export async function POST(req: NextRequest) {
             notes: it.notes || null
           }))
         }
-      },
+      }),
       include: { items: { include: { product: true } }, orders: true }
     });
 

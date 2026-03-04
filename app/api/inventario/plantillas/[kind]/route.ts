@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildTemplate, ImportKind } from "@/lib/inventory/import";
-import { requirePermission } from "@/lib/api/auth";
+import { requirePermission } from "@/lib/inventory/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

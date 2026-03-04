@@ -1,20 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePermission, roleFromRequest } from "@/lib/api/auth";
+import { requirePermission, requireRoles } from "@/lib/inventory/auth";
+import { inventoryCreateData, inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 
 export const runtime = "nodejs";
 
-const includeCombo = {
-  services: { include: { service: true } },
-  products: { include: { product: true } }
-};
+const includeCombo = (tenantId: string) => ({
+  services: { where: { tenantId, deletedAt: null }, include: { service: true } },
+  products: { where: { tenantId, deletedAt: null }, include: { product: true } }
+});
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function resolveStatusScope(req: NextRequest) {
+  const raw = normalizeOptionalString(req.nextUrl.searchParams.get("status"));
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
 
 export async function GET(req: NextRequest) {
+  const auth = requireRoles(req, ["Administrador", "Operador", "Recepcion"]);
+  if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
+
   const search = req.nextUrl.searchParams.get("q")?.toLowerCase() || "";
-  const status = req.nextUrl.searchParams.get("status") || undefined;
+  const statusScope = resolveStatusScope(req);
+  const statusWhere =
+    statusScope.length === 0 ? {} : statusScope.length === 1 ? { status: statusScope[0] } : { status: { in: statusScope } };
   const combos = await prisma.combo.findMany({
-    where: status ? { status } : undefined,
-    include: includeCombo,
+    where: inventoryWhere(scope, statusWhere),
+    include: includeCombo(scope.tenantId),
     orderBy: { updatedAt: "desc" }
   });
 
@@ -24,21 +47,31 @@ export async function GET(req: NextRequest) {
     return haystack.includes(search);
   });
 
-  return NextResponse.json({ data: filtered.map(mapCombo) });
+  return NextResponse.json({
+    data: filtered.map(mapCombo),
+    meta: {
+      scope: {
+        tenantId: scope.tenantId,
+        branchId: scope.branchId,
+        status: statusScope,
+        deletedAt: null
+      }
+    }
+  });
 }
 
 export async function POST(req: NextRequest) {
   const perm = requirePermission(req, "editar_combo");
   if (perm) return perm;
-  const role = roleFromRequest(req);
-  const isAdmin = role === "Administrador";
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const body = await req.json();
     const { nombre, descripcion, serviciosAsociados = [], productosAsociados = [], precioFinal = 0, estado = "Activo", imageUrl } = body || {};
     if (!nombre) return NextResponse.json({ error: "Nombre requerido" }, { status: 400 });
-    const { costProductsTotal, costCalculated } = await computeCost(productosAsociados);
+    const { costProductsTotal, costCalculated } = await computeCost(scope.tenantId, productosAsociados);
     const created = await prisma.combo.create({
-      data: {
+      data: inventoryCreateData(scope, {
         name: nombre,
         description: descripcion,
         priceFinal: precioFinal,
@@ -47,17 +80,18 @@ export async function POST(req: NextRequest) {
         status: estado,
         imageUrl,
         services: {
-          create: serviciosAsociados.map((sid: string) => ({ serviceId: sid }))
+          create: serviciosAsociados.map((sid: string) => ({ serviceId: sid, tenantId: scope.tenantId }))
         },
         products: {
           create: productosAsociados.map((p: any) => ({
+            tenantId: scope.tenantId,
             productId: p.productoId,
             quantity: p.cantidad ?? 1,
             unitCost: p.costoUnitario ?? null
           }))
         }
-      },
-      include: includeCombo
+      }),
+      include: includeCombo(scope.tenantId)
     });
     return NextResponse.json({ data: mapCombo(created) }, { status: 201 });
   } catch (err) {
@@ -66,10 +100,13 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function computeCost(productosAsociados: Array<{ productoId: string; cantidad?: number; costoUnitario?: number }>) {
+async function computeCost(tenantId: string, productosAsociados: Array<{ productoId: string; cantidad?: number; costoUnitario?: number }>) {
   if (!productosAsociados || productosAsociados.length === 0) return { costProductsTotal: 0, costCalculated: 0 };
   const ids = productosAsociados.map((p) => p.productoId).filter(Boolean);
-  const prods = await prisma.product.findMany({ where: { id: { in: ids } }, select: { id: true, avgCost: true, cost: true } });
+  const prods = await prisma.product.findMany({
+    where: { tenantId, deletedAt: null, id: { in: ids } },
+    select: { id: true, avgCost: true, cost: true }
+  });
   const map = prods.reduce<Record<string, number>>((acc, p) => ({ ...acc, [p.id]: Number(p.avgCost || p.cost || 0) }), {});
   const total = productosAsociados.reduce((acc, item) => {
     const cost = item.costoUnitario ?? map[item.productoId] ?? 0;

@@ -8,12 +8,26 @@ export async function runInventoryQA(now = new Date()): Promise<{
   findings: QAFinding[];
   status: "OK" | "WARN" | "ERROR";
 }> {
+  const tenantId = process.env.DEFAULT_TENANT_ID || "global";
+  return runInventoryQAForTenant(tenantId, now);
+}
+
+export async function runInventoryQAForTenant(tenantId: string, now = new Date()): Promise<{
+  findings: QAFinding[];
+  status: "OK" | "WARN" | "ERROR";
+}> {
   const [products, services, combos, priceListItems, schedules] = await Promise.all([
-    prisma.product.findMany({ include: { stocks: true } }),
-    prisma.service.findMany(),
-    prisma.combo.findMany({ include: { products: true, services: true } }),
-    prisma.priceListItem.findMany(),
-    prisma.inventoryEmailSchedule.findMany()
+    prisma.product.findMany({ where: { tenantId, deletedAt: null }, include: { stocks: { where: { tenantId, deletedAt: null } } } }),
+    prisma.service.findMany({ where: { tenantId, deletedAt: null } }),
+    prisma.combo.findMany({
+      where: { tenantId, deletedAt: null },
+      include: {
+        products: { where: { tenantId, deletedAt: null } },
+        services: { where: { tenantId, deletedAt: null } }
+      }
+    }),
+    prisma.priceListItem.findMany({ where: { tenantId, deletedAt: null } }),
+    prisma.inventoryEmailSchedule.findMany({ where: { tenantId, deletedAt: null } })
   ]);
 
   const findings: QAFinding[] = [];
@@ -117,7 +131,7 @@ export async function runInventoryQA(now = new Date()): Promise<{
   return { findings, status: overall };
 }
 
-export async function qaToWorkbook(findings: QAFinding[]) {
+export async function qaToWorkbook(findings: QAFinding[], tenantId: string) {
   const headers = ["Chequeo", "Severidad", "ID", "Descripción", "Extra", "Link"];
   const rows: Array<Array<string>> = [];
   findings.forEach((finding) => {
@@ -132,7 +146,7 @@ export async function qaToWorkbook(findings: QAFinding[]) {
 
   const { buffer } = await exportExcelViaProcessingService({
     context: {
-      tenantId: process.env.DEFAULT_TENANT_ID || "global",
+      tenantId,
       actorId: "inventory-qa"
     },
     fileName: "qa-inventario.xlsx",

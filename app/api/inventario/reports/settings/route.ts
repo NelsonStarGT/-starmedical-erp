@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { InventoryReportFrequency, InventoryReportType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryCreateData, inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import type { InventoryBiweeklyMode, InventoryScheduleType } from "@/lib/types/inventario";
 
 export const dynamic = "force-dynamic";
@@ -9,8 +10,13 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
-    const data = await prisma.inventoryEmailSetting.findMany({ orderBy: { createdAt: "asc" } });
+    const data = await prisma.inventoryEmailSetting.findMany({
+      where: inventoryWhere(scope, {}, { branchScoped: true }),
+      orderBy: { createdAt: "asc" }
+    });
     return NextResponse.json({ data });
   } catch (err) {
     console.error(err);
@@ -21,6 +27,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const body = await req.json();
     const recipients = normalizeRecipients(body.recipients ?? body.recipientsJson);
@@ -60,7 +68,7 @@ export async function POST(req: NextRequest) {
       isEnabled: Boolean(body.isEnabled),
       frequency,
       reportType: (body.reportType || "KARDEX") as InventoryReportType,
-      branchId: body.branchId || null,
+      branchId: scope.branchId || body.branchId || null,
       recipients: JSON.stringify(recipients),
       recipientsJson: JSON.stringify(recipients),
       includeAllProducts: body.includeAllProducts ?? true,
@@ -75,14 +83,25 @@ export async function POST(req: NextRequest) {
       oneTimeDate: scheduleType === "ONE_TIME" ? oneTimeDate : null,
       oneTimeTime: scheduleType === "ONE_TIME" ? oneTimeTime : null
     };
+    if (scope.branchId && body.branchId && body.branchId !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
     const record = body.id
-      ? await prisma.inventoryEmailSetting.update({ where: { id: body.id }, data: payload })
-      : await prisma.inventoryEmailSetting.create({ data: payload });
+      ? await updateInventoryEmailSettingScoped(scope.tenantId, scope.branchId, String(body.id), payload)
+      : await prisma.inventoryEmailSetting.create({ data: inventoryCreateData(scope, payload) });
     return NextResponse.json({ data: record });
   } catch (err: any) {
     console.error(err);
     return NextResponse.json({ error: err?.message || "No se pudo guardar la configuración" }, { status: 400 });
   }
+}
+
+async function updateInventoryEmailSettingScoped(tenantId: string, branchId: string | null, id: string, payload: any) {
+  const current = await prisma.inventoryEmailSetting.findFirst({
+    where: { tenantId, deletedAt: null, id, ...(branchId ? { branchId } : {}) }
+  });
+  if (!current) throw new Error("Configuración no encontrada");
+  return prisma.inventoryEmailSetting.update({ where: { id: current.id }, data: payload });
 }
 
 function normalizeRecipients(raw: any): string[] {

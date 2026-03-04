@@ -247,74 +247,109 @@ model WorkSchedule {
 
 model ProductCategory {
   id            String               @id @default(cuid())
+  tenantId      String               @default("global")
   name          String
   slug          String               @unique
   type          String
   order         Int                  @default(0)
   status        String               @default("Activo")
+  deletedAt     DateTime?
   products      Product[]
   subcategories ProductSubcategory[]
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, status, deletedAt])
 }
 
 model ProductSubcategory {
   id         String          @id @default(cuid())
+  tenantId   String          @default("global")
   categoryId String
   name       String
   slug       String          @unique
   order      Int             @default(0)
   status     String          @default("Activo")
+  deletedAt  DateTime?
   products   Product[]
   category   ProductCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, status, deletedAt])
 }
 
 model ServiceCategory {
   id            String               @id @default(cuid())
+  tenantId      String               @default("global")
   name          String
   slug          String               @unique
   area          String
   order         Int                  @default(0)
   status        String               @default("Activo")
+  deletedAt     DateTime?
   services      Service[]
   subcategories ServiceSubcategory[]
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, status, deletedAt])
 }
 
 model ServiceSubcategory {
   id         String          @id @default(cuid())
+  tenantId   String          @default("global")
   categoryId String
   name       String
   slug       String          @unique
   order      Int             @default(0)
   status     String          @default("Activo")
+  deletedAt  DateTime?
   services   Service[]
   category   ServiceCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, status, deletedAt])
 }
 
 model InventoryArea {
   id         String    @id @default(cuid())
+  tenantId   String    @default("global")
   name       String
   slug       String    @unique
   order      Int       @default(0)
   isExternal Boolean   @default(true)
+  deletedAt  DateTime?
   products   Product[]
+
+  @@index([tenantId, deletedAt])
 }
 
 model PriceList {
   id        String          @id @default(cuid())
+  tenantId  String          @default("global")
   name      String
   type      String
   estado    String          @default("Activo")
+  deletedAt DateTime?
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
   items     PriceListItem[]
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, estado, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model PriceListItem {
   id          String    @id @default(cuid())
+  tenantId    String    @default("global")
   priceListId String
   itemType    String
   itemId      String
   precio      Float
+  deletedAt   DateTime?
   priceList   PriceList @relation(fields: [priceListId], references: [id])
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, priceListId, deletedAt])
 }
 
 model Appointment {
@@ -404,6 +439,7 @@ model ReceptionSlaAreaConfig {
 
 model Product {
   id                  String                @id @default(cuid())
+  tenantId            String                @default("global")
   name                String
   code                String                @unique
   categoryId          String
@@ -413,6 +449,7 @@ model Product {
   cost                Decimal               @default(0) @db.Decimal(12, 4)
   price               Decimal               @default(0) @db.Decimal(12, 4)
   status              String                @default("Activo")
+  deletedAt           DateTime?
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
   avgCost             Decimal               @default(0) @db.Decimal(12, 4)
@@ -426,10 +463,15 @@ model Product {
   stocks              ProductStock[]
   PurchaseOrderItem   PurchaseOrderItem[]
   PurchaseRequestItem PurchaseRequestItem[]
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, status, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model Service {
   id            String              @id @default(cuid())
+  tenantId      String              @default("global")
   name          String
   code          String?             @unique
   categoryId    String
@@ -437,28 +479,39 @@ model Service {
   price         Float               @default(0)
   durationMin   Int                 @default(0)
   status        String              @default("Activo")
+  deletedAt     DateTime?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   marginPct     Float?
   comboLinks    ComboService[]
   category      ServiceCategory     @relation(fields: [categoryId], references: [id])
   subcategory   ServiceSubcategory? @relation(fields: [subcategoryId], references: [id])
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, status, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model ProductStock {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
+  tenantId  String    @default("global")
   productId String
   branchId  String
   stock     Int
   minStock  Int
-  updatedAt DateTime @default(now()) @updatedAt
-  product   Product  @relation(fields: [productId], references: [id])
+  deletedAt DateTime?
+  updatedAt DateTime  @default(now()) @updatedAt
+  product   Product   @relation(fields: [productId], references: [id])
 
-  @@unique([productId, branchId])
+  @@unique([tenantId, productId, branchId])
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, branchId, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model InventoryMovement {
   id          String       @id @default(cuid())
+  tenantId    String       @default("global")
   productId   String
   branchId    String
   type        MovementType
@@ -468,37 +521,55 @@ model InventoryMovement {
   reference   String?
   reason      String?
   createdById String
+  deletedAt   DateTime?
   createdAt   DateTime     @default(now())
   product     Product      @relation(fields: [productId], references: [id])
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, branchId, deletedAt])
+  @@index([tenantId, createdAt, deletedAt])
 }
 
 model PurchaseRequest {
   id            String                @id @default(cuid())
+  tenantId      String                @default("global")
   code          String                @unique
   branchId      String
   requestedById String
   status        PurchaseRequestStatus @default(DRAFT)
   notes         String?
+  deletedAt     DateTime?
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   orders        PurchaseOrder[]
   items         PurchaseRequestItem[]
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, branchId, deletedAt])
+  @@index([tenantId, status, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model PurchaseRequestItem {
   id                String          @id @default(cuid())
+  tenantId          String          @default("global")
   purchaseRequestId String
   productId         String
   quantity          Int
   unitId            String?
   supplierId        String?
   notes             String?
+  deletedAt         DateTime?
   product           Product         @relation(fields: [productId], references: [id])
   purchaseRequest   PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, purchaseRequestId, deletedAt])
 }
 
 model PurchaseOrder {
   id          String              @id @default(cuid())
+  tenantId    String              @default("global")
   code        String              @unique
   supplierId  String
   branchId    String
@@ -506,25 +577,37 @@ model PurchaseOrder {
   status      PurchaseOrderStatus @default(DRAFT)
   requestId   String?
   notes       String?
+  deletedAt   DateTime?
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
   request     PurchaseRequest?    @relation(fields: [requestId], references: [id])
   items       PurchaseOrderItem[]
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, branchId, deletedAt])
+  @@index([tenantId, status, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model PurchaseOrderItem {
   id              String        @id @default(cuid())
+  tenantId        String        @default("global")
   purchaseOrderId String
   productId       String
   quantity        Int
   unitCost        Decimal?      @db.Decimal(12, 2)
   receivedQty     Int           @default(0)
+  deletedAt       DateTime?
   product         Product       @relation(fields: [productId], references: [id])
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, purchaseOrderId, deletedAt])
 }
 
 model Combo {
   id                String         @id @default(cuid())
+  tenantId          String         @default("global")
   name              String
   description       String?
   priceFinal        Decimal        @default(0) @db.Decimal(12, 4)
@@ -532,36 +615,50 @@ model Combo {
   costCalculated    Decimal        @default(0) @db.Decimal(12, 4)
   imageUrl          String?
   status            String         @default("Activo")
+  deletedAt         DateTime?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
   products          ComboProduct[]
   services          ComboService[]
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, status, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model ComboService {
-  id        String  @id @default(cuid())
+  id        String    @id @default(cuid())
+  tenantId  String    @default("global")
   comboId   String
   serviceId String
-  combo     Combo   @relation(fields: [comboId], references: [id])
-  service   Service @relation(fields: [serviceId], references: [id])
+  deletedAt DateTime?
+  combo     Combo     @relation(fields: [comboId], references: [id])
+  service   Service   @relation(fields: [serviceId], references: [id])
 
-  @@unique([comboId, serviceId])
+  @@unique([tenantId, comboId, serviceId])
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, comboId, deletedAt])
 }
 
 model ComboProduct {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
+  tenantId  String    @default("global")
   comboId   String
   productId String
-  quantity  Int      @default(1)
-  unitCost  Decimal? @db.Decimal(12, 4)
-  combo     Combo    @relation(fields: [comboId], references: [id])
-  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int       @default(1)
+  unitCost  Decimal?  @db.Decimal(12, 4)
+  deletedAt DateTime?
+  combo     Combo     @relation(fields: [comboId], references: [id])
+  product   Product   @relation(fields: [productId], references: [id])
 
-  @@unique([comboId, productId])
+  @@unique([tenantId, comboId, productId])
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, comboId, deletedAt])
 }
 
 model InventoryEmailSetting {
   id                 String                   @id @default(cuid())
+  tenantId           String                   @default("global")
   isEnabled          Boolean                  @default(true)
   frequency          InventoryReportFrequency
   branchId           String?
@@ -583,11 +680,17 @@ model InventoryEmailSetting {
   oneTimeDate        DateTime?
   oneTimeTime        String?
   sentAt             DateTime?
+  deletedAt          DateTime?
   logs               InventoryReportLog[]
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, isEnabled, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model InventoryEmailSchedule {
   id           String                      @id @default(cuid())
+  tenantId     String                      @default("global")
   email        String
   isEnabled    Boolean                     @default(true)
   reportType   InventoryReportType         @default(KARDEX)
@@ -604,11 +707,17 @@ model InventoryEmailSchedule {
   lastSentAt   DateTime?
   createdAt    DateTime                    @default(now())
   updatedAt    DateTime                    @updatedAt
+  deletedAt    DateTime?
   logs         InventoryEmailScheduleLog[]
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, isEnabled, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model InventoryEmailScheduleLog {
   id         String                 @id @default(cuid())
+  tenantId   String                 @default("global")
   scheduleId String
   reportType InventoryReportType
   periodFrom DateTime
@@ -616,7 +725,11 @@ model InventoryEmailScheduleLog {
   sentAt     DateTime               @default(now())
   status     String
   error      String?
+  deletedAt  DateTime?
   schedule   InventoryEmailSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, sentAt, deletedAt])
 }
 
 model MailGlobalConfig {
@@ -1043,17 +1156,23 @@ model Payment {
 }
 
 model InventoryMarginPolicy {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
+  tenantId          String    @default("global")
   marginProductsPct Float?
   marginServicesPct Float?
-  roundingMode      String   @default("NONE")
-  autoApplyOnCreate Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  roundingMode      String    @default("NONE")
+  autoApplyOnCreate Boolean   @default(false)
+  deletedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, updatedAt, deletedAt])
 }
 
 model InventoryReportLog {
   id         String                @id @default(cuid())
+  tenantId   String                @default("global")
   settingId  String
   periodFrom DateTime
   periodTo   DateTime
@@ -1061,9 +1180,12 @@ model InventoryReportLog {
   status     String
   error      String?
   reportType InventoryReportType
+  deletedAt  DateTime?
   setting    InventoryEmailSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
 
-  @@unique([settingId, periodFrom, periodTo])
+  @@unique([tenantId, settingId, periodFrom, periodTo])
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, sentAt, deletedAt])
 }
 
 model CrmLead {
@@ -2709,44 +2831,44 @@ model QuoteDelivery {
 
 model Branch {
   // TODO(SaaS): add tenantId and scope unique constraints per tenant.
-  id                         String                       @id @default(cuid())
-  name                       String                       @unique
-  isActive                   Boolean                      @default(true)
-  createdById                String?
-  tenantId                   String?
-  parentId                   String?
-  createdAt                  DateTime                     @default(now())
-  updatedAt                  DateTime                     @updatedAt
-  address                    String?
-  code                       String?                      @unique
-  phone                      String?
-  timezone                   String                       @default("America/Guatemala")
-  tenant                     Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  parent                     Branch?                      @relation("BranchHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children                   Branch[]                     @relation("BranchHierarchy")
-  assignments                EmployeeBranchAssignment[]
-  timeClockDevices           TimeClockDevice[]
-  timeClockLogs              TimeClockLog[]
-  attendanceDays             AttendanceDay[]
-  attendanceRecords          AttendanceRecord[]
-  attendanceRawEvents        AttendanceRawEvent[]         @relation("BranchRawEvents")
-  labSequenceCounters        LabSequenceCounter[]
-  MembershipContract         MembershipContract[]
-  MembershipUsage            MembershipUsage[]
-  diagnosticOrders           DiagnosticOrder[]
-  visits                     Visit[]
-  queues                     Queue[]
-  companyLocations           CompanyLocation[]            @relation("CompanyLocationBranch")
-  receptionSlaConfig         ReceptionSlaConfig?
-  receptionAppointmentVitals ReceptionAppointmentVitals[]
-  receptionVisitVitals       ReceptionVisitVitals[]
-  ticketSequences            TicketSequence[]
-  payrollRuns                PayrollRun[]
-  businessHours              BranchBusinessHours[]
-  satEstablishments          BranchSatEstablishment[]
-  userAccesses               UserBranchAccess[]
-  billingProfiles            BranchBillingProfile[]
-  tradeUnits                 TradeUnit[]
+  id                              String                           @id @default(cuid())
+  name                            String                           @unique
+  isActive                        Boolean                          @default(true)
+  createdById                     String?
+  tenantId                        String?
+  parentId                        String?
+  createdAt                       DateTime                         @default(now())
+  updatedAt                       DateTime                         @updatedAt
+  address                         String?
+  code                            String?                          @unique
+  phone                           String?
+  timezone                        String                           @default("America/Guatemala")
+  tenant                          Tenant?                          @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  parent                          Branch?                          @relation("BranchHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children                        Branch[]                         @relation("BranchHierarchy")
+  assignments                     EmployeeBranchAssignment[]
+  timeClockDevices                TimeClockDevice[]
+  timeClockLogs                   TimeClockLog[]
+  attendanceDays                  AttendanceDay[]
+  attendanceRecords               AttendanceRecord[]
+  attendanceRawEvents             AttendanceRawEvent[]             @relation("BranchRawEvents")
+  labSequenceCounters             LabSequenceCounter[]
+  MembershipContract              MembershipContract[]
+  MembershipUsage                 MembershipUsage[]
+  diagnosticOrders                DiagnosticOrder[]
+  visits                          Visit[]
+  queues                          Queue[]
+  companyLocations                CompanyLocation[]                @relation("CompanyLocationBranch")
+  receptionSlaConfig              ReceptionSlaConfig?
+  receptionAppointmentVitals      ReceptionAppointmentVitals[]
+  receptionVisitVitals            ReceptionVisitVitals[]
+  ticketSequences                 TicketSequence[]
+  payrollRuns                     PayrollRun[]
+  businessHours                   BranchBusinessHours[]
+  satEstablishments               BranchSatEstablishment[]
+  userAccesses                    UserBranchAccess[]
+  billingProfiles                 BranchBillingProfile[]
+  tradeUnits                      TradeUnit[]
   pharmacyMedicationSubscriptions PharmacyMedicationSubscription[]
   pharmacyDiscountSubscriptions   PharmacyDiscountSubscription[]
 
@@ -3869,35 +3991,35 @@ model MembershipGatewayConfig {
 }
 
 model MembershipContract {
-  id                                  String                                @id @default(cuid())
-  code                                String                                @unique @default(dbgenerated("concat('MBR-', lpad((nextval('membership_contract_code_seq'::regclass))::text, 6, '0'::text))"))
-  ownerType                           MembershipOwnerType
-  ownerId                             String?
-  planId                              String
-  status                              MembershipStatus                      @default(PENDIENTE)
-  startAt                             DateTime
-  endAt                               DateTime?
-  nextRenewAt                         DateTime?
-  billingFrequency                    MembershipBillingFrequency            @default(MONTHLY)
-  priceLockedMonthly                  Decimal?                              @db.Decimal(12, 2)
-  priceLockedAnnual                   Decimal?                              @db.Decimal(12, 2)
-  balance                             Decimal                               @default(0) @db.Decimal(14, 2)
-  channel                             String?
-  assignedBranchId                    String?
-  allowDependents                     Boolean                               @default(true)
-  lastInvoiceId                       String?
-  createdAt                           DateTime                              @default(now())
-  updatedAt                           DateTime
-  branch                              Branch?                               @relation(fields: [assignedBranchId], references: [id])
-  owner                               ClientProfile?                        @relation(fields: [ownerId], references: [id])
-  plan                                MembershipPlan                        @relation(fields: [planId], references: [id])
-  billingProfile                      MembershipContractBillingProfile?
-  dependents                          MembershipDependent[]
-  exceptions                          MembershipException[]
-  payments                            MembershipPayment[]
-  publicSubscriptionRequests          MembershipPublicSubscriptionRequest[]
-  webhookEvents                       MembershipWebhookEvent[]
-  usages                              MembershipUsage[]
+  id                         String                                @id @default(cuid())
+  code                       String                                @unique @default(dbgenerated("concat('MBR-', lpad((nextval('membership_contract_code_seq'::regclass))::text, 6, '0'::text))"))
+  ownerType                  MembershipOwnerType
+  ownerId                    String?
+  planId                     String
+  status                     MembershipStatus                      @default(PENDIENTE)
+  startAt                    DateTime
+  endAt                      DateTime?
+  nextRenewAt                DateTime?
+  billingFrequency           MembershipBillingFrequency            @default(MONTHLY)
+  priceLockedMonthly         Decimal?                              @db.Decimal(12, 2)
+  priceLockedAnnual          Decimal?                              @db.Decimal(12, 2)
+  balance                    Decimal                               @default(0) @db.Decimal(14, 2)
+  channel                    String?
+  assignedBranchId           String?
+  allowDependents            Boolean                               @default(true)
+  lastInvoiceId              String?
+  createdAt                  DateTime                              @default(now())
+  updatedAt                  DateTime
+  branch                     Branch?                               @relation(fields: [assignedBranchId], references: [id])
+  owner                      ClientProfile?                        @relation(fields: [ownerId], references: [id])
+  plan                       MembershipPlan                        @relation(fields: [planId], references: [id])
+  billingProfile             MembershipContractBillingProfile?
+  dependents                 MembershipDependent[]
+  exceptions                 MembershipException[]
+  payments                   MembershipPayment[]
+  publicSubscriptionRequests MembershipPublicSubscriptionRequest[]
+  webhookEvents              MembershipWebhookEvent[]
+  usages                     MembershipUsage[]
 
   @@index([lastInvoiceId])
   @@index([nextRenewAt])
@@ -3907,29 +4029,29 @@ model MembershipContract {
 }
 
 model MembershipDependent {
-  id                 String             @id
-  contractId         String
-  personId           String?
-  relationType       String?
-  active             Boolean            @default(true)
-  createdAt          DateTime           @default(now())
-  contract           MembershipContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  person             ClientProfile?     @relation(fields: [personId], references: [id])
+  id           String             @id
+  contractId   String
+  personId     String?
+  relationType String?
+  active       Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  contract     MembershipContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  person       ClientProfile?     @relation(fields: [personId], references: [id])
 
   @@index([contractId])
   @@index([personId])
 }
 
 model MembershipException {
-  id                 String             @id
-  contractId         String
-  reason             String
-  allowBenefits      Boolean            @default(false)
-  expiresAt          DateTime?
-  createdByUserId    String?
-  createdAt          DateTime           @default(now())
-  contract           MembershipContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  createdBy          User?              @relation(fields: [createdByUserId], references: [id])
+  id              String             @id
+  contractId      String
+  reason          String
+  allowBenefits   Boolean            @default(false)
+  expiresAt       DateTime?
+  createdByUserId String?
+  createdAt       DateTime           @default(now())
+  contract        MembershipContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  createdBy       User?              @relation(fields: [createdByUserId], references: [id])
 
   @@index([contractId])
   @@index([createdByUserId])
@@ -3937,18 +4059,18 @@ model MembershipException {
 }
 
 model MembershipPayment {
-  id                 String                  @id @default(cuid())
-  contractId         String
-  amount             Decimal                 @db.Decimal(14, 2)
-  method             MembershipPaymentMethod
-  kind               MembershipPaymentKind
-  status             MembershipPaymentStatus @default(PENDING)
-  paidAt             DateTime?
-  refNo              String?
-  invoiceId          String?
-  notes              String?
-  createdAt          DateTime                @default(now())
-  contract           MembershipContract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  id         String                  @id @default(cuid())
+  contractId String
+  amount     Decimal                 @db.Decimal(14, 2)
+  method     MembershipPaymentMethod
+  kind       MembershipPaymentKind
+  status     MembershipPaymentStatus @default(PENDING)
+  paidAt     DateTime?
+  refNo      String?
+  invoiceId  String?
+  notes      String?
+  createdAt  DateTime                @default(now())
+  contract   MembershipContract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   @@index([contractId])
   @@index([kind])
@@ -3971,47 +4093,47 @@ model MembershipContractBillingProfile {
 }
 
 model MembershipWebhookEvent {
-  id                 String                  @id @default(cuid())
-  provider           MembershipBillingProvider
-  eventId            String                  @unique
-  eventType          String
-  signature          String?
-  contractId         String?
-  payload            Json
-  status             String                  @default("RECEIVED")
-  processedAt        DateTime?
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @default(now())
-  contract           MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  id          String                    @id @default(cuid())
+  provider    MembershipBillingProvider
+  eventId     String                    @unique
+  eventType   String
+  signature   String?
+  contractId  String?
+  payload     Json
+  status      String                    @default("RECEIVED")
+  processedAt DateTime?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @default(now())
+  contract    MembershipContract?       @relation(fields: [contractId], references: [id], onDelete: SetNull)
 
   @@index([provider, createdAt])
   @@index([contractId])
 }
 
 model MembershipPlan {
-  id                                  String                                @id @default(cuid())
-  slug                                String                                @unique
-  name                                String
-  type                                MembershipPlanType
-  segment                             MembershipPlanSegment                 @default(B2C)
-  categoryId                          String?
-  durationPresetId                    String?
-  customDurationDays                  Int?
-  imageUrl                            String?
-  active                              Boolean                               @default(true)
-  description                         String?
-  priceMonthly                        Decimal                               @db.Decimal(12, 2)
-  priceAnnual                         Decimal                               @db.Decimal(12, 2)
-  currency                            String                                @default("GTQ")
-  maxDependents                       Int?
-  createdAt                           DateTime                              @default(now())
-  updatedAt                           DateTime
-  legacyBenefits                      MembershipBenefit[]
-  benefits                            MembershipPlanBenefit[]
-  category                            MembershipPlanCategory?               @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  durationPreset                      MembershipDurationPreset?             @relation(fields: [durationPresetId], references: [id], onDelete: SetNull)
-  contracts                           MembershipContract[]
-  publicSubscriptionRequests          MembershipPublicSubscriptionRequest[]
+  id                         String                                @id @default(cuid())
+  slug                       String                                @unique
+  name                       String
+  type                       MembershipPlanType
+  segment                    MembershipPlanSegment                 @default(B2C)
+  categoryId                 String?
+  durationPresetId           String?
+  customDurationDays         Int?
+  imageUrl                   String?
+  active                     Boolean                               @default(true)
+  description                String?
+  priceMonthly               Decimal                               @db.Decimal(12, 2)
+  priceAnnual                Decimal                               @db.Decimal(12, 2)
+  currency                   String                                @default("GTQ")
+  maxDependents              Int?
+  createdAt                  DateTime                              @default(now())
+  updatedAt                  DateTime
+  legacyBenefits             MembershipBenefit[]
+  benefits                   MembershipPlanBenefit[]
+  category                   MembershipPlanCategory?               @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  durationPreset             MembershipDurationPreset?             @relation(fields: [durationPresetId], references: [id], onDelete: SetNull)
+  contracts                  MembershipContract[]
+  publicSubscriptionRequests MembershipPublicSubscriptionRequest[]
 
   @@index([categoryId])
   @@index([durationPresetId])
@@ -4020,15 +4142,15 @@ model MembershipPlan {
 }
 
 model MembershipDurationPreset {
-  id             String           @id @default(cuid())
-  name           String
-  days           Int
-  isActive       Boolean          @default(true)
-  sortOrder      Int              @default(0)
-  branchId       String?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @default(now())
-  plans          MembershipPlan[]
+  id        String           @id @default(cuid())
+  name      String
+  days      Int
+  isActive  Boolean          @default(true)
+  sortOrder Int              @default(0)
+  branchId  String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @default(now())
+  plans     MembershipPlan[]
 
   @@unique([branchId, name])
   @@index([isActive, sortOrder])
@@ -4036,17 +4158,17 @@ model MembershipDurationPreset {
 }
 
 model MembershipBenefitCatalog {
-  id                    String                       @id @default(cuid())
-  title                 String
-  serviceType           MembershipBenefitServiceType
-  imageUrl              String?
-  iconKey               String?
-  isActive              Boolean                      @default(true)
-  sortOrder             Int                          @default(0)
-  branchId              String?
-  createdAt             DateTime                     @default(now())
-  updatedAt             DateTime                     @default(now())
-  planBenefits          MembershipPlanBenefit[]
+  id           String                       @id @default(cuid())
+  title        String
+  serviceType  MembershipBenefitServiceType
+  imageUrl     String?
+  iconKey      String?
+  isActive     Boolean                      @default(true)
+  sortOrder    Int                          @default(0)
+  branchId     String?
+  createdAt    DateTime                     @default(now())
+  updatedAt    DateTime                     @default(now())
+  planBenefits MembershipPlanBenefit[]
 
   @@unique([branchId, title, serviceType])
   @@index([isActive, sortOrder])
@@ -4054,55 +4176,55 @@ model MembershipBenefitCatalog {
 }
 
 model MembershipPlanBenefit {
-  id                       String                   @id @default(cuid())
-  planId                   String
-  benefitId                String
-  quantity                 Int?
-  isUnlimited              Boolean                  @default(false)
-  notes                    String?
-  createdAt                DateTime                 @default(now())
-  updatedAt                DateTime                 @default(now())
-  plan                     MembershipPlan           @relation(fields: [planId], references: [id], onDelete: Cascade)
-  benefitCatalog           MembershipBenefitCatalog @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+  id             String                   @id @default(cuid())
+  planId         String
+  benefitId      String
+  quantity       Int?
+  isUnlimited    Boolean                  @default(false)
+  notes          String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @default(now())
+  plan           MembershipPlan           @relation(fields: [planId], references: [id], onDelete: Cascade)
+  benefitCatalog MembershipBenefitCatalog @relation(fields: [benefitId], references: [id], onDelete: Cascade)
 
   @@unique([planId, benefitId])
   @@index([benefitId])
 }
 
 model MembershipPlanCategory {
-  id                                  String                                @id @default(cuid())
-  name                                String
-  segment                             MembershipPlanSegment
-  isActive                            Boolean                               @default(true)
-  sortOrder                           Int                                   @default(0)
-  createdAt                           DateTime                              @default(now())
-  updatedAt                           DateTime                              @default(now())
-  plans                               MembershipPlan[]
-  publicSubscriptionRequests          MembershipPublicSubscriptionRequest[]
+  id                         String                                @id @default(cuid())
+  name                       String
+  segment                    MembershipPlanSegment
+  isActive                   Boolean                               @default(true)
+  sortOrder                  Int                                   @default(0)
+  createdAt                  DateTime                              @default(now())
+  updatedAt                  DateTime                              @default(now())
+  plans                      MembershipPlan[]
+  publicSubscriptionRequests MembershipPublicSubscriptionRequest[]
 
   @@unique([name, segment])
   @@index([segment, isActive, sortOrder])
 }
 
 model MembershipPublicSubscriptionRequest {
-  id                     String                  @id @default(cuid())
-  idempotencyKey         String                  @unique
-  channel                String                  @default("WEB")
-  planId                 String
-  segment                MembershipPlanSegment
-  categoryId             String?
-  clientProfileId        String?
-  contractId             String?
-  invoiceId              String?
-  status                 String                  @default("CREATED")
-  requestPayload         Json
-  responsePayload        Json?
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @default(now())
-  plan                   MembershipPlan          @relation(fields: [planId], references: [id], onDelete: Cascade)
-  category               MembershipPlanCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  clientProfile          ClientProfile?          @relation(fields: [clientProfileId], references: [id], onDelete: SetNull)
-  contract               MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  id              String                  @id @default(cuid())
+  idempotencyKey  String                  @unique
+  channel         String                  @default("WEB")
+  planId          String
+  segment         MembershipPlanSegment
+  categoryId      String?
+  clientProfileId String?
+  contractId      String?
+  invoiceId       String?
+  status          String                  @default("CREATED")
+  requestPayload  Json
+  responsePayload Json?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @default(now())
+  plan            MembershipPlan          @relation(fields: [planId], references: [id], onDelete: Cascade)
+  category        MembershipPlanCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  clientProfile   ClientProfile?          @relation(fields: [clientProfileId], references: [id], onDelete: SetNull)
+  contract        MembershipContract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
 
   @@index([clientProfileId])
   @@index([contractId])
@@ -4111,21 +4233,21 @@ model MembershipPublicSubscriptionRequest {
 }
 
 model MembershipUsage {
-  id                 String                @id
-  contractId         String
-  benefitId          String?
-  occurredAt         DateTime
-  module             MembershipUsageModule
-  referenceId        String?
-  qty                Decimal               @default(1) @db.Decimal(12, 2)
-  amountDiscounted   Decimal               @default(0) @db.Decimal(12, 2)
-  amountCharged      Decimal               @default(0) @db.Decimal(12, 2)
-  exceeded           Boolean               @default(false)
-  branchId           String?
-  createdAt          DateTime              @default(now())
-  legacyBenefit      MembershipBenefit?    @relation(fields: [benefitId], references: [id])
-  branch             Branch?               @relation(fields: [branchId], references: [id])
-  contract           MembershipContract    @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  id               String                @id
+  contractId       String
+  benefitId        String?
+  occurredAt       DateTime
+  module           MembershipUsageModule
+  referenceId      String?
+  qty              Decimal               @default(1) @db.Decimal(12, 2)
+  amountDiscounted Decimal               @default(0) @db.Decimal(12, 2)
+  amountCharged    Decimal               @default(0) @db.Decimal(12, 2)
+  exceeded         Boolean               @default(false)
+  branchId         String?
+  createdAt        DateTime              @default(now())
+  legacyBenefit    MembershipBenefit?    @relation(fields: [benefitId], references: [id])
+  branch           Branch?               @relation(fields: [branchId], references: [id])
+  contract         MembershipContract    @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   @@index([benefitId])
   @@index([contractId])
@@ -4143,20 +4265,20 @@ model PharmacySubscriptionConfig {
 }
 
 model PharmacyMedicationSubscription {
-  id                String                            @id @default(cuid())
+  id                String                               @id @default(cuid())
   patientId         String
   branchId          String?
-  frequency         PharmacyRegimenFrequency          @default(MONTHLY)
+  frequency         PharmacyRegimenFrequency             @default(MONTHLY)
   customDays        Int?
   nextFillAt        DateTime
   lastFillAt        DateTime?
-  deliveryMethod    PharmacyDeliveryMethod            @default(PICKUP)
-  contactPreference PharmacyContactPreference         @default(WHATSAPP)
-  status            PharmacySubscriptionStatus        @default(ACTIVE)
+  deliveryMethod    PharmacyDeliveryMethod               @default(PICKUP)
+  contactPreference PharmacyContactPreference            @default(WHATSAPP)
+  status            PharmacySubscriptionStatus           @default(ACTIVE)
   notes             String?
-  createdAt         DateTime                          @default(now())
-  updatedAt         DateTime                          @updatedAt
-  branch            Branch?                           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdAt         DateTime                             @default(now())
+  updatedAt         DateTime                             @updatedAt
+  branch            Branch?                              @relation(fields: [branchId], references: [id], onDelete: SetNull)
   items             PharmacyMedicationSubscriptionItem[]
   events            PharmacyReminderEvent[]
 
@@ -4165,13 +4287,13 @@ model PharmacyMedicationSubscription {
 }
 
 model PharmacyMedicationSubscriptionItem {
-  id             String                        @id @default(cuid())
+  id             String                         @id @default(cuid())
   subscriptionId String
   medicationId   String
-  qty            Decimal                       @default(1) @db.Decimal(12, 2)
+  qty            Decimal                        @default(1) @db.Decimal(12, 2)
   instructions   String?
-  createdAt      DateTime                      @default(now())
-  updatedAt      DateTime                      @updatedAt
+  createdAt      DateTime                       @default(now())
+  updatedAt      DateTime                       @updatedAt
   subscription   PharmacyMedicationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
   @@index([subscriptionId])
@@ -4179,12 +4301,12 @@ model PharmacyMedicationSubscriptionItem {
 }
 
 model PharmacyReminderEvent {
-  id             String                        @id @default(cuid())
+  id             String                         @id @default(cuid())
   subscriptionId String
   eventType      PharmacyReminderEventType
   notes          String?
-  happenedAt     DateTime                      @default(now())
-  createdAt      DateTime                      @default(now())
+  happenedAt     DateTime                       @default(now())
+  createdAt      DateTime                       @default(now())
   subscription   PharmacyMedicationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
   @@index([subscriptionId, happenedAt])
@@ -4207,18 +4329,18 @@ model PharmacyDiscountSubscriptionPlan {
 }
 
 model PharmacyDiscountSubscription {
-  id        String                          @id @default(cuid())
+  id        String                           @id @default(cuid())
   planId    String
   clientId  String?
   patientId String?
   branchId  String?
-  status    PharmacySubscriptionStatus      @default(ACTIVE)
-  startedAt DateTime                        @default(now())
+  status    PharmacySubscriptionStatus       @default(ACTIVE)
+  startedAt DateTime                         @default(now())
   endedAt   DateTime?
-  createdAt DateTime                        @default(now())
-  updatedAt DateTime                        @updatedAt
+  createdAt DateTime                         @default(now())
+  updatedAt DateTime                         @updatedAt
   plan      PharmacyDiscountSubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
-  branch    Branch?                         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branch    Branch?                          @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   @@index([planId, status])
   @@index([clientId, status])

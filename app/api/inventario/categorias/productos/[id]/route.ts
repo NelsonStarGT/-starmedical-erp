@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePermission, roleFromRequest } from "@/lib/api/auth";
+import { requirePermission, requireRoles, roleFromAuthenticatedRequest } from "@/lib/inventory/auth";
+import { inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 
 export const runtime = "nodejs";
 
-export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
-  const cat = await prisma.productCategory.findUnique({
-    where: { id: params.id },
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  const auth = requireRoles(req, ["Administrador", "Operador", "Recepcion"]);
+  if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
+
+  const cat = await prisma.productCategory.findFirst({
+    where: inventoryWhere(scope, { id: params.id }),
     include: { subcategories: true, _count: { select: { products: true, subcategories: true } } }
   });
   if (!cat) return NextResponse.json({ error: "Categoría no encontrada" }, { status: 404 });
@@ -16,7 +22,9 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const perm = requirePermission(req, "editar_config");
   if (perm) return perm;
-  const role = roleFromRequest(req);
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
+  const role = roleFromAuthenticatedRequest(req);
   const isAdmin = role === "Administrador";
 
   try {
@@ -32,10 +40,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (Object.keys(data).length === 0) return NextResponse.json({ error: "Sin cambios" }, { status: 400 });
     if (!isAdmin && data.status === "Inactivo") return NextResponse.json({ error: "Solo Administrador puede desactivar" }, { status: 403 });
 
-    const updated = await prisma.productCategory.update({
-      where: { id: params.id },
-      data
-    });
+    const current = await prisma.productCategory.findFirst({ where: inventoryWhere(scope, { id: params.id }) });
+    if (!current) return NextResponse.json({ error: "Categoría no encontrada" }, { status: 404 });
+    const updated = await prisma.productCategory.update({ where: { id: current.id }, data });
     return NextResponse.json({ data: updated });
   } catch (err: any) {
     if (err?.code === "P2002") return NextResponse.json({ error: "Slug ya existe" }, { status: 400 });
@@ -47,16 +54,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const perm = requirePermission(req, "editar_config");
   if (perm) return perm;
-  const role = roleFromRequest(req);
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
+  const role = roleFromAuthenticatedRequest(req);
   const isAdmin = role === "Administrador";
   if (!isAdmin) return NextResponse.json({ error: "Solo Administrador puede eliminar" }, { status: 403 });
 
   try {
-    const cat = await prisma.productCategory.findUnique({
-      where: { id: params.id },
+    const cat = await prisma.productCategory.findFirst({
+      where: inventoryWhere(scope, { id: params.id }),
       include: {
         _count: { select: { products: true, subcategories: true } },
-        subcategories: { where: { status: "Activo" } }
+        subcategories: { where: inventoryWhere(scope, { status: "Activo" }) }
       }
     });
     if (!cat) return NextResponse.json({ error: "Categoría no encontrada" }, { status: 404 });
@@ -66,7 +75,10 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     if ((cat.subcategories || []).length > 0) {
       return NextResponse.json({ error: "No se puede eliminar: tiene subcategorías activas" }, { status: 400 });
     }
-    await prisma.productCategory.delete({ where: { id: params.id } });
+    await prisma.productCategory.update({
+      where: { id: cat.id },
+      data: { deletedAt: new Date(), status: "Inactivo" }
+    });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error(err);

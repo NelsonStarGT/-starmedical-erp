@@ -7,12 +7,23 @@ type Finding = {
 };
 
 export async function computeIntegrityFindings(now = new Date()) {
+  const tenantId = process.env.DEFAULT_TENANT_ID || "global";
+  return computeIntegrityFindingsForTenant(tenantId, now);
+}
+
+export async function computeIntegrityFindingsForTenant(tenantId: string, now = new Date()) {
   const [products, services, combos, priceLists, priceListItems] = await Promise.all([
-    prisma.product.findMany({ include: { stocks: true } }),
-    prisma.service.findMany(),
-    prisma.combo.findMany({ include: { products: true, services: true } }),
-    prisma.priceList.findMany(),
-    prisma.priceListItem.findMany()
+    prisma.product.findMany({ where: { tenantId, deletedAt: null }, include: { stocks: { where: { tenantId, deletedAt: null } } } }),
+    prisma.service.findMany({ where: { tenantId, deletedAt: null } }),
+    prisma.combo.findMany({
+      where: { tenantId, deletedAt: null },
+      include: {
+        products: { where: { tenantId, deletedAt: null } },
+        services: { where: { tenantId, deletedAt: null } }
+      }
+    }),
+    prisma.priceList.findMany({ where: { tenantId, deletedAt: null } }),
+    prisma.priceListItem.findMany({ where: { tenantId, deletedAt: null } })
   ]);
 
   const findings: Finding[] = [];
@@ -66,7 +77,10 @@ export async function computeIntegrityFindings(now = new Date()) {
 
   // Servicios sin implementos (no products linked)
   const servicesNoProducts: any[] = [];
-  if ((await prisma.comboService.count()) || (await prisma.comboProduct.count())) {
+  if (
+    (await prisma.comboService.count({ where: { tenantId, deletedAt: null } })) ||
+    (await prisma.comboProduct.count({ where: { tenantId, deletedAt: null } }))
+  ) {
     // cannot infer implementos from schema; leave empty
   }
   findings.push({

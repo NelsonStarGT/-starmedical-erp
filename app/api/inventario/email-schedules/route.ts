@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { InventoryReportType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRoles } from "@/lib/api/auth";
+import { requireRoles } from "@/lib/inventory/auth";
+import { inventoryCreateData, inventoryWhere, resolveInventoryScope } from "@/lib/inventory/scope";
 import type { InventoryBiweeklyMode, InventoryScheduleType } from "@/lib/types/inventario";
 
 export const dynamic = "force-dynamic";
@@ -9,8 +10,13 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
-    const data = await prisma.inventoryEmailSchedule.findMany({ orderBy: { createdAt: "asc" } });
+    const data = await prisma.inventoryEmailSchedule.findMany({
+      where: inventoryWhere(scope, {}, { branchScoped: true }),
+      orderBy: { createdAt: "asc" }
+    });
     return NextResponse.json({ data });
   } catch (err) {
     console.error(err);
@@ -21,10 +27,17 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = requireRoles(req, ["Administrador"]);
   if (auth.errorResponse) return auth.errorResponse;
+  const { scope, errorResponse } = resolveInventoryScope(req);
+  if (errorResponse || !scope) return errorResponse;
   try {
     const body = await req.json();
     const payload = normalizePayload(body);
-    const record = await prisma.inventoryEmailSchedule.create({ data: payload });
+    if (scope.branchId && payload.branchId && payload.branchId !== scope.branchId) {
+      return NextResponse.json({ error: "Branch fuera de alcance" }, { status: 403 });
+    }
+    const record = await prisma.inventoryEmailSchedule.create({
+      data: inventoryCreateData(scope, { ...payload, branchId: scope.branchId || payload.branchId })
+    });
     return NextResponse.json({ data: record });
   } catch (err: any) {
     console.error(err);
