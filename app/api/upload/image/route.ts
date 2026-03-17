@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { auditLog } from "@/lib/audit";
+import { requireAuth } from "@/lib/auth";
+import { requirePermission } from "@/lib/rbac";
 import { uploadBufferToSupabase } from "@/lib/storage/supabase";
 
 const DEFAULT_MAX_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -13,6 +16,12 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = requireAuth(req);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const permission = requirePermission(auth.user, "FILES:UPLOAD");
+    if (permission.errorResponse) return permission.errorResponse;
+
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const scope = String(formData.get("scope") ?? "").trim().toLowerCase();
@@ -74,7 +83,21 @@ export async function POST(req: NextRequest) {
         sizeBytes: uploaded.size,
         sha256: uploaded.sha256,
         originalName: file.name,
-        createdByUserId: null
+        createdByUserId: auth.user?.id ?? null
+      }
+    });
+
+    await auditLog({
+      action: "FILE_UPLOADED",
+      entityType: "FileAsset",
+      entityId: asset.id,
+      user: auth.user,
+      req,
+      metadata: {
+        storageKey: uploaded.path,
+        mimeType: file.type,
+        sizeBytes: uploaded.size,
+        scope
       }
     });
 

@@ -1,24 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
-import { roleFromRequest, requireRoles } from "./auth";
+import { requireAuth } from "@/lib/auth";
+import { hasPermission, isAdmin } from "@/lib/rbac";
 
-type FinanceRole = "Administrador" | "Contador";
-
-const FINANCE_ROLES: FinanceRole[] = ["Administrador", "Contador"];
-
-function hasRole(role: string | null, allowed: FinanceRole[]) {
-  return role && allowed.includes(role as FinanceRole);
+function requiredFinancePermission(method: string) {
+  return method === "GET" || method === "HEAD" ? "FINANCE:READ" : "FINANCE:WRITE";
 }
 
-export function ensureFinanceAccess(req: NextRequest, allowed: FinanceRole[] = FINANCE_ROLES) {
-  const roleHeader = roleFromRequest(req);
-  if (hasRole(roleHeader, allowed)) return { role: roleHeader as FinanceRole, errorResponse: null };
+function forbiddenResponse() {
+  return NextResponse.json({ error: "No autorizado", code: "FORBIDDEN" }, { status: 403 });
+}
 
-  const tokenAuth = requireRoles(req, ["Administrador"]);
-  if (!tokenAuth.errorResponse) return { role: (tokenAuth.role as FinanceRole) || "Administrador", errorResponse: null };
+export function ensureFinanceAccess(req: NextRequest) {
+  const auth = requireAuth(req);
+  if (auth.errorResponse) return { user: null, errorResponse: auth.errorResponse };
 
-  return { role: null, errorResponse: NextResponse.json({ error: "No autorizado" }, { status: 403 }) };
+  const user = auth.user;
+  if (isAdmin(user) || hasPermission(user, requiredFinancePermission(req.method))) {
+    return { user, errorResponse: null };
+  }
+
+  return { user, errorResponse: forbiddenResponse() };
 }
 
 export function ensureFinancePoster(req: NextRequest) {
-  return ensureFinanceAccess(req, ["Administrador", "Contador"]);
+  const auth = requireAuth(req);
+  if (auth.errorResponse) return { user: null, errorResponse: auth.errorResponse };
+
+  const user = auth.user;
+  if (isAdmin(user) || hasPermission(user, "FINANCE:POST")) {
+    return { user, errorResponse: null };
+  }
+
+  return { user, errorResponse: forbiddenResponse() };
 }

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies as nextCookies } from "next/headers";
 import jwt from "jsonwebtoken";
-import bcrypt from "bcryptjs";
 import { AUTH_COOKIE_NAME } from "./constants";
 import { buildPermissionsFromRoles } from "./rbac";
+import { hashPassword, validatePassword } from "./auth-password";
+import { getAuthSecret } from "./runtime-secrets";
 
-const AUTH_SECRET = process.env.AUTH_SECRET || "dev-star-secret";
+const AUTH_SECRET = getAuthSecret();
 const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8h
 
 export type SessionUser = {
@@ -69,7 +70,7 @@ function signToken(payload: SessionUser, ttlSeconds = SESSION_TTL_SECONDS) {
   return jwt.sign(payload, AUTH_SECRET, { expiresIn: ttlSeconds });
 }
 
-function verifyToken(token: string) {
+export function verifyToken(token: string) {
   try {
     return jwt.verify(token, AUTH_SECRET) as any;
   } catch {
@@ -151,10 +152,6 @@ export const hasValidSession = (cookieValue?: string | null) => {
   return Boolean(verifyToken(cookieValue));
 };
 
-export async function validatePassword(password: string, hash: string) {
-  return bcrypt.compare(password, hash);
-}
-
 export async function getSessionUserFromCookies(
   cookieStore?: Awaited<ReturnType<typeof nextCookies>> | Promise<Awaited<ReturnType<typeof nextCookies>>>
 ) {
@@ -176,3 +173,5 @@ export async function requireAuthenticatedUser(reqOrCookieStore?: NextRequest | 
 
   return { user, errorResponse: null };
 }
+
+export { hashPassword, validatePassword };

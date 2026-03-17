@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { getClientRegistrationSecret } from "@/lib/runtime-secrets";
 
 const INVITE_KIND = "invite" as const;
 const RECEIPT_KIND = "receipt" as const;
@@ -19,16 +20,6 @@ type ReceiptPayload = {
 };
 
 type ParsedTokenPayload = InvitePayload | ReceiptPayload;
-
-function getClientRegistrationSecret() {
-  return (
-    process.env.CLIENT_REGISTRATION_TOKEN_SECRET ||
-    process.env.PORTAL_AUTH_PEPPER ||
-    process.env.APP_SECRET ||
-    process.env.AUTH_SECRET ||
-    "dev-client-registration-secret"
-  );
-}
 
 function signPayload(payloadB64: string) {
   return crypto.createHmac("sha256", getClientRegistrationSecret()).update(payloadB64).digest("base64url");

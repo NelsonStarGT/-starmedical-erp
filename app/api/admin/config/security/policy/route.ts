@@ -45,6 +45,14 @@ export async function PUT(req: NextRequest) {
     enforceRateLimit(req, { limit: 20, windowMs: 60_000 });
     const body = await req.json().catch(() => ({}));
     const patch = parseTenantSecurityPolicyPatch(body);
+    if (patch.enforce2FA === true) {
+      return validation422("2FA aún no está implementado para login.", [
+        {
+          path: "enforce2FA",
+          message: "No actives enforce2FA hasta implementar el flujo real de enrolamiento y verificación."
+        }
+      ]);
+    }
     const tenantId = normalizeTenantId(auth.user?.tenantId);
 
     const before = await getTenantSecurityPolicy(tenantId);

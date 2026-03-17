@@ -1,37 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CRM_DEV_ROLE_HEADER_ENABLED } from "../constants";
 import { requireAuth, SessionUser } from "../auth";
-import { normalizeRoleName, hasPermission, roleLabel, buildPermissionsFromRoles, isAdmin } from "../rbac";
+import { hasPermission, roleLabel, isAdmin } from "../rbac";
 import { auditPermissionDenied } from "../audit";
-import { roleFromRequest } from "./auth";
 
 type EnsureResult = { user: SessionUser | null; role: string | null; errorResponse: NextResponse | null };
 
-function devFallback(req: NextRequest): EnsureResult | null {
-  if (!CRM_DEV_ROLE_HEADER_ENABLED) return null;
-  const rawRole = roleFromRequest(req);
-  if (!rawRole) return null;
-  const normalized = normalizeRoleName(rawRole);
-  const roleDisplay = roleLabel({ id: "dev", email: "dev@local", roles: [normalized], permissions: [], branchId: null });
-  const permissions = buildPermissionsFromRoles([normalized]);
-  return {
-    user: {
-      id: "dev",
-      email: "dev@local",
-      name: "Developer",
-      roles: [normalized],
-      permissions,
-      branchId: null
-    },
-    role: roleDisplay,
-    errorResponse: null
-  };
-}
-
 export function ensureCrmAccess(req: NextRequest, requiredPermissions?: string | string[]) {
-  const dev = devFallback(req);
-  if (dev) return dev;
-
   const auth = requireAuth(req);
   if (auth.errorResponse) return { user: null, role: null, errorResponse: auth.errorResponse };
 
@@ -67,5 +41,8 @@ export function ensureCrmAdmin(req: NextRequest) {
 }
 
 export function isCrmAdmin(role: string | null) {
-  return normalizeRoleName(role) === "ADMIN";
+  return String(role || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_") === "ADMIN";
 }

@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CRM_DEV_ROLE_HEADER_ENABLED } from "@/lib/constants";
 import { requireAuth, type SessionUser } from "@/lib/auth";
 import { auditPermissionDenied } from "@/lib/audit";
-import { buildPermissionsFromRoles, hasPermission, isAdmin, normalizeRoleName, roleLabel } from "@/lib/rbac";
-import { roleFromRequest } from "@/lib/api/auth";
+import { hasPermission, isAdmin, normalizeRoleName, roleLabel } from "@/lib/rbac";
 
 type EnsureMembershipResult = {
   user: SessionUser | null;
@@ -11,30 +9,7 @@ type EnsureMembershipResult = {
   errorResponse: NextResponse | null;
 };
 
-function devFallback(req: NextRequest): EnsureMembershipResult | null {
-  if (!CRM_DEV_ROLE_HEADER_ENABLED) return null;
-  const rawRole = roleFromRequest(req);
-  if (!rawRole) return null;
-
-  const normalized = normalizeRoleName(rawRole);
-  const permissions = buildPermissionsFromRoles([normalized]);
-  const user: SessionUser = {
-    id: "dev",
-    email: "dev@local",
-    name: "Developer",
-    roles: [normalized],
-    permissions,
-    branchId: null,
-    legalEntityId: null
-  };
-
-  return { user, role: roleLabel(user), errorResponse: null };
-}
-
 export function ensureMembershipAccess(req: NextRequest, requiredPermissions?: string | string[]) {
-  const dev = devFallback(req);
-  if (dev) return dev;
-
   const auth = requireAuth(req);
   if (auth.errorResponse) return { user: null, role: null, errorResponse: auth.errorResponse };
 

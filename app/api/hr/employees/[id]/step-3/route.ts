@@ -1,11 +1,12 @@
-import bcrypt from "bcryptjs";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api/hr";
+import { hashPasswordForTenant } from "@/lib/auth-password";
 import { onboardingStep3Schema } from "@/lib/hr/schemas";
 import { upsertEmployeeDocument } from "@/lib/hr/onboarding";
 import { cleanNullableString, parseDateInput } from "@/lib/hr/utils";
+import { normalizeTenantId } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -46,13 +47,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     const existing = await prisma.user.findUnique({ where: { email: user.email } });
     if (existing) return NextResponse.json({ error: "Correo ya utilizado por otro usuario" }, { status: 409 });
-    const hash = await bcrypt.hash(user.password, 10);
+    const tenantId = normalizeTenantId(auth.user?.tenantId);
+    const hash = await hashPasswordForTenant(user.password, tenantId);
     const created = await prisma.user.create({
       data: {
         email: user.email,
         name: user.name || null,
         passwordHash: hash,
-        isActive: true
+        isActive: true,
+        tenantId
       }
     });
     userId = created.id;

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
-import { requirePermission } from "@/lib/rbac";
 import { safeJson, withApiErrorHandling } from "@/lib/api/http";
+import { requireUsersAdminApi } from "@/lib/users/access";
 import { linkUserAndEmployee } from "@/lib/users/service";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +12,8 @@ const bodySchema = z.object({
 });
 
 async function handler(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = requireAuth(req);
+  const auth = requireUsersAdminApi(req);
   if (auth.errorResponse) return auth.errorResponse;
-  const perm = requirePermission(auth.user, "USERS:ADMIN");
-  if (perm.errorResponse) return perm.errorResponse;
 
   const parsed = bodySchema.safeParse(await safeJson(req));
   if (!parsed.success) {

@@ -1,14 +1,20 @@
-import { NextRequest } from "next/server";
-import { requireRoles, roleFromRequest } from "./auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
+import { hasPermission, isAdmin } from "@/lib/rbac";
 
 export function ensureAdmin(req: NextRequest) {
-  const tokenAuth = requireRoles(req, ["Administrador"]);
-  if (!tokenAuth.errorResponse) {
-    return { role: tokenAuth.role || "Administrador", errorResponse: null };
+  const auth = requireAuth(req);
+  if (auth.errorResponse) {
+    return { user: null, errorResponse: auth.errorResponse };
   }
-  const role = roleFromRequest(req);
-  if (role === "Administrador") {
-    return { role, errorResponse: null };
+
+  const user = auth.user;
+  if (isAdmin(user) || hasPermission(user, "SYSTEM:ADMIN")) {
+    return { user, errorResponse: null };
   }
-  return { role: null, errorResponse: tokenAuth.errorResponse };
+
+  return {
+    user,
+    errorResponse: NextResponse.json({ error: "No autorizado", code: "FORBIDDEN" }, { status: 403 })
+  };
 }

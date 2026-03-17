@@ -2,6 +2,7 @@ import crypto from "crypto";
 import path from "path";
 import { promises as fs } from "fs";
 import { prisma } from "@/lib/prisma";
+import { getPortalSigningSecret } from "@/lib/runtime-secrets";
 import { downloadFromSupabase, signedUrlFromSupabase } from "@/lib/storage/supabase";
 
 const LOCAL_STORAGE_ROOT = process.env.LOCAL_STORAGE_ROOT || "storage";
@@ -19,16 +20,6 @@ export type PortalFileReference = {
   originalName: string | null;
   mimeType: string;
 };
-
-function getPortalSigningSecret() {
-  return (
-    process.env.PORTAL_AUTH_PEPPER ||
-    process.env.APP_SECRET ||
-    process.env.AUTH_SECRET ||
-    process.env.EMAIL_SECRET_KEY ||
-    "dev-star-portal-pepper"
-  );
-}
 
 function signPayload(payloadB64: string) {
   return crypto.createHmac("sha256", getPortalSigningSecret()).update(payloadB64).digest("base64url");

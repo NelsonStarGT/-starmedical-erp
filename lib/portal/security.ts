@@ -1,14 +1,9 @@
 import crypto from "crypto";
 import { PORTAL_ACCESS_TTL_MINUTES, PORTAL_CHALLENGE_TTL_MINUTES, PORTAL_SESSION_TTL_HOURS } from "@/lib/portal/constants";
+import { getPortalSigningSecret } from "@/lib/runtime-secrets";
 
 function getPortalPepper() {
-  return (
-    process.env.PORTAL_AUTH_PEPPER ||
-    process.env.APP_SECRET ||
-    process.env.AUTH_SECRET ||
-    process.env.EMAIL_SECRET_KEY ||
-    "dev-star-portal-pepper"
-  );
+  return getPortalSigningSecret();
 }
 
 export function hashPortalSecret(raw: string) {

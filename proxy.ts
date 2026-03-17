@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "./lib/constants";
+import { getAuthSecret } from "./lib/runtime-secrets";
 import { resolveReceptionAliasPath } from "./lib/reception/alias";
 
 const IS_PROD = process.env.NODE_ENV === "production";
@@ -35,7 +36,63 @@ function withSecurityHeaders(response: NextResponse) {
   return response;
 }
 
-export function proxy(request: NextRequest) {
+function decodeBase64Url(value: string) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+  return atob(padded);
+}
+
+function bytesFromBase64Url(value: string) {
+  const decoded = decodeBase64Url(value);
+  return Uint8Array.from(decoded, (char) => char.charCodeAt(0));
+}
+
+function parseJwtPayload(segment: string) {
+  try {
+    return JSON.parse(decodeBase64Url(segment)) as { exp?: number; nbf?: number; iat?: number };
+  } catch {
+    return null;
+  }
+}
+
+async function hasVerifiedSession(token: string | null | undefined) {
+  if (!token) return false;
+
+  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
+  if (!headerSegment || !payloadSegment || !signatureSegment) return false;
+
+  try {
+    const header = JSON.parse(decodeBase64Url(headerSegment)) as { alg?: string; typ?: string };
+    if (header.alg !== "HS256") return false;
+
+    const payload = parseJwtPayload(payloadSegment);
+    if (!payload) return false;
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (typeof payload.nbf === "number" && payload.nbf > nowSeconds) return false;
+    if (typeof payload.exp !== "number" || payload.exp <= nowSeconds) return false;
+
+    const secret = getAuthSecret();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+
+    return crypto.subtle.verify(
+      "HMAC",
+      key,
+      bytesFromBase64Url(signatureSegment),
+      new TextEncoder().encode(`${headerSegment}.${payloadSegment}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const receptionCanonicalPathname = resolveReceptionAliasPath(pathname);
   if (receptionCanonicalPathname) {
@@ -45,7 +102,7 @@ export function proxy(request: NextRequest) {
   }
 
   const sessionCookie = request.cookies.get(AUTH_COOKIE_NAME)?.value;
-  const authenticated = Boolean(sessionCookie);
+  const authenticated = await hasVerifiedSession(sessionCookie);
   const isMedicalRoute = pathname === "/medical" || pathname.startsWith("/medical/");
   const isLoginRoute = pathname.startsWith("/login");
   const isAdminRoute = pathname.startsWith("/admin");

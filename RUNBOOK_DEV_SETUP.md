@@ -24,13 +24,14 @@
 - `docker compose down --remove-orphans`
 - `docker compose down -v --remove-orphans`
 
-## Verificación de puerto 5432
+## Verificación de puerto DB local
 - Comando:
   - `lsof -nP -iTCP:5432 -sTCP:LISTEN`
 - Si hay conflicto:
-  - Solución A: cambiar `docker-compose.yml` a `5433:5432`
-  - Actualizar `DATABASE_URL` a puerto `5433`
-  - Ejemplo: `postgresql://postgres:postgres@localhost:5433/starmedical?schema=public`
+  - Solución A: usar el puerto por defecto endurecido del repo, `5434`
+  - Actualizar `DATABASE_URL`, `DIRECT_URL` y `SHADOW_DATABASE_URL` a `5434`
+  - Ejemplo: `postgresql://postgres:postgres@localhost:5434/starmedical?schema=public`
+  - Si usas `docker compose local`, puedes sobreescribirlo con `DB_PORT=5434`
 
 ## Troubleshooting rápido
 - Error `P1001` (DB no reachable):

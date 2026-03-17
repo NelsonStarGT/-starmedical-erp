@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AccionInventario, hasPermission } from "@/lib/types/inventario";
 
-export function roleFromRequest(req: NextRequest) {
-  return req.headers.get("x-role") || req.headers.get("x-user-role") || req.nextUrl.searchParams.get("role");
-}
-
 function roleFromToken(req: NextRequest): string | null {
   const auth = req.headers.get("authorization") || "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : null;

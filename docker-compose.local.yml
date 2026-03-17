@@ -11,7 +11,7 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
       TENANT_ID: ${TENANT_ID:-local}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_PORT:-5434}:5432"
     volumes:
       - pgdata-local:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro

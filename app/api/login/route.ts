@@ -227,6 +227,30 @@ export async function POST(request: NextRequest) {
     const rememberMeApplied = rememberMeRequested && policy.allowRememberMe;
     const sessionTtlSeconds = Math.max(policy.sessionTimeoutMinutes * 60, 300);
 
+    if (policy.enforce2FA) {
+      await auditLog({
+        action: "LOGIN_BLOCKED_2FA_REQUIRED",
+        entityType: "SECURITY",
+        entityId: user.id,
+        metadata: {
+          email: normalizedEmail,
+          tenantId,
+          reason: "tenant_enforce2fa_without_runtime_flow"
+        },
+        tenantId,
+        req: request,
+        user: null
+      });
+
+      return NextResponse.json(
+        {
+          error: "El tenant exige 2FA, pero el flujo real de 2FA aún no está habilitado para login.",
+          code: "TWO_FACTOR_REQUIRED_UNAVAILABLE"
+        },
+        { status: 501 }
+      );
+    }
+
     await auditLog({
       action: "LOGIN_SUCCESS",
       entityType: "SECURITY",
