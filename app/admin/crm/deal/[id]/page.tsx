@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -128,7 +128,7 @@ function SlaChip({ status, label }: { status?: string; label?: string }) {
   return <span className={cn("rounded-full border px-2 py-1 text-[11px] font-semibold", colors)}>{label || status || "-"}</span>;
 }
 
-export default function DealDetailPage() {
+function DealDetailPageContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const typeParam = searchParams.get("type") || "b2b";
@@ -1596,5 +1596,13 @@ export default function DealDetailPage() {
       </Modal>
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
+  );
+}
+
+export default function DealDetailPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-500">Cargando detalle CRM...</div>}>
+      <DealDetailPageContent />
+    </Suspense>
   );
 }

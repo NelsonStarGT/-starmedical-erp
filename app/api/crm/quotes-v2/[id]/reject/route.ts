@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!quoteId) return NextResponse.json({ error: "id requerido" }, { status: 400 });
     const quote = await prisma.quote.findUnique({ where: { id: quoteId }, include: { items: true } });
     if (!quote) return NextResponse.json({ error: "Cotizacion no encontrada" }, { status: 404 });
-    if ([QuoteStatus.SENT, QuoteStatus.APPROVED].includes(quote.status)) {
+    if (quote.status === QuoteStatus.SENT || quote.status === QuoteStatus.APPROVED) {
       return NextResponse.json({ error: "No puedes rechazar una cotizacion ya enviada o aprobada" }, { status: 400 });
     }
 

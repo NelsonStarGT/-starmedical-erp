@@ -17,7 +17,8 @@ export type AuditParams = {
 function buildMetadata(req?: NextRequest, extra?: Record<string, any>) {
   const base: Record<string, any> = { ...(extra || {}) };
   if (req) {
-    base.ip = req.headers.get("x-forwarded-for") || req.ip || null;
+    const forwardedFor = req.headers.get("x-forwarded-for");
+    if (forwardedFor) base.ip = forwardedFor;
     base.userAgent = req.headers.get("user-agent") || null;
     base.route = req.nextUrl.pathname;
     base.requestId = req.headers.get("x-request-id") || crypto.randomUUID();

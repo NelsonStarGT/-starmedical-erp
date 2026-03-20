@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -66,7 +66,7 @@ function SlaChip({ status, label }: { status?: string; label?: string }) {
   );
 }
 
-export default function CrmPipelinePage() {
+function CrmPipelinePageContent() {
   const searchParams = useSearchParams();
   const typeParam = searchParams.get("type") || "b2b";
   const normalizedType = typeParam.toLowerCase() === "b2c" ? "b2c" : "b2b";
@@ -949,5 +949,13 @@ export default function CrmPipelinePage() {
       </Modal>
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
+  );
+}
+
+export default function CrmPipelinePage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-500">Cargando pipeline CRM...</div>}>
+      <CrmPipelinePageContent />
+    </Suspense>
   );
 }

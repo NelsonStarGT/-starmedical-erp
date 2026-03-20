@@ -8,6 +8,10 @@ export const dynamic = "force-dynamic";
 
 type Range = { from?: Date; to?: Date };
 
+function isPendingQuoteStatus(status: QuoteStatus) {
+  return status === QuoteStatus.DRAFT || status === QuoteStatus.SENT || status === QuoteStatus.APPROVAL_PENDING;
+}
+
 function parseRange(params: URLSearchParams): Range {
   const month = params.get("month");
   const year = params.get("year");
@@ -87,7 +91,7 @@ export async function GET(req: NextRequest) {
         acc.created += 1;
         if (quote.status === QuoteStatus.SENT || quote.status === QuoteStatus.APPROVAL_PENDING) acc.sent += 1;
         if (quote.status === QuoteStatus.APPROVED || quote.status === QuoteStatus.REJECTED) acc.responded += 1;
-        if ([QuoteStatus.DRAFT, QuoteStatus.SENT, QuoteStatus.APPROVAL_PENDING].includes(quote.status as QuoteStatus)) acc.pending += 1;
+        if (isPendingQuoteStatus(quote.status)) acc.pending += 1;
         if (quote.status === QuoteStatus.APPROVED) acc.approvedAmount += Number(quote.total || 0);
         return acc;
       },
@@ -108,9 +112,7 @@ export async function GET(req: NextRequest) {
 
     const pendingDeals = deals.filter((deal) => {
       const latest = deal.quotesV2[0];
-      const hasPendingQuote = latest
-        ? [QuoteStatus.DRAFT, QuoteStatus.SENT, QuoteStatus.APPROVAL_PENDING].includes(latest.status as QuoteStatus)
-        : true;
+      const hasPendingQuote = latest ? isPendingQuoteStatus(latest.status) : true;
       const missingAction = !deal.nextAction || !deal.nextActionAt;
       return hasPendingQuote || missingAction;
     }).length;

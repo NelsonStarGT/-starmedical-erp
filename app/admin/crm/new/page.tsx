@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ToastContainer } from "@/components/ui/Toast";
@@ -29,7 +29,7 @@ type Contact = {
   phone?: string | null;
 };
 
-export default function CrmNewDealPage() {
+function CrmNewDealPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const typeParam = searchParams.get("type") || "b2b";
@@ -713,5 +713,13 @@ export default function CrmNewDealPage() {
       )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
+  );
+}
+
+export default function CrmNewDealPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-500">Cargando formulario CRM...</div>}>
+      <CrmNewDealPageContent />
+    </Suspense>
   );
 }

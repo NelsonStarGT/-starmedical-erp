@@ -80,6 +80,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const body = (await req.json().catch(() => ({}))) as SendBody;
     const channelRaw = (body.channel || "EMAIL").toUpperCase();
     const channel = channelRaw === "WHATSAPP" ? QuoteDeliveryChannel.WHATSAPP : QuoteDeliveryChannel.EMAIL;
+    const forwardedFor = req.headers.get("x-forwarded-for");
 
     const quote = await prisma.quote.findUnique({
       where: { id: quoteId },
@@ -123,14 +124,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     const pdf = await generatePdf(quote, body.regeneratePdf || false, auth.user?.id);
+    const deliveryMetadata = {
+      requestId: req.headers.get("x-request-id") || crypto.randomUUID(),
+      ...(forwardedFor ? { ip: forwardedFor } : {})
+    };
     const delivery = await prisma.quoteDelivery.create({
       data: {
         quoteId,
         dealId: quote.dealId,
         channel,
         to,
-        cc: cc.length ? cc : null,
-        bcc: bcc.length ? bcc : null,
+        cc: cc.length ? cc : undefined,
+        bcc: bcc.length ? bcc : undefined,
         subject,
         bodyText,
         bodyHtml,
@@ -141,10 +146,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         status: QuoteDeliveryStatus.SENDING,
         provider: process.env.EMAIL_PROVIDER || "SMTP",
         actorUserId: auth.user?.id || null,
-        metadata: {
-          requestId: req.headers.get("x-request-id") || crypto.randomUUID(),
-          ip: req.headers.get("x-forwarded-for") || req.ip
-        }
+        metadata: deliveryMetadata
       }
     });
 
