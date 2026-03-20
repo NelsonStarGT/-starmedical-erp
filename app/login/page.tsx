@@ -13,6 +13,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -31,7 +32,7 @@ export default function LoginPage() {
       const response = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email, password, rememberMe })
       });
 
       if (response.ok) {
@@ -41,8 +42,10 @@ export default function LoginPage() {
           JSON.stringify({ email: data.email, name: data.name || data.email })
         );
         router.push("/admin");
-      } else if (response.status === 401) {
-        setError("Credenciales incorrectas. Verifica tu correo y contraseña.");
+      } else if (response.status === 401 || response.status === 403 || response.status === 423 || response.status === 429) {
+        const payload = await response.json().catch(() => ({}));
+        const message = typeof payload.error === "string" && payload.error.trim().length ? payload.error : "";
+        setError(message || "Credenciales incorrectas. Verifica tu correo y contraseña.");
       } else {
         setError("No se pudo iniciar sesión. Intenta nuevamente.");
       }
@@ -92,9 +95,14 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
-              placeholder="nelsonlopezallen@gmail.com"
+              placeholder="usuario@empresa.com"
             />
           </div>
+
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} />
+            Mantener sesión iniciada
+          </label>
 
           <div className="space-y-2">
             <label className="block text-sm font-medium text-slate-700" htmlFor="password">

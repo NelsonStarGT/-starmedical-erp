@@ -1,168 +1,107 @@
-'use client';
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { useUserData } from "@/components/users/UserProvider";
-import { useMemo } from "react";
-import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { getUsersDashboardSnapshot } from "@/lib/users/admin-data";
 
-const barColors = ["bg-brand-primary", "bg-brand-secondary", "bg-amber-400", "bg-slate-400", "bg-indigo-400"];
-
-export default function UsuariosDashboard() {
-  const { usuarios, roles, sucursales, documentosDef } = useUserData();
-
-  const stats = useMemo(() => {
-    const total = usuarios.length;
-    const activos = usuarios.filter((u) => u.estado === "Activo").length;
-    const inactivos = usuarios.filter((u) => u.estado === "Inactivo").length;
-    const suspendidos = usuarios.filter((u) => u.estado === "Suspendido").length;
-    return { total, activos, inactivos, suspendidos };
-  }, [usuarios]);
-
-  const usersByRol = useMemo(() => {
-    return roles.map((rol) => ({
-      rol: rol.nombre,
-      total: usuarios.filter((u) => u.rolId === rol.id).length
-    }));
-  }, [roles, usuarios]);
-
-  const usersBySucursal = useMemo(() => {
-    return sucursales.map((s) => ({
-      sucursal: s.nombre,
-      total: usuarios.filter((u) => u.sucursalId === s.id).length
-    }));
-  }, [sucursales, usuarios]);
-
-  const alerts = useMemo(() => {
-    const today = new Date();
-    const soon = new Date();
-    soon.setDate(today.getDate() + 30);
-
-    const expiring = usuarios.flatMap((u) =>
-      (u.documentos || []).map((doc) => {
-        const def = documentosDef.find((d) => d.id === doc.documentoId);
-        return { ...doc, usuario: u, def };
-      })
-    );
-
-    const withDates = expiring.filter((d) => d.fechaVencimiento);
-    const aboutToExpire = withDates.filter((d) => {
-      const venc = new Date(d.fechaVencimiento as string);
-      return venc >= today && venc <= soon;
-    });
-    return { aboutToExpire: aboutToExpire.length };
-  }, [usuarios, documentosDef]);
-
-  const maxRolValue = Math.max(1, ...usersByRol.map((r) => r.total));
+export default async function UsuariosDashboard() {
+  const dashboard = await getUsersDashboardSnapshot();
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <Card>
           <CardContent className="py-5">
             <p className="text-sm text-slate-500">Total de usuarios</p>
-            <p className="text-3xl font-semibold text-slate-900 mt-2">{stats.total}</p>
+            <p className="mt-2 text-3xl font-semibold text-slate-900">{dashboard.total}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="py-5">
             <p className="text-sm text-slate-500">Activos</p>
-            <p className="text-3xl font-semibold text-slate-900 mt-2">{stats.activos}</p>
+            <p className="mt-2 text-3xl font-semibold text-slate-900">{dashboard.active}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="py-5">
             <p className="text-sm text-slate-500">Inactivos</p>
-            <p className="text-3xl font-semibold text-slate-900 mt-2">{stats.inactivos}</p>
+            <p className="mt-2 text-3xl font-semibold text-slate-900">{dashboard.inactive}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="py-5">
-            <p className="text-sm text-slate-500">Suspendidos</p>
-            <p className="text-3xl font-semibold text-slate-900 mt-2">{stats.suspendidos}</p>
+            <p className="text-sm text-slate-500">Roles registrados</p>
+            <p className="mt-2 text-3xl font-semibold text-slate-900">{dashboard.roles.length}</p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Usuarios por rol</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {usersByRol.map((item, index) => (
-                <div key={item.rol}>
-                  <div className="flex justify-between text-sm text-slate-600">
-                    <span>{item.rol}</span>
-                    <span>{item.total}</span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-slate-100">
-                    <div
-                      className={cn("h-2 rounded-full transition-all", barColors[index % barColors.length])}
-                      style={{ width: `${(item.total / maxRolValue) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Resumen por sucursal</CardTitle>
+            <CardTitle>Distribución por rol</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {usersBySucursal.map((item) => (
-              <div key={item.sucursal} className="flex items-center justify-between">
+            {dashboard.roles.map((item) => (
+              <div key={item.id} className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium text-slate-900">{item.sucursal}</p>
-                  <p className="text-xs text-slate-500">Usuarios</p>
+                  <p className="text-sm font-semibold text-slate-900">{item.name}</p>
+                  <p className="text-xs text-slate-500">Usuarios asignados</p>
                 </div>
                 <Badge variant="info">{item.total}</Badge>
               </div>
             ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Alertas de documentos</CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-500">Documentos próximos a vencer (30 días)</p>
-              <p className="text-3xl font-semibold text-amber-600 mt-2">{alerts.aboutToExpire}</p>
-            </div>
-            <Badge variant="warning">Revisar</Badge>
+            {dashboard.roles.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+                No hay roles persistidos todavía.
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Indicadores rápidos</CardTitle>
+            <CardTitle>Lectura operativa</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm text-slate-700">
+          <CardContent className="space-y-3">
             <div className="flex items-center justify-between">
-              <span>Roles únicos</span>
-              <Badge variant="info">{roles.length}</Badge>
+              <span className="text-sm text-slate-600">Roles</span>
+              <Badge variant="info">{dashboard.roles.length}</Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span>Sucursales activas</span>
-              <Badge variant="info">{sucursales.filter((s) => s.estado === "Activa").length}</Badge>
+              <span className="text-sm text-slate-600">Usuarios activos</span>
+              <Badge variant="info">{dashboard.active}</Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span>Documentos requeridos</span>
-              <Badge variant="info">
-                {documentosDef.filter((d) => d.obligatorio).length}/{documentosDef.length}
-              </Badge>
+              <span className="text-sm text-slate-600">Usuarios inactivos</span>
+              <Badge variant="info">{dashboard.inactive}</Badge>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+              Dashboard alineado al esquema real de `main`, sin dependencias de tablas legacy.
             </div>
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Usuarios por branchId</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {dashboard.branches.map((branch) => (
+            <div key={branch.id} className="rounded-xl border border-slate-200 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-900">{branch.name}</p>
+                <Badge variant="neutral">{branch.total}</Badge>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Usuarios asignados a este branchId</p>
+            </div>
+          ))}
+          {dashboard.branches.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+              No hay branchId persistidos en usuarios.
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
     </div>
   );
 }
