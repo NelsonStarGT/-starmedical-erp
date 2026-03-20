@@ -3,13 +3,13 @@ import { CRM_DEV_ROLE_HEADER_ENABLED } from "../constants";
 import { requireAuth, SessionUser } from "../auth";
 import { normalizeRoleName, hasPermission, roleLabel, buildPermissionsFromRoles, isAdmin } from "../rbac";
 import { auditPermissionDenied } from "../audit";
-import { roleFromRequest } from "./auth";
+import { requestedRoleFromRequest } from "./auth";
 
 type EnsureResult = { user: SessionUser | null; role: string | null; errorResponse: NextResponse | null };
 
 function devFallback(req: NextRequest): EnsureResult | null {
   if (!CRM_DEV_ROLE_HEADER_ENABLED) return null;
-  const rawRole = roleFromRequest(req);
+  const rawRole = requestedRoleFromRequest(req);
   if (!rawRole) return null;
   const normalized = normalizeRoleName(rawRole);
   const roleDisplay = roleLabel({ id: "dev", email: "dev@local", roles: [normalized], permissions: [], branchId: null });

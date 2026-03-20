@@ -4,8 +4,15 @@ import bcrypt from "bcryptjs";
 import { AUTH_COOKIE_NAME } from "./constants";
 import { buildPermissionsFromRoles } from "./rbac";
 
-const AUTH_SECRET = process.env.AUTH_SECRET || "dev-star-secret";
 const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8h
+
+function getAuthSecret() {
+  const secret = process.env.AUTH_SECRET?.trim();
+  if (!secret) {
+    throw new Error("AUTH_SECRET no configurado");
+  }
+  return secret;
+}
 
 export type SessionUser = {
   id: string;
@@ -17,12 +24,12 @@ export type SessionUser = {
 };
 
 function signToken(payload: Omit<SessionUser, "permissions"> & { permissions: string[] }) {
-  return jwt.sign(payload, AUTH_SECRET, { expiresIn: SESSION_TTL_SECONDS });
+  return jwt.sign(payload, getAuthSecret(), { expiresIn: SESSION_TTL_SECONDS });
 }
 
 function verifyToken(token: string) {
   try {
-    return jwt.verify(token, AUTH_SECRET) as any;
+    return jwt.verify(token, getAuthSecret()) as any;
   } catch {
     return null;
   }
@@ -86,3 +93,5 @@ export const hasValidSession = (cookieValue?: string | null) => {
 export async function validatePassword(password: string, hash: string) {
   return bcrypt.compare(password, hash);
 }
+
+export { verifyToken };

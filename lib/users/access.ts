@@ -1,8 +1,7 @@
-import jwt from "jsonwebtoken";
 import { cookies } from "next/headers";
 import { forbidden, redirect } from "next/navigation";
 import { NextResponse } from "next/server";
-import { requireAuth, type SessionUser } from "@/lib/auth";
+import { requireAuth, type SessionUser, verifyToken } from "@/lib/auth";
 import { AUTH_COOKIE_NAME } from "@/lib/constants";
 import { hasPermission, isAdmin } from "@/lib/rbac";
 
@@ -27,7 +26,7 @@ function decodeSessionToken(token?: string | null): SessionUser | null {
   if (!token) return null;
 
   try {
-    const decoded = jwt.verify(token, process.env.AUTH_SECRET || "dev-star-secret") as Partial<SessionUser>;
+    const decoded = verifyToken(token) as Partial<SessionUser> | null;
     if (!decoded?.id || !decoded?.email) return null;
     return {
       id: decoded.id,
