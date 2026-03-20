@@ -17,7 +17,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const quote = await prisma.quote.findUnique({ where: { id: quoteId }, include: { items: true } });
     if (!quote) return NextResponse.json({ error: "Cotizacion no encontrada" }, { status: 404 });
     if (!quote.dealId) return NextResponse.json({ error: "Cotizacion debe pertenecer a un deal" }, { status: 400 });
-    if (![QuoteStatus.DRAFT, QuoteStatus.APPROVAL_PENDING].includes(quote.status)) {
+    if (quote.status !== QuoteStatus.DRAFT && quote.status !== QuoteStatus.APPROVAL_PENDING) {
       return NextResponse.json({ error: "Solo cotizaciones en DRAFT o PENDING_APPROVAL pueden aprobarse" }, { status: 400 });
     }
     if (quote.type === "B2B" && !quote.pdfUrl) {
